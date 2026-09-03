@@ -1,0 +1,11 @@
+[Unit]
+Description=Check the sbmgr IP HTTPS certificate twice daily
+
+[Timer]
+OnCalendar=*-*-* 00,12:15:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=sbmgr-ip-cert-renew.service
+
+[Install]
+WantedBy=timers.target

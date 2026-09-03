@@ -1,0 +1,28 @@
+[Unit]
+Description=Renew the short-lived Let's Encrypt IP certificate for sbmgr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/root/sbmgr/deploy/renew-ip-https.sh
+TimeoutStartSec=15min
+User=root
+Group=root
+UMask=0077
+Nice=10
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/root/sbmgr
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
