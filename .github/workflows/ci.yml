@@ -28,7 +28,18 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test ./...
+        shell: bash
+        run: |
+          test_log="$(mktemp)"
+          if go test ./... 2>&1 | tee "$test_log"; then
+            exit 0
+          fi
+          summary="$(tail -n 20 "$test_log" | tr '\n' ' ')"
+          summary="${summary//'%'/'%25'}"
+          summary="${summary//$'\r'/'%0D'}"
+          summary="${summary//$'\n'/'%0A'}"
+          printf '::error title=Go test failed::%s\n' "$summary"
+          exit 1
       - name: Validate deployment scripts
         run: sh ./deploy/test-deploy-scripts.sh
       - name: Cross-build Linux AMD64
