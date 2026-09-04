@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test check build build-linux
+.PHONY: fmt fmt-check vet test deploy-check check build build-linux
 
 fmt:
 	gofmt -w ./cmd/sbmgr
@@ -12,7 +12,10 @@ vet:
 test:
 	go test ./...
 
-check: fmt-check vet test
+deploy-check:
+	sh ./deploy/test-deploy-scripts.sh
+
+check: fmt-check vet test deploy-check
 
 build:
 	go build -trimpath -o sbmgr ./cmd/sbmgr

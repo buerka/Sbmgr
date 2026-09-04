@@ -2,7 +2,9 @@ package main
 
 import (
 	"io"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -179,7 +181,19 @@ func TestSubscriptionOverviewShowsTLSCertificateWithoutPrivateKeyPath(t *testing
 
 func TestSubscriptionSettingsFormPersistsNativeTLSPaths(t *testing.T) {
 	certPath, keyPath := writeTestSubscriptionKeyPair(t, "subscription.example")
-	statePath := filepath.Join(t.TempDir(), "state.json")
+	testDir := t.TempDir()
+	statePath := filepath.Join(testDir, "state.json")
+	systemctlLog := filepath.Join(testDir, "systemctl.args")
+	fakeBinDir := filepath.Join(testDir, "bin")
+	if err := os.Mkdir(fakeBinDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fakeSystemctl := filepath.Join(fakeBinDir, "systemctl")
+	if err := os.WriteFile(fakeSystemctl, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SBMGR_TEST_SYSTEMCTL_LOG\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SBMGR_TEST_SYSTEMCTL_LOG", systemctlLog)
+	t.Setenv("PATH", fakeBinDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	state := &State{Version: stateVersion, Subscription: SubscriptionSettings{Listen: "127.0.0.1:18080"}}
 	if err := saveState(statePath, state); err != nil {
 		t.Fatal(err)
@@ -207,5 +221,14 @@ func TestSubscriptionSettingsFormPersistsNativeTLSPaths(t *testing.T) {
 	}
 	if stored.Subscription.TLSCertFile != certPath || stored.Subscription.TLSKeyFile != keyPath {
 		t.Fatalf("stored TLS settings = %#v", stored.Subscription)
+	}
+	if runtime.GOOS == "linux" {
+		called, err := os.ReadFile(systemctlLog)
+		if err != nil {
+			t.Fatalf("fake systemctl was not called: %v", err)
+		}
+		if got, want := string(called), "restart\nsbmgr\n"; got != want {
+			t.Fatalf("systemctl args = %q, want %q", got, want)
+		}
 	}
 }

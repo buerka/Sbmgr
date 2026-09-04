@@ -66,6 +66,44 @@ func (a *app) backupCmdLocked(args []string) error {
 		if err != nil {
 			return err
 		}
+		if isSQLiteStatePath(a.statePath) {
+			_, loadErr := loadState(a.statePath)
+			currentReadable := loadErr == nil
+			if currentReadable {
+				if _, err := createManualStateBackup(a.statePath, time.Now()); err != nil {
+					return fmt.Errorf("恢复前创建安全备份: %w", err)
+				}
+			}
+			quarantine, err := installSQLiteStateForRestore(a.statePath, restored, time.Now())
+			if err != nil {
+				if loadErr != nil {
+					return errors.Join(fmt.Errorf("读取恢复前状态: %w", loadErr), err)
+				}
+				return err
+			}
+			fmt.Fprintln(a.out, "已恢复状态备份", name)
+			if *doApply {
+				if err := applyState(restored, false, true, a.out); err != nil {
+					removeSQLiteFiles(a.statePath)
+					if rollbackErr := quarantine.restore(); rollbackErr != nil {
+						return errors.Join(fmt.Errorf("配置应用失败: %w", err), fmt.Errorf("原状态数据库恢复失败: %w", rollbackErr))
+					}
+					return fmt.Errorf("配置应用失败，状态数据库已原样恢复到操作前: %w", err)
+				}
+			}
+			if currentReadable {
+				if err := quarantine.discard(); err != nil {
+					return fmt.Errorf("备份已恢复，但清理临时回滚副本失败: %w", err)
+				}
+			} else if quarantine != nil && quarantine.directory != "" {
+				fmt.Fprintln(a.out, "原数据库不可读，已隔离到", quarantine.directory)
+			}
+			return nil
+		}
+
+		// Legacy JSON restore remains an atomic JSON write. SQLite restoration
+		// above deliberately installs a fully verified database image instead of
+		// merging rows into the current database.
 		previous, err := loadState(a.statePath)
 		if err != nil {
 			return fmt.Errorf("读取恢复前状态: %w", err)
@@ -91,11 +129,114 @@ func (a *app) backupCmdLocked(args []string) error {
 	}
 }
 
+type sqliteRestoreMove struct {
+	original   string
+	quarantine string
+}
+
+type sqliteRestoreQuarantine struct {
+	directory string
+	moves     []sqliteRestoreMove
+}
+
+// quarantineSQLiteForRestore moves an unreadable SQLite family aside before a
+// verified backup is installed. The bytes are retained for forensic recovery;
+// if installation fails, restore puts the original family back in place.
+func quarantineSQLiteForRestore(statePath string, now time.Time) (*sqliteRestoreQuarantine, error) {
+	root := filepath.Join(stateBackupDir(statePath), "quarantine")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		return nil, err
+	}
+	base := "state-" + now.Format("20060102-150405")
+	directory := filepath.Join(root, base)
+	for suffix := 1; ; suffix++ {
+		err := os.Mkdir(directory, 0700)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		directory = filepath.Join(root, fmt.Sprintf("%s-%d", base, suffix))
+	}
+	result := &sqliteRestoreQuarantine{directory: directory}
+	// Move sidecars before the main file so a failure can restore a complete
+	// family. The rollback journal matters when a process died mid-transaction.
+	for _, suffix := range []string{"-wal", "-shm", "-journal", ""} {
+		original := statePath + suffix
+		if _, err := os.Stat(original); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			_ = result.restore()
+			return nil, err
+		}
+		target := filepath.Join(directory, filepath.Base(statePath)+suffix)
+		if err := os.Rename(original, target); err != nil {
+			_ = result.restore()
+			return nil, err
+		}
+		result.moves = append(result.moves, sqliteRestoreMove{original: original, quarantine: target})
+	}
+	if len(result.moves) == 0 {
+		if err := os.Remove(directory); err != nil {
+			return nil, err
+		}
+		result.directory = ""
+	}
+	return result, nil
+}
+
+func (q *sqliteRestoreQuarantine) restore() error {
+	if q == nil {
+		return nil
+	}
+	var result error
+	for _, move := range q.moves {
+		if err := os.Remove(move.original); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, err)
+		}
+	}
+	if result != nil {
+		return result
+	}
+	for index := len(q.moves) - 1; index >= 0; index-- {
+		move := q.moves[index]
+		if err := os.Rename(move.quarantine, move.original); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
+	if result == nil && q.directory != "" {
+		_ = os.Remove(q.directory)
+	}
+	return result
+}
+
+func (q *sqliteRestoreQuarantine) discard() error {
+	if q == nil {
+		return nil
+	}
+	var result error
+	for _, move := range q.moves {
+		if err := os.Remove(move.quarantine); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, err)
+		}
+	}
+	if q.directory != "" {
+		if err := os.Remove(q.directory); err != nil && !errors.Is(err, os.ErrNotExist) {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
+}
+
 func stateBackupDir(statePath string) string {
 	return filepath.Join(filepath.Dir(statePath), "backups")
 }
 
 func createManualStateBackup(statePath string, now time.Time) (string, error) {
+	if isSQLiteStatePath(statePath) {
+		return createManualSQLiteStateBackup(statePath, now)
+	}
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
 		return "", err
@@ -123,6 +264,30 @@ func createManualStateBackup(statePath string, now time.Time) (string, error) {
 	return name, nil
 }
 
+func createManualSQLiteStateBackup(statePath string, now time.Time) (string, error) {
+	dir := stateBackupDir(statePath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	base := "state-manual-" + now.Format("20060102-150405")
+	name := base + ".db"
+	for suffix := 1; ; suffix++ {
+		if _, err := os.Stat(filepath.Join(dir, name)); errors.Is(err, os.ErrNotExist) {
+			break
+		} else if err != nil {
+			return "", err
+		}
+		name = fmt.Sprintf("%s-%d.db", base, suffix)
+	}
+	if err := sqliteBackupTo(statePath, filepath.Join(dir, name)); err != nil {
+		return "", err
+	}
+	if err := pruneManualStateBackups(dir, 20); err != nil {
+		return "", fmt.Errorf("备份已创建，但清理旧手动备份失败: %w", err)
+	}
+	return name, nil
+}
+
 func pruneManualStateBackups(dir string, keep int) error {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -138,7 +303,8 @@ func pruneManualStateBackups(dir string, keep int) error {
 	items := []item{}
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, "state-manual-") || !strings.HasSuffix(strings.ToLower(name), ".json") {
+		if entry.IsDir() || !strings.HasPrefix(name, "state-manual-") ||
+			(!strings.HasSuffix(strings.ToLower(name), ".json") && !strings.HasSuffix(strings.ToLower(name), ".db")) {
 			continue
 		}
 		info, err := entry.Info()
@@ -183,14 +349,23 @@ func listStateBackups(statePath string) ([]BackupInfo, error) {
 }
 
 func validStateBackupName(name string) bool {
-	return filepath.Base(name) == name && strings.HasPrefix(name, "state") && strings.HasSuffix(strings.ToLower(name), ".json")
+	extension := strings.ToLower(filepath.Ext(name))
+	return filepath.Base(name) == name && strings.HasPrefix(name, "state") && (extension == ".json" || extension == ".db")
 }
 
 func readStateBackup(statePath, name string) (*State, error) {
 	if !validStateBackupName(name) {
 		return nil, errors.New("无效的状态备份文件名")
 	}
-	raw, err := os.ReadFile(filepath.Join(stateBackupDir(statePath), name))
+	path := filepath.Join(stateBackupDir(statePath), name)
+	if isSQLiteStatePath(path) {
+		s, err := loadSQLiteBackupState(path)
+		if err != nil {
+			return nil, fmt.Errorf("读取 SQLite 备份: %w", err)
+		}
+		return s, nil
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

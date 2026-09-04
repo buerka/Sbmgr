@@ -387,7 +387,7 @@ func (a *app) templateCmdLocked(args []string) error {
 		pathSet := false
 		fs.Visit(func(current *flag.Flag) { pathSet = pathSet || current.Name == "path" })
 		if !pathSet || fs.NArg() != 0 {
-			return errors.New("用法: sbmgr admin template set --path /root/sbmgr/mihomo.template.yaml")
+			return fmt.Errorf("用法: sbmgr admin template set --path %s", filepath.Join(filepath.Dir(a.statePath), "mihomo.template.yaml"))
 		}
 		cleaned := strings.TrimSpace(*path)
 		if cleaned != "" {

@@ -10,7 +10,7 @@ sbmgr 是部署在单台 Linux 中转机上的 sing-box 多用户 CUI 管理器�
 CUI / 隐藏 admin 维护入口
             │
             ▼
- 跨进程锁 → 读取/迁移/校验 state.json → 原子保存
+ 跨进程锁 → SQLite 事务/迁移/校验 → 原子提交
             │                         │
             │                         ├─ HTTPS 设备订阅 / 用量响应头
             │                         └─ 审计与告警
@@ -28,7 +28,8 @@ CUI / 隐藏 admin 维护入口
 
 ## 持久文件
 
-- `state.json`：业务数据库，包含用户策略和累计统计；原子写入，权限 `0600`。
+- `state.db`：嵌入式 SQLite 业务数据库。用户、设备、节点、流量采样、用量历史、访问目标、来源 IP、连接、账期和告警分别存入结构化表并建立查询索引；小型策略对象使用受约束的 JSON 列。数据库及 sidecar 权限为 `0600`。
+- `state.json`：仅用于从旧版本一次性导入。迁移会在跨进程锁内完成，成功后保留原文件和备份作为人工回退材料，并用 `state.json.migrated` 防止 DB 丢失后静默回灌陈旧统计。
 - `config.base.json`：服务器原有 sing-box 配置的基础模板；受管用户和路由在生成阶段叠加。
 - `sing-box.json`：当前生成并应用的运行配置。
 - `backups/`：状态、基础模板、运行配置和限速快照；不保存程序版本。
@@ -39,14 +40,14 @@ CUI / 隐藏 admin 维护入口
 
 ## 关键模块
 
-- `cmd/sbmgr/main.go`：状态模型、命令入口、配置生成与应用事务。
+- `cmd/sbmgr/main.go`、`state_sqlite.go`：状态模型、SQLite schema/迁移、命令入口、配置生成与应用事务。
 - `cmd/sbmgr/tui.go`：CUI 页面、菜单、表单和刷新。
 - `cmd/sbmgr/daemon.go`、`stats.go`、`usage.go`：后台维护、流量同步与实时数据。
 - `cmd/sbmgr/rate.go`：按 routing mark 的 nftables 限速与计数。
 - `cmd/sbmgr/subscription.go`：按设备 token 下发 HTTPS 订阅和用量响应头。
 - `cmd/sbmgr/ip_policy.go`、`access_policy.go`、`burst.go`：来源 IP、访问/并发和异常流量规则。
 - `cmd/sbmgr/outbound_*.go`、`proxy_admin.go`：中转入口、出站和 endpoint 的安全编辑。
-- `cmd/sbmgr/backup.go`：业务状态备份与恢复。
+- `cmd/sbmgr/backup.go`：使用 SQLite 一致性快照的业务状态备份、完整性验证与恢复。
 
 ## 版本职责
 

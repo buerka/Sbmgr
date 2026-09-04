@@ -554,7 +554,7 @@ func (m tuiModel) updateList(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "u":
 		m.mode = tuiSubscriptions
 	case "T":
-		m.form = tuiForm{kind: formMihomoTemplate, title: "Mihomo 导出模板", fields: []tuiField{{label: "模板绝对路径", value: m.state.Client.MihomoTemplate, placeholder: "/root/sbmgr/mihomo.template.yaml；留空关闭"}}}
+		m.form = tuiForm{kind: formMihomoTemplate, title: "Mihomo 导出模板", fields: []tuiField{{label: "模板绝对路径", value: m.state.Client.MihomoTemplate, placeholder: m.appDataPath("mihomo.template.yaml") + "；留空关闭"}}}
 		m.mode = tuiFormMode
 	case "o":
 		m.mode = tuiAudit
@@ -606,7 +606,7 @@ func manageMenuEntries() []tuiMenuEntry {
 		{title: "线路与服务器", description: "修改中转入口、落地出口并查看线路健康"},
 		{title: "告警中心", description: "查看异常流量、IP、出口和服务告警"},
 		{title: "订阅交付", description: "管理每设备订阅服务与外部地址"},
-		{title: "状态备份与恢复", description: "只备份 state.json，不管理程序版本"},
+		{title: "状态备份与恢复", description: "备份 SQLite 业务数据，不管理程序版本"},
 		{title: "操作审计", description: "查看最近的管理变更记录"},
 		{title: "远端管理节点", description: "只读汇总其他 sbmgr 服务器"},
 		{title: "Mihomo 导出母版", description: "设置每用户 YAML 的基础模板"},
@@ -664,7 +664,7 @@ func (m tuiModel) updateManage(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case 5:
 			m.fleetCursor, m.mode = 0, tuiFleet
 		case 6:
-			m.form = tuiForm{kind: formMihomoTemplate, title: "Mihomo 导出母版", fields: []tuiField{{label: "母版绝对路径", value: m.state.Client.MihomoTemplate, placeholder: "/root/sbmgr/mihomo.template.yaml；留空关闭"}}}
+			m.form = tuiForm{kind: formMihomoTemplate, title: "Mihomo 导出母版", fields: []tuiField{{label: "母版绝对路径", value: m.state.Client.MihomoTemplate, placeholder: m.appDataPath("mihomo.template.yaml") + "；留空关闭"}}}
 			m.mode = tuiFormMode
 		case 7:
 			return m.startAction("正在同步流量、访问与到期状态", func(a *app) error { return a.daemonCycle() })
@@ -759,8 +759,8 @@ func (m tuiModel) updateFleet(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			{label: "SSH 主机", placeholder: "IP 或域名"},
 			{label: "SSH 端口", value: "22"},
 			{label: "SSH 用户", value: "root"},
-			{label: "私钥绝对路径", placeholder: "/root/.ssh/id_ed25519"},
-			{label: "远端应用目录", value: "/root/sbmgr"},
+			{label: "私钥绝对路径", placeholder: "/home/admin/.ssh/id_ed25519"},
+			{label: "远端应用目录", placeholder: "留空使用远端 SSH 用户的 ~/sbmgr"},
 		}}
 		m.mode = tuiFormMode
 	case "D":
@@ -821,8 +821,8 @@ func (m tuiModel) updateSubscriptions(key tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 			{label: "订阅服务", value: enabled, options: []string{"关闭", "开启"}},
 			{label: "监听地址", value: settings.Listen, placeholder: "127.0.0.1:18080"},
 			{label: "外部基础 URL", value: settings.BaseURL, placeholder: "https://sub.example.com"},
-			{label: "TLS 证书绝对路径", value: settings.TLSCertFile, placeholder: "/root/sbmgr/tls/fullchain.pem；留空关闭 HTTPS"},
-			{label: "TLS 私钥绝对路径", value: settings.TLSKeyFile, placeholder: "/root/sbmgr/tls/privkey.pem；仅填写路径"},
+			{label: "TLS 证书绝对路径", value: settings.TLSCertFile, placeholder: m.appDataPath("tls", "fullchain.pem") + "；留空关闭 HTTPS"},
+			{label: "TLS 私钥绝对路径", value: settings.TLSKeyFile, placeholder: m.appDataPath("tls", "privkey.pem") + "；仅填写路径"},
 		}}
 		m.mode = tuiFormMode
 	}
@@ -1064,7 +1064,7 @@ func (m tuiModel) updateProxyMenu(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		case 2:
-			m.form = tuiForm{kind: formManagedProxyImport, title: "从文件替换 · " + document.Tag, proxyKind: document.Kind, proxyTag: document.Tag, proxyOp: "replace", fields: []tuiField{{label: "JSON 文件", placeholder: "/root/sbmgr/imports/outbound.json"}}}
+			m.form = tuiForm{kind: formManagedProxyImport, title: "从文件替换 · " + document.Tag, proxyKind: document.Kind, proxyTag: document.Tag, proxyOp: "replace", fields: []tuiField{{label: "JSON 文件", placeholder: m.appDataPath("imports", "outbound.json")}}}
 			m.mode = tuiFormMode
 		case 3:
 			users, nodes := managedProxyImpact(m.state, document.Tag)
@@ -1098,7 +1098,7 @@ func (m tuiModel) updateProxyReview(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	case "i":
-		m.form = tuiForm{kind: formManagedProxyImport, title: "导入完整 JSON", proxyKind: m.proxyKind, proxyTag: m.proxyTag, proxyOp: m.proxyOperation, fields: []tuiField{{label: "JSON 文件", placeholder: "/root/sbmgr/imports/object.json"}}}
+		m.form = tuiForm{kind: formManagedProxyImport, title: "导入完整 JSON", proxyKind: m.proxyKind, proxyTag: m.proxyTag, proxyOp: m.proxyOperation, fields: []tuiField{{label: "JSON 文件", placeholder: m.appDataPath("imports", "object.json")}}}
 		m.mode = tuiFormMode
 	case "enter":
 		if m.proxyIdentity.Tag == "" || m.proxyDraft == "" {
@@ -3938,7 +3938,12 @@ func (m tuiModel) renderFleet() string {
 			}
 			lines = append(lines, row)
 			if index == m.fleetCursor {
-				lines = append(lines, tuiDimStyle.Render(fmt.Sprintf("     %s@%s:%d · %s", normalizedFleetServer(server).User, server.Host, normalizedFleetServer(server).Port, normalizedFleetServer(server).AppDir)))
+				normalized := normalizedFleetServer(server)
+				appDir := normalized.AppDir
+				if appDir == "" {
+					appDir = "~/sbmgr"
+				}
+				lines = append(lines, tuiDimStyle.Render(fmt.Sprintf("     %s@%s:%d · %s", normalized.User, server.Host, normalized.Port, appDir)))
 				if status.Error != "" {
 					lines = append(lines, tuiBadStyle.Render("     "+singleLine(status.Error, max(24, m.width-8))))
 				}
@@ -4273,8 +4278,8 @@ func (m tuiModel) renderBackups() string {
 	lines := []string{
 		m.renderHeader("状态备份与恢复"),
 		"",
-		"  " + tuiTitleStyle.Render("state.json 状态备份"),
-		"  " + tuiDimStyle.Render(singleLine("只包含 state.json，不包含程序版本；恢复后使用当前基础模板重新生成运行配置。", max(20, m.width-4))),
+		"  " + tuiTitleStyle.Render("SQLite 业务状态备份"),
+		"  " + tuiDimStyle.Render(singleLine("包含 state.db 中的用户、策略与统计，不包含程序版本；恢复后使用当前基础模板重新生成运行配置。", max(20, m.width-4))),
 		"",
 	}
 	if err != nil {
@@ -5003,6 +5008,14 @@ func nodeTemplateNames(s *State) []string {
 		return []string{"默认线路"}
 	}
 	return names
+}
+
+func (m tuiModel) appDataPath(parts ...string) string {
+	base := "."
+	if m.a != nil && strings.TrimSpace(m.a.statePath) != "" {
+		base = filepath.Dir(m.a.statePath)
+	}
+	return filepath.Join(append([]string{base}, parts...)...)
 }
 
 func defaultExportPath(statePath, user string, now time.Time) string {

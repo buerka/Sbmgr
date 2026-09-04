@@ -5,7 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/root/sbmgr/deploy/renew-ip-https.sh
+Environment=SBMGR_HOME=@SBMGR_HOME@
+ExecStart=@SBMGR_HOME@/deploy/renew-ip-https.sh --home @SBMGR_HOME@
 TimeoutStartSec=15min
 User=root
 Group=root
@@ -20,7 +21,7 @@ ProtectHome=read-only
 ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectSystem=strict
-ReadWritePaths=/root/sbmgr
+ReadWritePaths=@SBMGR_HOME@
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
 RestrictSUIDSGID=true

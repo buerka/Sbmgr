@@ -1,0 +1,3 @@
+[Service]
+ExecStart=
+ExecStart=@SING_BOX_BIN@ -D /var/lib/sing-box -c @SBMGR_HOME@/sing-box.json run

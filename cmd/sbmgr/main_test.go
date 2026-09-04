@@ -222,9 +222,21 @@ func TestPublicCLIStaysSmall(t *testing.T) {
 func TestDefaultStatePathUsesApplicationHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SBMGR_HOME", home)
-	want := filepath.Join(home, "state.json")
+	want := filepath.Join(home, "state.db")
 	if got := defaultStatePath(); got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestDefaultStatePathStaysBesideExecutableWithoutApplicationHome(t *testing.T) {
+	t.Setenv("SBMGR_HOME", "")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Dir(executable), "state.db")
+	if got := defaultStatePath(); got != want {
+		t.Fatalf("got %q want executable-local %q", got, want)
 	}
 }
 

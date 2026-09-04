@@ -9,6 +9,15 @@ import (
 	"testing"
 )
 
+func TestStateLockPathIsSharedAcrossStorageFormats(t *testing.T) {
+	directory := t.TempDir()
+	jsonLock := stateLockPath(filepath.Join(directory, "state.json"))
+	databaseLock := stateLockPath(filepath.Join(directory, "state.db"))
+	if jsonLock != databaseLock || filepath.Base(databaseLock) != "state.lock" {
+		t.Fatalf("storage formats use different application locks: json=%q db=%q", jsonLock, databaseLock)
+	}
+}
+
 func TestConcurrentStateUpdatesAreSerialized(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	if err := saveState(statePath, &State{Version: stateVersion, Users: []User{{Name: "alice", Enabled: true}}}); err != nil {

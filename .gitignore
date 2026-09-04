@@ -19,7 +19,9 @@ sbmgr-linux-*
 .sbmgr-deploy-key.pem
 .dist/
 /dist/
+.cache/
 .gocache/
+.gomodcache/
 .audit/
 /.agents/
 /.codex/
@@ -34,6 +36,11 @@ Thumbs.db
 # Runtime data and private deployment material must never enter source control.
 /state.json
 /state.json.lock
+/state.json.migrated
+/state.db
+/state.db-*
+/state.db.lock
+/state.lock
 /config.base.json
 /sing-box.json
 /mihomo.template.yaml

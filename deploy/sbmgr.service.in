@@ -6,8 +6,9 @@ Wants=sing-box.service
 
 [Service]
 Type=simple
-WorkingDirectory=/root/sbmgr
-ExecStart=/root/sbmgr/sbmgr daemon
+Environment=SBMGR_HOME=@SBMGR_HOME@
+WorkingDirectory=@SBMGR_HOME@
+ExecStart=@SBMGR_HOME@/sbmgr daemon
 Restart=always
 RestartSec=5s
 User=root
@@ -17,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/root/sbmgr
+ReadWritePaths=@SBMGR_HOME@
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

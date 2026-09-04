@@ -41,10 +41,10 @@ func TestRuntimeInterfacesDoNotExposeBinaryVersionManagement(t *testing.T) {
 	}
 
 	backupPage := m
-	backupPage.a = &app{statePath: t.TempDir() + "/state.json"}
+	backupPage.a = &app{statePath: t.TempDir() + "/state.db"}
 	backupPage.mode = tuiBackups
 	rendered := backupPage.renderBackups()
-	for _, expected := range []string{"状态备份与恢复", "只包含 state.json", "当前基础模板", "不包含程序版本"} {
+	for _, expected := range []string{"状态备份与恢复", "SQLite 业务状态备份", "当前基础模板", "不包含程序版本"} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("state backup page is missing %q:\n%s", expected, rendered)
 		}

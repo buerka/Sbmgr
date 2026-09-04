@@ -27,7 +27,7 @@ const stateVersion = 9
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
 var (
-	appVersion = "0.22.0-dev"
+	appVersion = "0.23.0-dev"
 	gitCommit  = "unknown"
 )
 
@@ -304,7 +304,7 @@ func main() {
 func (a *app) run(args []string) error {
 	global := flag.NewFlagSet("sbmgr", flag.ContinueOnError)
 	global.SetOutput(a.err)
-	global.StringVar(&a.statePath, "state", defaultStatePath(), "状态文件路径")
+	global.StringVar(&a.statePath, "state", defaultStatePath(), "状态数据库路径（.db；旧 .json 仅兼容迁移）")
 	global.Usage = func() { usage(a.out) }
 	if err := global.Parse(args); err != nil {
 		return err
@@ -364,7 +364,7 @@ func (a *app) adminCmd(args []string) error {
 	}
 	switch args[0] {
 	case "init":
-		return a.initCmd(args[1:])
+		return a.withStateLock(func() error { return a.initCmd(args[1:]) })
 	case "user":
 		return a.userCmd(args[1:])
 	case "node":
@@ -434,9 +434,43 @@ func (a *app) initCmd(args []string) error {
 	if *config == "" {
 		return errors.New("必须提供 --config")
 	}
+	legacyBackupName := ""
+	legacyStatePath := ""
 	if !*force {
 		if _, err := os.Stat(a.statePath); err == nil {
 			return fmt.Errorf("状态文件已存在: %s（如需覆盖请加 --force）", a.statePath)
+		}
+		if isSQLiteStatePath(a.statePath) {
+			legacyPath := filepath.Join(filepath.Dir(a.statePath), "state.json")
+			if _, err := os.Stat(legacyPath); err == nil {
+				if _, markerErr := os.Stat(sqliteMigrationMarkerPath(a.statePath)); markerErr == nil {
+					return fmt.Errorf("状态数据库缺失且旧 JSON 已有迁移标记；请从 SQLite 备份恢复，不会自动回灌 %s", legacyPath)
+				} else if !errors.Is(markerErr, os.ErrNotExist) {
+					return fmt.Errorf("检查旧状态迁移标记: %w", markerErr)
+				}
+				return fmt.Errorf("检测到待迁移的旧状态文件 %s；请先正常启动以安全迁移，或明确加 --force 放弃旧状态", legacyPath)
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("检查旧状态文件: %w", err)
+			}
+		}
+	} else {
+		if _, err := os.Stat(a.statePath); err == nil {
+			if _, err := createManualStateBackup(a.statePath, time.Now()); err != nil {
+				return fmt.Errorf("覆盖前备份现有状态: %w", err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("检查现有状态: %w", err)
+		}
+		if isSQLiteStatePath(a.statePath) {
+			legacyStatePath = filepath.Join(filepath.Dir(a.statePath), "state.json")
+			if _, err := os.Stat(legacyStatePath); err == nil {
+				legacyBackupName, err = backupLegacyJSONFile(a.statePath, legacyStatePath, "state-replaced-json-", time.Now())
+				if err != nil {
+					return fmt.Errorf("覆盖前备份旧 state.json: %w", err)
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("检查旧状态文件: %w", err)
+			}
 		}
 	}
 	raw, err := os.ReadFile(*config)
@@ -484,27 +518,50 @@ func (a *app) initCmd(args []string) error {
 	state.BaseConfig = absOrOriginal(*base)
 	baseBytes, _ := json.MarshalIndent(clean, "", "  ")
 	baseBytes = append(baseBytes, '\n')
-	if previousBase, readErr := os.ReadFile(*base); readErr == nil {
+	previousBase, readBaseErr := os.ReadFile(*base)
+	baseExisted := readBaseErr == nil
+	if readBaseErr == nil {
 		if _, err := createOutboundEndpointBackup(*base, previousBase, time.Now()); err != nil {
 			return fmt.Errorf("覆盖前备份基础模板: %w", err)
 		}
-	} else if !errors.Is(readErr, os.ErrNotExist) {
-		return fmt.Errorf("覆盖前读取基础模板: %w", readErr)
+	} else if !errors.Is(readBaseErr, os.ErrNotExist) {
+		return fmt.Errorf("覆盖前读取基础模板: %w", readBaseErr)
+	}
+	// A forced replacement of legacy JSON must record the archive before the
+	// new base/database commit begins. If the marker cannot be persisted, no
+	// live configuration has changed; if a later write fails, the marker still
+	// prevents an unsafe future re-import of the deliberately replaced JSON.
+	if legacyBackupName != "" {
+		if err := writeSQLiteMigrationMarker(a.statePath, legacyStatePath, legacyBackupName); err != nil {
+			return fmt.Errorf("记录旧 state.json 已归档: %w", err)
+		}
 	}
 	if err := atomicWrite(*base, baseBytes, 0600); err != nil {
 		return err
 	}
 	if err := saveState(a.statePath, state); err != nil {
-		return err
+		var restoreErr error
+		if baseExisted {
+			restoreErr = atomicWrite(*base, previousBase, 0600)
+		} else {
+			restoreErr = os.Remove(*base)
+			if errors.Is(restoreErr, os.ErrNotExist) {
+				restoreErr = nil
+			}
+		}
+		if restoreErr != nil {
+			return errors.Join(err, fmt.Errorf("恢复初始化前基础模板: %w", restoreErr))
+		}
+		return fmt.Errorf("写入状态失败，基础模板已恢复到初始化前: %w", err)
 	}
 	if *importUsers {
 		fmt.Fprintf(a.out, "已导入 %d 个现有凭据为受管用户\n", countNodes(state.Users))
 	} else {
 		fmt.Fprintf(a.out, "已保留 %d 个现有凭据为非托管节点；受管用户列表为空\n", len(state.ReservedAuthUsers))
 	}
-	fmt.Fprintf(a.out, "基础模板: %s\n状态文件: %s\n", state.BaseConfig, absOrOriginal(a.statePath))
+	fmt.Fprintf(a.out, "基础模板: %s\n状态数据库: %s\n", state.BaseConfig, absOrOriginal(a.statePath))
 	if state.Client.Server == "" || state.Client.PublicKey == "" {
-		fmt.Fprintln(a.out, "提示：导出客户端前需要设置 --server 和 --public-key；可重新 init，或直接编辑状态文件。")
+		fmt.Fprintln(a.out, "提示：导出客户端前需要设置 --server 和 --public-key；请通过管理界面或维护入口设置。")
 	}
 	return nil
 }
@@ -2011,6 +2068,13 @@ func loadState(path string) (*State, error) {
 // or normalizers changed the decoded model so callers that already own the state
 // lock can durably commit generated credentials and other canonical fields.
 func loadStateWithCanonicalChange(path string) (*State, bool, error) {
+	if isSQLiteStatePath(path) {
+		return loadSQLiteStateWithCanonicalChange(path)
+	}
+	return loadJSONStateWithCanonicalChange(path)
+}
+
+func loadJSONStateWithCanonicalChange(path string) (*State, bool, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, false, fmt.Errorf("读取状态文件 %s: %w", path, err)
@@ -2254,6 +2318,16 @@ func saveState(path string, s *State) error {
 	if err := validateState(s); err != nil {
 		return fmt.Errorf("拒绝保存无效状态: %w", err)
 	}
+	if isSQLiteStatePath(path) {
+		if err := saveSQLiteState(path, s); err != nil {
+			return fmt.Errorf("保存状态数据库: %w", err)
+		}
+		return nil
+	}
+	return saveJSONState(path, s)
+}
+
+func saveJSONState(path string, s *State) error {
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return err
@@ -2419,15 +2493,12 @@ func absOrOriginal(p string) string {
 }
 func defaultStatePath() string {
 	if home := strings.TrimSpace(os.Getenv("SBMGR_HOME")); home != "" {
-		return filepath.Join(home, "state.json")
+		return filepath.Join(home, "state.db")
 	}
 	if executable, err := os.Executable(); err == nil {
-		besideExecutable := filepath.Join(filepath.Dir(executable), "state.json")
-		if _, err := os.Stat(besideExecutable); err == nil {
-			return besideExecutable
-		}
+		return filepath.Join(filepath.Dir(executable), "state.db")
 	}
-	return "sbmgr.json"
+	return "state.db"
 }
 func slug(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))

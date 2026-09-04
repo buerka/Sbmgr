@@ -2,15 +2,38 @@
 set -eu
 
 usage() {
-    echo "用法: $0 PUBLIC_IP [HTTPS_PORT] [EMAIL]" >&2
-    echo "示例: $0 203.0.113.10 8443 admin@example.com" >&2
+    echo "用法: $0 [--home 绝对安装目录] PUBLIC_IP [HTTPS_PORT] [EMAIL]" >&2
+    echo "示例: $0 --home /srv/sbmgr 203.0.113.10 8443 admin@example.com" >&2
+    echo "默认取本脚本所在 deploy/ 的父目录，也可通过 SBMGR_HOME 覆盖。" >&2
     exit 2
 }
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+# shellcheck source=path-lib.sh
+. "$script_dir/path-lib.sh"
+
+home_override_set=0
+home_override=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --home)
+            [ "$#" -ge 2 ] || usage
+            home_override_set=1
+            home_override=$2
+            shift 2
+            ;;
+        --help|-h) usage ;;
+        --) shift; break ;;
+        -*) echo "未知参数：$1" >&2; usage ;;
+        *) break ;;
+    esac
+done
 
 public_ip=${1:-}
 https_port=${2:-8443}
 email=${3:-}
 [ -n "$public_ip" ] || usage
+[ "$#" -le 3 ] || usage
 [ "$(id -u)" -eq 0 ] || {
     echo "必须以 root 运行此脚本" >&2
     exit 1
@@ -32,8 +55,12 @@ case "$public_ip" in
     *) listen_host='0.0.0.0' ;;
 esac
 
-app_dir=/root/sbmgr
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ "$home_override_set" -eq 1 ]; then
+    app_dir=$(sbmgr_resolve_home "$script_dir" "$home_override")
+else
+    app_dir=$(sbmgr_resolve_home "$script_dir")
+fi
+sbmgr_assert_root_trusted_path "$app_dir"
 venv="$app_dir/certbot-venv"
 certbot="$venv/bin/certbot"
 config_dir="$app_dir/letsencrypt"
@@ -42,11 +69,14 @@ logs_dir="$app_dir/logs/certbot"
 certificate_dir="$config_dir/live/$public_ip"
 renew_source="$script_dir/renew-ip-https.sh"
 renew_target="$app_dir/deploy/renew-ip-https.sh"
+path_lib_source="$script_dir/path-lib.sh"
+path_lib_target="$app_dir/deploy/path-lib.sh"
 
-if [ ! -x "$app_dir/sbmgr" ] || [ ! -f "$app_dir/state.json" ]; then
-    echo "找不到 $app_dir/sbmgr 或 state.json" >&2
+if [ ! -x "$app_dir/sbmgr" ]; then
+    echo "找不到可执行文件 $app_dir/sbmgr" >&2
     exit 1
 fi
+state=$(sbmgr_select_state_file "$app_dir")
 if ss -ltnH "sport = :80" | grep -q .; then
     echo "端口 80 已被占用；Certbot standalone 无法完成 HTTP-01 验证" >&2
     exit 1
@@ -62,6 +92,11 @@ if [ "$renew_source" != "$renew_target" ]; then
     install -m 0700 "$renew_source" "$renew_target"
 else
     chmod 0700 "$renew_target"
+fi
+if [ "$path_lib_source" != "$path_lib_target" ]; then
+    install -m 0600 "$path_lib_source" "$path_lib_target"
+else
+    chmod 0600 "$path_lib_target"
 fi
 if [ ! -x "$certbot" ]; then
     if ! python3 -m venv "$venv"; then
@@ -131,10 +166,9 @@ if not certificate.not_valid_before_utc <= now < certificate.not_valid_after_utc
     raise SystemExit("签发的证书当前不在有效期内")
 PY
 
-install -m 0644 "$script_dir/sbmgr-ip-cert-renew.service" /etc/systemd/system/sbmgr-ip-cert-renew.service
-install -m 0644 "$script_dir/sbmgr-ip-cert-renew.timer" /etc/systemd/system/sbmgr-ip-cert-renew.timer
+sh "$script_dir/install-systemd.sh" --home "$app_dir" --component https
 
-"$app_dir/sbmgr" --state "$app_dir/state.json" admin subscription set \
+"$app_dir/sbmgr" --state "$state" admin subscription set \
     --enabled true \
     --listen "$listen_host:$https_port" \
     --base-url "https://$url_host:$https_port" \
@@ -142,7 +176,6 @@ install -m 0644 "$script_dir/sbmgr-ip-cert-renew.timer" /etc/systemd/system/sbmg
     --tls-key "$certificate_dir/privkey.pem" \
     --restart
 
-systemctl daemon-reload
 systemctl enable --now sbmgr-ip-cert-renew.timer
 
 echo "订阅 HTTPS 已启用：https://$url_host:$https_port"

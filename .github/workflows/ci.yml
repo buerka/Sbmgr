@@ -13,10 +13,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -27,16 +27,21 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test ./...
+      - name: Validate deployment scripts
+        run: sh ./deploy/test-deploy-scripts.sh
       - name: Cross-build Linux AMD64
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |
           mkdir -p .dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o .dist/sbmgr-ci-linux-amd64 ./cmd/sbmgr
       - name: Build tagged Linux release
         if: startsWith(github.ref, 'refs/tags/v')
         run: ./deploy/build-linux.sh
-      - name: Upload CI binary
-        uses: actions/upload-artifact@v4
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v7
         with:
           name: sbmgr-linux-amd64
-          path: .dist/sbmgr-*-linux-amd64
+          path: |
+            .dist/sbmgr-*-linux-amd64
+            .dist/sbmgr-*-linux-amd64.sha256
           if-no-files-found: error

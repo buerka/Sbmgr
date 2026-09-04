@@ -39,10 +39,11 @@ git tag -a v0.22.0 -m "sbmgr v0.22.0"
 ## 状态模式改动
 
 1. 修改结构并递增 `stateVersion`。
-2. 在迁移逻辑中为旧数据设置兼容默认值。
-3. 增加从旧版本状态读取的测试以及新值的校验测试。
-4. 确认保存仍为原子写入、权限 `0600`，并且 CUI 与 daemon 都通过状态锁。
-5. 用生产数据的脱敏副本验证时，不得把副本放入仓库或测试夹具。
+2. 修改表结构时递增独立的 SQLite schema 版本并编写事务迁移；业务模型版本与数据库 schema 版本不能混用。
+3. 在迁移逻辑中为旧数据设置兼容默认值，并增加从旧 `state.json` 无损导入、重复迁移幂等、损坏输入不留半成品的测试。
+4. 高频统计应使用结构化表、稳定主键和增量 UPSERT；不要在每个后台周期清空并重插全部历史。
+5. 确认提交使用 SQLite 事务，数据库和 sidecar 权限为 `0600`，CUI 与 daemon 共用状态锁，备份通过 `integrity_check`。
+6. 用生产数据的脱敏副本验证时，不得把副本放入仓库或测试夹具。
 
 ## 发布检查表
 
@@ -56,13 +57,14 @@ git tag -a v0.22.0 -m "sbmgr v0.22.0"
 
 软件需要回退时，从 Git 检出目标 tag，重新构建并走同一套外部部署流程。不要把旧二进制长期堆放在服务器，也不要让运行程序替换自身。
 
-通用部署脚本固定读取 `/root/sbmgr/.sbmgr-release.candidate`，并要求显式传入候选文件的 SHA256 或服务器上的校验文件路径。例如先把产物改名上传为该候选文件，再执行：
+部署脚本默认从自身所在 `deploy/` 的父目录推导 `<SBMGR_HOME>`；也可以使用 `SBMGR_HOME` 或 `--home` 显式指定安全的绝对目录。候选程序放在 `<SBMGR_HOME>/.sbmgr-release.candidate`，并要求显式传入 SHA256 或服务器上的校验文件路径。例如：
 
 ```bash
-/root/sbmgr/deploy/deploy-release.sh <64位SHA256>
+<SBMGR_HOME>/deploy/install-systemd.sh --home <SBMGR_HOME> --component core
+<SBMGR_HOME>/deploy/deploy-release.sh --home <SBMGR_HOME> [--sing-box-bin /absolute/path/to/sing-box] <64位SHA256>
 ```
 
-脚本会把 `state.json`、`config.base.json`、`sing-box.json` 和校验清单持久保存到 `backups/state-config/`，并保留最近 20 组；旧程序只存在于权限为 `0700` 的临时文件，成功或失败恢复后都会删除。
+脚本会在状态锁内保存 `state.db` 的一致性副本、兼容期旧 `state.json`、迁移标记、`config.base.json`、`sing-box.json` 和校验清单到 `backups/state-config/`，并保留最近 20 组；首次升级会在停服状态下同步完成 JSON → SQLite 影子验证与正式迁移，确认数据库完整后才启动服务。root 服务的应用目录与父目录必须由 root 持有且不可被组/其他用户写入。旧程序只存在于权限为 `0700` 的临时文件，成功或失败恢复后都会删除。
 
 ## 敏感信息检查
 
