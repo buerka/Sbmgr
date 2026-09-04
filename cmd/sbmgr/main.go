@@ -27,7 +27,7 @@ const stateVersion = 9
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
 var (
-	appVersion = "0.23.1-dev"
+	appVersion = "0.23.2-dev"
 	gitCommit  = "unknown"
 )
 

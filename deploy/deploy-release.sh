@@ -77,6 +77,131 @@ same_sha256() {
     [ "$(sha256sum "$1" | awk '{print $1}')" = "$(sha256sum "$2" | awk '{print $1}')" ]
 }
 
+verify_installed_release() {
+    [ -f "$binary" ] && [ ! -L "$binary" ] || {
+        echo "已安装的 sbmgr 不存在或不是普通文件" >&2
+        return 1
+    }
+    installed_release_sha256=$(sha256sum "$binary" | awk '{print $1}') || {
+        echo "无法校验已安装的 sbmgr" >&2
+        return 1
+    }
+    [ "$installed_release_sha256" = "$expected_sha256" ] || {
+        echo "稳定性检查期间已安装的 sbmgr 内容发生变化" >&2
+        return 1
+    }
+    installed_release_version=$("$binary" version) || {
+        echo "稳定性检查期间无法读取已安装的 sbmgr 版本" >&2
+        return 1
+    }
+    [ "$installed_release_version" = "sbmgr $new_version" ] || {
+        echo "稳定性检查期间已安装的 sbmgr 版本发生变化" >&2
+        return 1
+    }
+}
+
+systemd_nonnegative_integer() {
+    systemd_integer_value=$(sbmgr_systemd_value "$1" "$2") || {
+        echo "无法读取 $1 的 $2" >&2
+        return 1
+    }
+    case "$systemd_integer_value" in
+        ''|*[!0-9]*)
+            echo "$1 的 $2 不是非负整数" >&2
+            return 1
+            ;;
+    esac
+    printf '%s\n' "$systemd_integer_value"
+}
+
+wait_for_post_start_stability() {
+    # Type=simple can be reported active before initialization failures surface.
+    # Observe across more than two RestartSec=5s windows. No duration knobs are
+    # exposed; isolated regression tests provide a controlled sleep via PATH.
+    post_start_observations=9
+    post_start_delay_seconds=2
+    post_start_observation=1
+    post_start_main_pid=
+    post_start_restart_baseline=
+    command -v timeout >/dev/null 2>&1 || {
+        echo "缺少 timeout，无法建立有界的部署后业务自检" >&2
+        return 1
+    }
+
+    while [ "$post_start_observation" -le "$post_start_observations" ]; do
+        systemctl is-active --quiet sbmgr.service || {
+            echo "部署后稳定性检查失败：sbmgr.service 未保持 active" >&2
+            return 1
+        }
+        systemctl is-active --quiet sing-box.service || {
+            echo "部署后稳定性检查失败：sing-box.service 未保持 active" >&2
+            return 1
+        }
+
+        post_start_current_pid=$(systemd_nonnegative_integer sbmgr.service MainPID) || return 1
+        [ "$post_start_current_pid" -gt 0 ] || {
+            echo "部署后稳定性检查失败：sbmgr.service 没有有效 MainPID" >&2
+            return 1
+        }
+        post_start_current_restarts=$(systemd_nonnegative_integer sbmgr.service NRestarts) || return 1
+
+        if [ "$post_start_observation" -eq 1 ]; then
+            # NRestarts may include an old unit lifecycle on some systemd
+            # versions, so the first new-process observation is the baseline.
+            post_start_main_pid=$post_start_current_pid
+            post_start_restart_baseline=$post_start_current_restarts
+        else
+            [ "$post_start_current_pid" = "$post_start_main_pid" ] || {
+                echo "部署后稳定性检查失败：sbmgr.service MainPID 发生变化" >&2
+                return 1
+            }
+            [ "$post_start_current_restarts" = "$post_start_restart_baseline" ] || {
+                echo "部署后稳定性检查失败：sbmgr.service NRestarts 发生变化" >&2
+                return 1
+            }
+        fi
+
+        verify_installed_release || return 1
+        if [ "$post_start_observation" -lt "$post_start_observations" ]; then
+            sleep "$post_start_delay_seconds" || {
+                echo "部署后稳定性等待被中断" >&2
+                return 1
+            }
+        fi
+        post_start_observation=$((post_start_observation + 1))
+    done
+
+    # This is deliberately a CLI business check rather than a fixed-port probe:
+    # it reloads the deployed SQLite state, renders the managed configuration,
+    # and asks the configured sing-box binary to validate that configuration.
+    timeout 30 "$binary" --state "$database_state" admin check >/dev/null || {
+        echo "部署后业务自检失败" >&2
+        return 1
+    }
+
+    # Close the race between the business check and the deployment commit.
+    systemctl is-active --quiet sbmgr.service || {
+        echo "业务自检后 sbmgr.service 不再 active" >&2
+        return 1
+    }
+    systemctl is-active --quiet sing-box.service || {
+        echo "业务自检后 sing-box.service 不再 active" >&2
+        return 1
+    }
+    post_start_final_pid=$(systemd_nonnegative_integer sbmgr.service MainPID) || return 1
+    post_start_final_restarts=$(systemd_nonnegative_integer sbmgr.service NRestarts) || return 1
+    [ "$post_start_final_pid" = "$post_start_main_pid" ] || {
+        echo "业务自检后 sbmgr.service MainPID 发生变化" >&2
+        return 1
+    }
+    [ "$post_start_final_restarts" = "$post_start_restart_baseline" ] || {
+        echo "业务自检后 sbmgr.service NRestarts 发生变化" >&2
+        return 1
+    }
+    verify_installed_release || return 1
+    return 0
+}
+
 acquire_state_locks() {
     command -v flock >/dev/null 2>&1 || {
         echo "缺少 flock，无法建立安全部署边界" >&2
@@ -505,8 +630,7 @@ sbmgr_assert_core_systemd_layout "$app_dir" "$sing_box_bin"
 
 systemctl start sbmgr.service
 release_state_locks
-systemctl is-active --quiet sbmgr.service
-systemctl is-active --quiet sing-box.service
+wait_for_post_start_stability
 
 rollback_needed=0
 sbmgr_stopped=0

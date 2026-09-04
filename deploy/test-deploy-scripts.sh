@@ -143,6 +143,8 @@ case "$command_name" in
             sbmgr.service:ExecStart)
                 printf '{ path=%s/sbmgr ; argv[]=%s/sbmgr daemon ; ignore_errors=no ; }\n' "$SBMGR_TEST_APP" "$SBMGR_TEST_APP"
                 ;;
+            sbmgr.service:MainPID) cat "$SBMGR_TEST_CONTROL/sbmgr-main-pid" ;;
+            sbmgr.service:NRestarts) cat "$SBMGR_TEST_CONTROL/sbmgr-nrestarts" ;;
             sing-box.service:ExecStart)
                 printf '{ path=%s ; argv[]=%s -D /var/lib/sing-box -c %s/sing-box.json run ; ignore_errors=no ; }\n' \
                     "$SBMGR_TEST_SING_BOX" "$SBMGR_TEST_SING_BOX" "$SBMGR_TEST_APP"
@@ -201,6 +203,29 @@ exit 1
 SH
 chmod 0700 "$mock_bin/pgrep"
 
+cat >"$mock_bin/sleep" <<'SH'
+#!/bin/sh
+printf 'sleep|%s\n' "$*" >>"$SBMGR_TEST_EVENTS"
+sleep_count_file="$SBMGR_TEST_CONTROL/sleep-count"
+sleep_count=$(cat "$sleep_count_file" 2>/dev/null || echo 0)
+sleep_count=$((sleep_count + 1))
+printf '%s\n' "$sleep_count" >"$sleep_count_file"
+
+if [ "$sleep_count" -eq 1 ]; then
+    case "${SBMGR_TEST_SLEEP_ACTION:-}" in
+        pid-change) printf '5252\n' >"$SBMGR_TEST_CONTROL/sbmgr-main-pid" ;;
+        restart-increase) printf '1\n' >"$SBMGR_TEST_CONTROL/sbmgr-nrestarts" ;;
+        service-inactive) printf 'inactive\n' >"$SBMGR_TEST_CONTROL/sbmgr_service" ;;
+        replace-binary) printf 'tampered\n' >>"$SBMGR_TEST_APP/sbmgr" ;;
+        signal-term) kill -TERM "$PPID" ;;
+        ''|none) ;;
+        *) exit 2 ;;
+    esac
+fi
+exit 0
+SH
+chmod 0700 "$mock_bin/sleep"
+
 make_old_binary() {
     destination=$1
     cat >"$destination" <<'SH'
@@ -249,6 +274,9 @@ if [ "$state_path" = "$SBMGR_TEST_APP/state.db" ] && [ "$*" = 'admin check' ]; t
         fi
         exit 42
     fi
+    if [ "${SBMGR_TEST_FAIL_POST_START_CHECK:-0}" -eq 1 ] && [ "$live_count" -ge 3 ]; then
+        exit 43
+    fi
 fi
 exit 0
 SH
@@ -272,6 +300,8 @@ reset_transaction_fixture() {
     mkdir -p "$mock_control"
     printf 'active\n' >"$mock_control/sbmgr_service"
     printf 'active\n' >"$mock_control/sing-box_service"
+    printf '4242\n' >"$mock_control/sbmgr-main-pid"
+    printf '0\n' >"$mock_control/sbmgr-nrestarts"
     export SBMGR_TEST_APP="$app"
     export SBMGR_TEST_EVENTS="$events"
     export SBMGR_TEST_CONTROL="$mock_control"
@@ -286,11 +316,34 @@ assert_transaction_order() {
     first_candidate_line=$(grep -n '^candidate|' "$events_file" | head -n 1 | cut -d: -f1)
     live_line=$(grep -n "^candidate|$app_path/state.db|admin check$" "$events_file" | head -n 1 | cut -d: -f1)
     start_line=$(grep -n '^systemctl|start sbmgr.service$' "$events_file" | tail -n 1 | cut -d: -f1)
-    [ -n "$stop_line" ] && [ -n "$first_candidate_line" ] && [ -n "$live_line" ] && [ -n "$start_line" ] || \
+    post_start_check_line=$(grep -n "^candidate|$app_path/state.db|admin check$" "$events_file" | sed -n '3p' | cut -d: -f1)
+    first_stability_sleep_line=$(grep -n '^sleep|2$' "$events_file" | head -n 1 | cut -d: -f1)
+    [ -n "$stop_line" ] && [ -n "$first_candidate_line" ] && [ -n "$live_line" ] \
+        && [ -n "$start_line" ] && [ -n "$post_start_check_line" ] \
+        && [ -n "$first_stability_sleep_line" ] || \
         fail "部署事件不完整"
     [ "$stop_line" -lt "$first_candidate_line" ] || fail "候选程序在停止 daemon 前接触了状态"
     [ "$first_candidate_line" -lt "$live_line" ] || fail "候选程序没有先在影子库预检"
     [ "$live_line" -lt "$start_line" ] || fail "live 迁移未在启动服务前完成"
+    [ "$start_line" -lt "$first_stability_sleep_line" ] || fail "启动前错误进入稳定性等待"
+    [ "$first_stability_sleep_line" -lt "$post_start_check_line" ] || fail "业务自检没有等待稳定观察窗口"
+}
+
+assert_post_start_failure_rolled_back() {
+    failed_app=$1
+    failed_start_count=$(grep -c '^systemctl|start sbmgr.service$' "$SBMGR_TEST_EVENTS" || true)
+    failed_sleep_count=$(grep -c '^sleep|2$' "$SBMGR_TEST_EVENTS" || true)
+    [ "$failed_start_count" -eq 2 ] || fail "门禁失败场景没有先启动新服务再启动回滚服务"
+    [ "$failed_sleep_count" -ge 1 ] || fail "门禁失败场景没有进入稳定观察窗口"
+    [ "$("$failed_app/sbmgr" version)" = 'sbmgr 0.22.0' ] || fail "启动后门禁失败未恢复旧程序"
+    [ "$(cat "$failed_app/state.json")" = original-json-state ] || fail "启动后门禁失败未恢复 JSON"
+    [ ! -e "$failed_app/state.db" ] || fail "启动后门禁失败遗留迁移数据库"
+    [ ! -e "$failed_app/state.json.migrated" ] || fail "启动后门禁失败遗留迁移标记"
+    [ "$(cat "$mock_control/sbmgr_service")" = active ] || fail "启动后门禁失败回滚后 sbmgr 未恢复"
+    [ "$(cat "$mock_control/sing-box_service")" = active ] || fail "启动后门禁失败回滚后 sing-box 未恢复"
+    if find "$failed_app" -maxdepth 1 -type f -name '.sbmgr-deploy-rollback.*' | grep -q .; then
+        fail "启动后门禁失败且回滚成功时不应遗留临时旧程序"
+    fi
 }
 
 old_path=$PATH
@@ -338,6 +391,60 @@ snapshot=$(find "$app/backups/state-config" -mindepth 1 -maxdepth 1 -type d -nam
 [ ! -e "$snapshot/state.db-shm" ] || fail "快照不应保存 state.db-shm"
 (cd "$snapshot" && sha256sum -c SHA256SUMS >/dev/null) || fail "成功快照校验失败"
 assert_transaction_order "$events" "$app"
+stability_sleep_count=$(grep -c '^sleep|2$' "$events" || true)
+[ "$stability_sleep_count" -eq 8 ] || fail "成功部署没有完成 16 秒稳定观察窗口"
+if find "$app" -maxdepth 1 -type f -name '.sbmgr-deploy-rollback.*' | grep -q .; then
+    fail "成功部署后仍遗留临时旧程序"
+fi
+
+reset_transaction_fixture post-start-inactive
+if SBMGR_TEST_FAIL_LIVE_CHECK=0 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \
+    SBMGR_TEST_SLEEP_ACTION=service-inactive \
+    sh "$script_dir/deploy-release.sh" --home "$app" --sing-box-bin "$mock_bin/sing-box" "$checksum" >/dev/null 2>&1; then
+    fail "稳定观察期间服务停止时部署本应失败"
+fi
+assert_post_start_failure_rolled_back "$app"
+
+reset_transaction_fixture post-start-pid-change
+if SBMGR_TEST_FAIL_LIVE_CHECK=0 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \
+    SBMGR_TEST_SLEEP_ACTION=pid-change \
+    sh "$script_dir/deploy-release.sh" --home "$app" --sing-box-bin "$mock_bin/sing-box" "$checksum" >/dev/null 2>&1; then
+    fail "稳定观察期间 MainPID 变化时部署本应失败"
+fi
+assert_post_start_failure_rolled_back "$app"
+
+reset_transaction_fixture post-start-restart
+if SBMGR_TEST_FAIL_LIVE_CHECK=0 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \
+    SBMGR_TEST_SLEEP_ACTION=restart-increase \
+    sh "$script_dir/deploy-release.sh" --home "$app" --sing-box-bin "$mock_bin/sing-box" "$checksum" >/dev/null 2>&1; then
+    fail "稳定观察期间 NRestarts 增加时部署本应失败"
+fi
+assert_post_start_failure_rolled_back "$app"
+
+reset_transaction_fixture post-start-binary-change
+if SBMGR_TEST_FAIL_LIVE_CHECK=0 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \
+    SBMGR_TEST_SLEEP_ACTION=replace-binary \
+    sh "$script_dir/deploy-release.sh" --home "$app" --sing-box-bin "$mock_bin/sing-box" "$checksum" >/dev/null 2>&1; then
+    fail "稳定观察期间程序内容变化时部署本应失败"
+fi
+assert_post_start_failure_rolled_back "$app"
+
+reset_transaction_fixture post-start-business-check
+if SBMGR_TEST_FAIL_LIVE_CHECK=0 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \
+    SBMGR_TEST_FAIL_POST_START_CHECK=1 \
+    sh "$script_dir/deploy-release.sh" --home "$app" --sing-box-bin "$mock_bin/sing-box" "$checksum" >/dev/null 2>&1; then
+    fail "启动后业务自检失败时部署本应失败"
+fi
+assert_post_start_failure_rolled_back "$app"
+
+reset_transaction_fixture post-start-signal
+signal_status=0
+SBMGR_TEST_FAIL_LIVE_CHECK=0 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \
+    SBMGR_TEST_SLEEP_ACTION=signal-term \
+    sh "$script_dir/deploy-release.sh" --home "$app" --sing-box-bin "$mock_bin/sing-box" "$checksum" >/dev/null 2>&1 || \
+    signal_status=$?
+[ "$signal_status" -eq 130 ] || fail "稳定观察期间 TERM 应以 130 退出，实际为 $signal_status"
+assert_post_start_failure_rolled_back "$app"
 
 reset_transaction_fixture rollback
 if SBMGR_TEST_FAIL_LIVE_CHECK=1 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \
