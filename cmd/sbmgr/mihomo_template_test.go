@@ -11,23 +11,23 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const representativeMihomoTemplate = `# 用户提供的完整母版注释
+const representativeMihomoTemplate = `# Representative complete template fixture
 mixed-port: 7893
 mode: rule
 dns:
   enable: true
   nameserver:
-    - tls://1.1.1.1
+    - tls://192.0.2.53
 rule-providers:
-  google:
+  sample-rules:
     type: http
-    url: https://example.com/google.yaml
+    url: https://rules.example/sample.yaml
 proxies:
-  - name: LAX
+  - name: Node A
     type: vless
     server: old.example.com
     port: 443
-    uuid: old-lax-uuid
+    uuid: old-node-a-uuid
     network: tcp
     tls: true
     udp: true
@@ -39,11 +39,11 @@ proxies:
       public-key: old-public-key
       short-id: old-short-id
     packet-encoding: xudp
-  - name: ATT via LAX
+  - name: Relay A via Node A
     type: vless
     server: old.example.com
     port: 443
-    uuid: old-att-uuid
+    uuid: old-relay-a-uuid
     network: tcp
     tls: true
     udp: true
@@ -53,11 +53,11 @@ proxies:
       public-key: old-public-key
       short-id: old-short-id
     packet-encoding: xudp
-  - name: Frontier via LAX
+  - name: Relay B via Node A
     type: vless
     server: old.example.com
     port: 443
-    uuid: old-frontier-uuid
+    uuid: old-relay-b-uuid
     network: tcp
     tls: true
     udp: true
@@ -68,26 +68,26 @@ proxies:
       short-id: old-short-id
     packet-encoding: xudp
 proxy-groups:
-  - name: 节点选择
+  - name: Primary
     type: select
-    proxies: [Auto⚡, Frontier via LAX, ATT via LAX, LAX, DIRECT]
-  - name: Auto⚡
+    proxies: [Auto, Relay B via Node A, Relay A via Node A, Node A, DIRECT]
+  - name: Auto
     type: url-test
-    proxies: [LAX, Frontier via LAX, ATT via LAX]
-  - name: LLM
+    proxies: [Node A, Relay B via Node A, Relay A via Node A]
+  - name: Service
     type: select
-    proxies: [Frontier via LAX, ATT via LAX]
-  - name: 通讯
+    proxies: [Relay B via Node A, Relay A via Node A]
+  - name: Secondary
     type: select
-    proxies: [节点选择, LAX, Frontier via LAX, ATT via LAX]
-  - name: 漏网之🐟
+    proxies: [Primary, Node A, Relay B via Node A, Relay A via Node A]
+  - name: Fallback
     type: select
-    proxies: [节点选择, LAX, Frontier via LAX, ATT via LAX, DIRECT]
+    proxies: [Primary, Node A, Relay B via Node A, Relay A via Node A, DIRECT]
 rules:
   - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT
-  - DOMAIN-SUFFIX,openai.com,LLM
-  - RULE-SET,google,节点选择
-  - MATCH,漏网之🐟
+  - DOMAIN-SUFFIX,service.example,Service
+  - RULE-SET,sample-rules,Primary
+  - MATCH,Fallback
 `
 
 func TestMihomoTemplatePreservesRulesAndFiltersNodes(t *testing.T) {
@@ -96,15 +96,15 @@ func TestMihomoTemplatePreservesRulesAndFiltersNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &State{Client: ClientSettings{
-		Server: "managed.example.com", Port: 8443, ServerName: "www.cloudflare.com",
+		Server: "managed.example", Port: 8443, ServerName: "tls.example",
 		PublicKey: "managed-public-key", ShortID: "managed-short-id", MihomoTemplate: templatePath,
 	}}
 	u := User{
 		Name: "alice", Enabled: true, Devices: []Device{{Name: "电脑", Enabled: true}},
 		Nodes: []Node{
-			{Name: "LAX", Device: "电脑", UUID: "11111111-1111-4111-8111-111111111111"},
-			{Name: "Frontier via LAX", Device: "电脑", UUID: "22222222-2222-4222-8222-222222222222"},
-			{Name: "ATT via LAX", Device: "手机", UUID: "33333333-3333-4333-8333-333333333333"},
+			{Name: "Node A", Device: "电脑", UUID: "11111111-1111-4111-8111-111111111111"},
+			{Name: "Relay B via Node A", Device: "电脑", UUID: "22222222-2222-4222-8222-222222222222"},
+			{Name: "Relay A via Node A", Device: "手机", UUID: "33333333-3333-4333-8333-333333333333"},
 		},
 	}
 
@@ -113,12 +113,12 @@ func TestMihomoTemplatePreservesRulesAndFiltersNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(exported)
-	for _, forbidden := range []string{"old-lax-uuid", "old-att-uuid", "old-frontier-uuid", "33333333-3333-4333-8333-333333333333"} {
+	for _, forbidden := range []string{"old-node-a-uuid", "old-relay-a-uuid", "old-relay-b-uuid", "33333333-3333-4333-8333-333333333333"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("unavailable credential %q leaked into export:\n%s", forbidden, text)
 		}
 	}
-	for _, preserved := range []string{"用户提供的完整母版注释", "tls://1.1.1.1", "https://example.com/google.yaml", "DOMAIN-SUFFIX,openai.com,LLM"} {
+	for _, preserved := range []string{"Representative complete template fixture", "tls://192.0.2.53", "https://rules.example/sample.yaml", "DOMAIN-SUFFIX,service.example,Service", "client-fingerprint: chrome", "packet-encoding: xudp"} {
 		if !strings.Contains(text, preserved) {
 			t.Fatalf("template content %q was not preserved:\n%s", preserved, text)
 		}
@@ -130,7 +130,7 @@ func TestMihomoTemplatePreservesRulesAndFiltersNodes(t *testing.T) {
 	}
 	root, _ := yamlRootMapping(document)
 	rules, _ := yamlMapValue(root, "rules")
-	if got := rules.Content[len(rules.Content)-1].Value; got != "MATCH,漏网之🐟" {
+	if got := rules.Content[len(rules.Content)-1].Value; got != "MATCH,Fallback" {
 		t.Fatalf("final rule = %q, want MATCH rule from template", got)
 	}
 	proxies, _ := yamlMapValue(root, "proxies")
@@ -138,32 +138,32 @@ func TestMihomoTemplatePreservesRulesAndFiltersNodes(t *testing.T) {
 		t.Fatalf("exported %d proxies, want 2", len(proxies.Content))
 	}
 	wantUUIDs := map[string]string{
-		"LAX":              "11111111-1111-4111-8111-111111111111",
-		"Frontier via LAX": "22222222-2222-4222-8222-222222222222",
+		"Node A":             "11111111-1111-4111-8111-111111111111",
+		"Relay B via Node A": "22222222-2222-4222-8222-222222222222",
 	}
 	for _, proxy := range proxies.Content {
 		name := yamlStringMapValue(proxy, "name")
 		if got, want := yamlStringMapValue(proxy, "uuid"), wantUUIDs[name]; got != want {
 			t.Fatalf("proxy %q UUID = %q want %q", name, got, want)
 		}
-		if got := yamlStringMapValue(proxy, "server"); got != "managed.example.com" {
+		if got := yamlStringMapValue(proxy, "server"); got != "managed.example" {
 			t.Fatalf("proxy %q server = %q", name, got)
 		}
 		if got := yamlStringMapValue(proxy, "port"); got != "8443" {
 			t.Fatalf("proxy %q port = %q", name, got)
 		}
 	}
-	if lax := proxies.Content[0]; yamlStringMapValue(lax, "skip-cert-verify") != "true" {
+	if nodeA := proxies.Content[0]; yamlStringMapValue(nodeA, "skip-cert-verify") != "true" {
 		t.Fatal("template-only proxy options were not retained")
 	}
 
 	groups, _ := yamlMapValue(root, "proxy-groups")
 	wantGroups := map[string][]string{
-		"节点选择":  {"Auto⚡", "LAX", "Frontier via LAX", "DIRECT"},
-		"Auto⚡": {"LAX", "Frontier via LAX"},
-		"LLM":   {"Frontier via LAX"},
-		"通讯":    {"节点选择", "LAX", "Frontier via LAX"},
-		"漏网之🐟":  {"节点选择", "LAX", "Frontier via LAX", "DIRECT"},
+		"Primary":   {"Auto", "Node A", "Relay B via Node A", "DIRECT"},
+		"Auto":      {"Node A", "Relay B via Node A"},
+		"Service":   {"Relay B via Node A"},
+		"Secondary": {"Primary", "Node A", "Relay B via Node A"},
+		"Fallback":  {"Primary", "Node A", "Relay B via Node A", "DIRECT"},
 	}
 	for name, want := range wantGroups {
 		if got := mihomoGroupProxyValues(groups, name); !reflect.DeepEqual(got, want) {
@@ -178,7 +178,7 @@ func TestMihomoTemplateEmptyPartialGroupFallsBackToPrimary(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &State{Client: ClientSettings{Server: "example.com", Port: 443, ServerName: "example.com", PublicKey: "pub", ShortID: "id", MihomoTemplate: templatePath}}
-	u := User{Name: "alice", Enabled: true, Devices: []Device{{Name: "默认设备", Enabled: true}}, Nodes: []Node{{Name: "LAX", Device: "默认设备", UUID: "11111111-1111-4111-8111-111111111111"}}}
+	u := User{Name: "alice", Enabled: true, Devices: []Device{{Name: "默认设备", Enabled: true}}, Nodes: []Node{{Name: "Node A", Device: "默认设备", UUID: "11111111-1111-4111-8111-111111111111"}}}
 	exported, err := renderMihomoDevice(s, u, "默认设备")
 	if err != nil {
 		t.Fatal(err)
@@ -186,8 +186,8 @@ func TestMihomoTemplateEmptyPartialGroupFallsBackToPrimary(t *testing.T) {
 	document, _ := parseMihomoTemplate(exported)
 	root, _ := yamlRootMapping(document)
 	groups, _ := yamlMapValue(root, "proxy-groups")
-	if got, want := mihomoGroupProxyValues(groups, "LLM"), []string{"节点选择"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("LLM proxies = %#v want %#v", got, want)
+	if got, want := mihomoGroupProxyValues(groups, "Service"), []string{"Primary"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Service proxies = %#v want %#v", got, want)
 	}
 }
 

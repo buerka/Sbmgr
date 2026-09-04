@@ -9,18 +9,18 @@ import (
 	"time"
 )
 
-func TestParseSourceAndConnectionIDFromRealLogShape(t *testing.T) {
-	message := "-0700 2026-08-03 03:09:37 \x1b[36mINFO\x1b[0m [\x1b[38;5;29m1781284324\x1b[0m 0ms] inbound/vless[vless-in]: inbound connection from 112.3.242.216:8280"
+func TestParseSourceAndConnectionIDFromJournalLogShape(t *testing.T) {
+	message := "-0700 2026-08-03 03:09:37 \x1b[36mINFO\x1b[0m [\x1b[38;5;29m1781284324\x1b[0m 0ms] inbound/vless[vless-in]: inbound connection from 192.0.2.10:8280"
 	if got := parseConnectionID(message); got != "1781284324" {
 		t.Fatalf("connection id = %q", got)
 	}
 	ip, ok := parseSourceLog(message)
-	if !ok || ip != "112.3.242.216" {
+	if !ok || ip != "192.0.2.10" {
 		t.Fatalf("source = %q, ok=%v", ip, ok)
 	}
-	authLine := "-0700 INFO [\x1b[38;5;29m1781284324\x1b[0m 453ms] inbound/vless[vless-in]: [alice:lax] inbound connection to chatgpt.com:443"
+	authLine := "-0700 INFO [\x1b[38;5;29m1781284324\x1b[0m 453ms] inbound/vless[vless-in]: [user-a:node-a] inbound connection to service.example:443"
 	auth, target, ok := parseAccessLog(authLine)
-	if !ok || auth != "alice:lax" || target != "chatgpt.com" || parseConnectionID(authLine) != "1781284324" {
+	if !ok || auth != "user-a:node-a" || target != "service.example" || parseConnectionID(authLine) != "1781284324" {
 		t.Fatalf("auth=%q target=%q ok=%v", auth, target, ok)
 	}
 }
@@ -29,7 +29,7 @@ func TestIPPolicyAutoBindsFirstSourceAndAlertsViolation(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
 	s := &State{Users: []User{{Name: "alice", Enabled: true, IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "auto", MaxIPs: 1}}}}
 	u := &s.Users[0]
-	if !recordUserSourceIP(s, u, "LAX", "203.0.113.10", now) {
+	if !recordUserSourceIP(s, u, "Node A", "203.0.113.10", now) {
 		t.Fatal("first source was not recorded")
 	}
 	if len(u.IPPolicy.BoundIPs) != 1 || u.IPPolicy.BoundIPs[0] != "203.0.113.10" || !s.IPApplyPending {
@@ -38,7 +38,7 @@ func TestIPPolicyAutoBindsFirstSourceAndAlertsViolation(t *testing.T) {
 	if len(s.Alerts) != 1 || s.Alerts[0].Kind != "ip_bound" {
 		t.Fatalf("missing bind alert: %#v", s.Alerts)
 	}
-	recordUserSourceIP(s, u, "ATT", "198.51.100.20", now.Add(time.Minute))
+	recordUserSourceIP(s, u, "Relay A", "198.51.100.20", now.Add(time.Minute))
 	if len(u.IPPolicy.BoundIPs) != 1 || u.SourceIPs["198.51.100.20"].Violations != 1 {
 		t.Fatalf("second source was not treated as violation: %#v", u)
 	}
@@ -56,20 +56,20 @@ func TestDynamicSingleActiveIPAllowsSameIPAndSafeHandover(t *testing.T) {
 		Users: []User{{Name: "alice", Enabled: true, IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "dynamic", MaxIPs: 1}}},
 	}
 	u := &s.Users[0]
-	recordUserSourceIP(s, u, "LAX", "203.0.113.10", now)
+	recordUserSourceIP(s, u, "Node A", "203.0.113.10", now)
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "203.0.113.10" || !s.IPApplyPending {
 		t.Fatalf("initial dynamic IP not learned: %#v", u.IPPolicy)
 	}
 
 	s.IPApplyPending = false
 	s.ActiveConnections["pc"] = ActiveConnection{ID: "pc", User: "alice", Device: "电脑", SourceIP: "203.0.113.10", LastSeen: now.Add(time.Minute).Format(time.RFC3339)}
-	recordUserSourceIP(s, u, "ATT", "203.0.113.10", now.Add(time.Minute))
+	recordUserSourceIP(s, u, "Relay A", "203.0.113.10", now.Add(time.Minute))
 	if u.SourceIPs["203.0.113.10"].Violations != 0 || s.IPApplyPending {
 		t.Fatalf("same public IP was treated as a conflict: %#v", u.SourceIPs)
 	}
 
 	s.ActiveConnections["other-ip"] = ActiveConnection{ID: "other-ip", User: "alice", Device: "平板", SourceIP: "198.51.100.20", LastSeen: now.Add(2 * time.Minute).Format(time.RFC3339)}
-	recordUserSourceIP(s, u, "Frontier", "198.51.100.20", now.Add(2*time.Minute))
+	recordUserSourceIP(s, u, "Relay B", "198.51.100.20", now.Add(2*time.Minute))
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "203.0.113.10" {
 		t.Fatalf("competing IP replaced the active IP: %#v", got)
 	}
@@ -79,7 +79,7 @@ func TestDynamicSingleActiveIPAllowsSameIPAndSafeHandover(t *testing.T) {
 
 	delete(s.ActiveConnections, "phone")
 	delete(s.ActiveConnections, "pc")
-	recordUserSourceIP(s, u, "Frontier", "198.51.100.20", now.Add(3*time.Minute))
+	recordUserSourceIP(s, u, "Relay B", "198.51.100.20", now.Add(3*time.Minute))
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "198.51.100.20" || !s.IPApplyPending {
 		t.Fatalf("new IP did not take over after the old IP became inactive: %#v", u.IPPolicy)
 	}
@@ -121,7 +121,7 @@ func TestDynamicSingleActiveIPIgnoresRejectedCandidatesDuringHandover(t *testing
 	}
 
 	u := &s.Users[0]
-	recordUserSourceIP(s, u, "LAX", "198.51.100.20", now)
+	recordUserSourceIP(s, u, "Node A", "198.51.100.20", now)
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "198.51.100.20" {
 		t.Fatalf("rejected candidate prevented safe handover: %#v", got)
 	}
@@ -182,7 +182,7 @@ func TestDynamicSingleActiveIPHandoverGraceWithoutCloseLog(t *testing.T) {
 			}
 
 			u := &s.Users[0]
-			recordUserSourceIP(s, u, "LAX", newIP, now)
+			recordUserSourceIP(s, u, "Node A", newIP, now)
 			if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != tc.wantIP {
 				t.Fatalf("bound IP = %#v, want %s", got, tc.wantIP)
 			}
@@ -216,13 +216,13 @@ func TestDynamicSingleActiveIPUsesConfiguredHandoverGrace(t *testing.T) {
 	}
 
 	u := &s.Users[0]
-	recordUserSourceIP(s, u, "LAX", "198.51.100.20", now)
+	recordUserSourceIP(s, u, "Node A", "198.51.100.20", now)
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "203.0.113.10" {
 		t.Fatalf("configured grace was ignored: %#v", got)
 	}
 
 	u.IPPolicy.HandoverSeconds = 30
-	recordUserSourceIP(s, u, "LAX", "198.51.100.20", now)
+	recordUserSourceIP(s, u, "Node A", "198.51.100.20", now)
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "198.51.100.20" {
 		t.Fatalf("short configured grace did not permit handover: %#v", got)
 	}
@@ -235,7 +235,7 @@ func TestMonitorOnlyDynamicIPChangeDoesNotQueueConfigRestart(t *testing.T) {
 		IPPolicy: IPPolicy{Enabled: true, Mode: "monitor", Binding: "dynamic", MaxIPs: 1},
 	}}}
 	u := &s.Users[0]
-	recordUserSourceIP(s, u, "LAX", "198.51.100.20", now)
+	recordUserSourceIP(s, u, "Node A", "198.51.100.20", now)
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "198.51.100.20" {
 		t.Fatalf("monitor-only policy did not learn the source: %#v", got)
 	}
@@ -299,7 +299,7 @@ func TestDynamicSingleActiveIPStillProtectsRecentlyActiveBoundAddress(t *testing
 	}
 
 	u := &s.Users[0]
-	recordUserSourceIP(s, u, "LAX", "198.51.100.20", now)
+	recordUserSourceIP(s, u, "Node A", "198.51.100.20", now)
 	if got := u.IPPolicy.BoundIPs; len(got) != 1 || got[0] != "203.0.113.10" {
 		t.Fatalf("candidate replaced a recently active bound address: %#v", got)
 	}
@@ -312,7 +312,7 @@ func TestDynamicIPPolicyLearnsBeforeGeneratingRestrictionRule(t *testing.T) {
 	s := &State{Users: []User{{
 		Name: "alice", Enabled: true,
 		IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "dynamic", MaxIPs: 1},
-		Nodes:    []Node{{AuthUser: "alice:lax"}},
+		Nodes:    []Node{{AuthUser: "alice:node-a"}},
 	}}}
 	if rules := ipRestrictionRules(s, time.Now()); len(rules) != 0 {
 		t.Fatalf("unlearned dynamic policy rejected the first connection: %#v", rules)
@@ -334,7 +334,7 @@ func TestNewUserDefaultsToDynamicSingleActiveIP(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &app{statePath: statePath, out: io.Discard, err: io.Discard}
-	if err := a.userCmd([]string{"add", "alice", "--quota", "20G", "--node-name", "LAX"}); err != nil {
+	if err := a.userCmd([]string{"add", "alice", "--quota", "20G", "--node-name", "Node A"}); err != nil {
 		t.Fatal(err)
 	}
 	s, err := loadState(statePath)
@@ -412,7 +412,7 @@ func TestIPRestrictionRuleCombinesAuthAndInvertedSource(t *testing.T) {
 	s := &State{Users: []User{{
 		Name: "alice", Enabled: true,
 		IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "manual", MaxIPs: 1, BoundIPs: []string{"203.0.113.10"}},
-		Nodes:    []Node{{AuthUser: "alice:lax"}, {AuthUser: "alice:att"}},
+		Nodes:    []Node{{AuthUser: "alice:node-a"}, {AuthUser: "alice:relay-a"}},
 	}}}
 	rules := ipRestrictionRules(s, time.Now())
 	if len(rules) != 1 {
@@ -420,7 +420,7 @@ func TestIPRestrictionRuleCombinesAuthAndInvertedSource(t *testing.T) {
 	}
 	b, _ := json.Marshal(rules[0])
 	text := string(b)
-	for _, want := range []string{`"type":"logical"`, `"mode":"and"`, `"action":"reject"`, `"auth_user":["alice:lax","alice:att"]`, `"source_ip_cidr":["203.0.113.10"]`, `"invert":true`} {
+	for _, want := range []string{`"type":"logical"`, `"mode":"and"`, `"action":"reject"`, `"auth_user":["alice:node-a","alice:relay-a"]`, `"source_ip_cidr":["203.0.113.10"]`, `"invert":true`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %s in %s", want, text)
 		}

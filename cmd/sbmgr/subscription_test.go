@@ -22,8 +22,8 @@ func TestSubscriptionServerExportsOnlyTokenDeviceAndRevokesOldLink(t *testing.T)
 		Subscription: SubscriptionSettings{Enabled: true, Listen: "127.0.0.1:0", BaseURL: "https://sub.example.com"},
 		Client:       ClientSettings{Server: "example.com", Port: 443, ServerName: "example.com", PublicKey: "pub", ShortID: "abcd"},
 		Users: []User{{Name: "alice", Enabled: true, QuotaBytes: 100, ExtraQuotaBytes: 20, Upload: 12, Download: 34, Expires: "2030-12-31", Devices: []Device{{Name: "phone", Enabled: true}, {Name: "pc", Enabled: true}}, Nodes: []Node{
-			{Name: "ATT", Device: "phone", AuthUser: "alice-phone", UUID: "11111111-1111-4111-8111-111111111111"},
-			{Name: "ATT", Device: "pc", AuthUser: "alice-pc", UUID: "22222222-2222-4222-8222-222222222222"},
+			{Name: "Relay A", Device: "phone", AuthUser: "alice-phone", UUID: "11111111-1111-4111-8111-111111111111"},
+			{Name: "Relay A", Device: "pc", AuthUser: "alice-pc", UUID: "22222222-2222-4222-8222-222222222222"},
 		}}},
 	}
 	if err := saveState(statePath, s); err != nil {
@@ -161,7 +161,7 @@ func TestSubscriptionHEADDoesNotRenderMihomoTemplate(t *testing.T) {
 		Subscription: SubscriptionSettings{Enabled: true, Listen: "127.0.0.1:0"},
 		Client:       ClientSettings{MihomoTemplate: filepath.Join(t.TempDir(), "missing.yaml")},
 		Users: []User{{Name: "alice", Enabled: true, Devices: []Device{{Name: "phone", Enabled: true}}, Nodes: []Node{
-			{Name: "ATT", Device: "phone", AuthUser: "alice-phone", UUID: "11111111-1111-4111-8111-111111111111"},
+			{Name: "Relay A", Device: "phone", AuthUser: "alice-phone", UUID: "11111111-1111-4111-8111-111111111111"},
 		}}},
 	}
 	if err := saveState(statePath, state); err != nil {
@@ -239,7 +239,7 @@ func TestLegacyMissingSubscriptionTokenIsCanonicalizedBeforeHTTPReads(t *testing
   "version": 2,
   "client": {"server":"example.com","port":443,"server_name":"example.com","reality_public_key":"pub","short_id":"abcd"},
   "subscription": {"enabled":true,"listen":"127.0.0.1:0"},
-  "users": [{"name":"alice","enabled":true,"nodes":[{"name":"ATT","auth_user":"alice:att","uuid":"11111111-1111-4111-8111-111111111111"}]}]
+  "users": [{"name":"alice","enabled":true,"nodes":[{"name":"Relay A","auth_user":"alice:relay-a","uuid":"11111111-1111-4111-8111-111111111111"}]}]
 }`
 	if err := os.WriteFile(statePath, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
@@ -282,7 +282,7 @@ func TestRunningSubscriptionServerHonorsDisableWithoutRestart(t *testing.T) {
 		Subscription: SubscriptionSettings{Enabled: true, Listen: "127.0.0.1:0"},
 		Client:       ClientSettings{Server: "example.com", Port: 443, ServerName: "example.com", PublicKey: "pub", ShortID: "abcd"},
 		Users: []User{{Name: "alice", Enabled: true, Devices: []Device{{Name: "phone", Enabled: true}}, Nodes: []Node{{
-			Name: "ATT", Device: "phone", AuthUser: "alice:att", UUID: "11111111-1111-4111-8111-111111111111",
+			Name: "Relay A", Device: "phone", AuthUser: "alice:relay-a", UUID: "11111111-1111-4111-8111-111111111111",
 		}}}},
 	}
 	if err := saveState(statePath, state); err != nil {

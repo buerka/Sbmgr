@@ -13,7 +13,7 @@ import (
 
 func TestVersionTwoMigratesNodesToDefaultDevice(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
-	raw := `{"version":2,"users":[{"name":"alice","enabled":true,"nodes":[{"name":"ATT","auth_user":"alice:att","uuid":"11111111-1111-4111-8111-111111111111"}]}]}`
+	raw := `{"version":2,"users":[{"name":"alice","enabled":true,"nodes":[{"name":"Relay A","auth_user":"alice:relay-a","uuid":"11111111-1111-4111-8111-111111111111"}]}]}`
 	if err := os.WriteFile(statePath, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestVersionTwoMigratesNodesToDefaultDevice(t *testing.T) {
 	if s.Version != stateVersion || len(s.Users[0].Devices) != 1 || s.Users[0].Devices[0].Name != defaultDeviceName {
 		t.Fatalf("device migration failed: %#v", s.Users[0])
 	}
-	if s.Users[0].Nodes[0].Device != defaultDeviceName || s.Users[0].Nodes[0].UUID != "11111111-1111-4111-8111-111111111111" || s.Users[0].Nodes[0].AuthUser != "alice:att" {
+	if s.Users[0].Nodes[0].Device != defaultDeviceName || s.Users[0].Nodes[0].UUID != "11111111-1111-4111-8111-111111111111" || s.Users[0].Nodes[0].AuthUser != "alice:relay-a" {
 		t.Fatalf("legacy credentials changed: %#v", s.Users[0].Nodes[0])
 	}
 }
@@ -35,8 +35,8 @@ func TestDeviceIPPolicyOnlyTargetsThatDevice(t *testing.T) {
 		{Name: "电脑", Enabled: true, IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "manual", MaxIPs: 1, BoundIPs: []string{"203.0.113.8"}}},
 		{Name: "手机", Enabled: true},
 	}, Nodes: []Node{
-		{Name: "ATT", Device: "电脑", AuthUser: "alice-pc", UUID: "11111111-1111-4111-8111-111111111111"},
-		{Name: "ATT", Device: "手机", AuthUser: "alice-phone", UUID: "22222222-2222-4222-8222-222222222222"},
+		{Name: "Relay A", Device: "电脑", AuthUser: "alice-pc", UUID: "11111111-1111-4111-8111-111111111111"},
+		{Name: "Relay A", Device: "手机", AuthUser: "alice-phone", UUID: "22222222-2222-4222-8222-222222222222"},
 	}}}}
 	raw, _ := json.Marshal(ipRestrictionRules(s, now))
 	if !strings.Contains(string(raw), "alice-pc") || !strings.Contains(string(raw), "203.0.113.8") || strings.Contains(string(raw), "alice-phone") {
@@ -44,7 +44,7 @@ func TestDeviceIPPolicyOnlyTargetsThatDevice(t *testing.T) {
 	}
 	device := findDevice(&s.Users[0], "电脑")
 	device.IPPolicy = IPPolicy{Enabled: true, Mode: "enforce", Binding: "auto", MaxIPs: 1}
-	if !recordDeviceSourceIP(s, &s.Users[0], device, "ATT", "198.51.100.9", now) {
+	if !recordDeviceSourceIP(s, &s.Users[0], device, "Relay A", "198.51.100.9", now) {
 		t.Fatal("device source IP was not recorded")
 	}
 	if len(device.SourceIPs) != 1 || !containsIP(device.IPPolicy.BoundIPs, "198.51.100.9") || device.LastSeen == "" || !s.IPApplyPending {
@@ -55,8 +55,8 @@ func TestDeviceIPPolicyOnlyTargetsThatDevice(t *testing.T) {
 func TestDeviceAddCreatesIndependentCredentialsAndRotateIsScoped(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	s := &State{Users: []User{{Name: "alice", Enabled: true, Devices: []Device{{Name: defaultDeviceName, Enabled: true}}, Nodes: []Node{
-		{Name: "LAX", Device: defaultDeviceName, AuthUser: "alice:lax", UUID: "11111111-1111-4111-8111-111111111111", UploadMbps: 10},
-		{Name: "ATT", Device: defaultDeviceName, AuthUser: "alice:att", UUID: "22222222-2222-4222-8222-222222222222", DownloadMbps: 20},
+		{Name: "Node A", Device: defaultDeviceName, AuthUser: "alice:node-a", UUID: "11111111-1111-4111-8111-111111111111", UploadMbps: 10},
+		{Name: "Relay A", Device: defaultDeviceName, AuthUser: "alice:relay-a", UUID: "22222222-2222-4222-8222-222222222222", DownloadMbps: 20},
 	}}}}
 	if err := saveState(statePath, s); err != nil {
 		t.Fatal(err)
@@ -105,8 +105,8 @@ func TestDisabledDeviceIsExcludedFromConfigAndDeviceExport(t *testing.T) {
 		Name: "alice", Enabled: true,
 		Devices: []Device{{Name: "电脑", Enabled: true}, {Name: "手机", Enabled: false}},
 		Nodes: []Node{
-			{Name: "ATT", Device: "电脑", AuthUser: "alice-pc", UUID: "11111111-1111-4111-8111-111111111111"},
-			{Name: "ATT", Device: "手机", AuthUser: "alice-phone", UUID: "22222222-2222-4222-8222-222222222222"},
+			{Name: "Relay A", Device: "电脑", AuthUser: "alice-pc", UUID: "11111111-1111-4111-8111-111111111111"},
+			{Name: "Relay A", Device: "手机", AuthUser: "alice-phone", UUID: "22222222-2222-4222-8222-222222222222"},
 		},
 	}}}
 	rendered, err := renderConfig(s)
@@ -131,25 +131,25 @@ func TestDisabledDeviceIsExcludedFromConfigAndDeviceExport(t *testing.T) {
 func TestNodeSelectionRequiresDeviceWhenNamesRepeat(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	s := &State{Users: []User{{Name: "alice", Enabled: true, Devices: []Device{{Name: "电脑", Enabled: true}, {Name: "手机", Enabled: true}}, Nodes: []Node{
-		{Name: "ATT", Device: "电脑", AuthUser: "pc", UUID: "11111111-1111-4111-8111-111111111111"},
-		{Name: "ATT", Device: "手机", AuthUser: "phone", UUID: "22222222-2222-4222-8222-222222222222"},
+		{Name: "Relay A", Device: "电脑", AuthUser: "pc", UUID: "11111111-1111-4111-8111-111111111111"},
+		{Name: "Relay A", Device: "手机", AuthUser: "phone", UUID: "22222222-2222-4222-8222-222222222222"},
 	}}}}
 	if err := saveState(statePath, s); err != nil {
 		t.Fatal(err)
 	}
 	a := &app{statePath: statePath, out: io.Discard, err: io.Discard}
-	if err := a.nodeCmd([]string{"set", "alice", "ATT", "--up-mbps", "8"}); err == nil || !strings.Contains(err.Error(), "--device") {
+	if err := a.nodeCmd([]string{"set", "alice", "Relay A", "--up-mbps", "8"}); err == nil || !strings.Contains(err.Error(), "--device") {
 		t.Fatalf("ambiguous node did not require a device: %v", err)
 	}
-	if err := a.nodeCmd([]string{"set", "alice", "ATT", "--device", "手机", "--up-mbps", "8"}); err != nil {
+	if err := a.nodeCmd([]string{"set", "alice", "Relay A", "--device", "手机", "--up-mbps", "8"}); err != nil {
 		t.Fatal(err)
 	}
 	s, _ = loadState(statePath)
-	node, err := findUserNode(&s.Users[0], "手机", "ATT")
+	node, err := findUserNode(&s.Users[0], "手机", "Relay A")
 	if err != nil || node.UploadMbps != 8 {
 		t.Fatalf("target device node was not updated: node=%#v err=%v", node, err)
 	}
-	pc, _ := findUserNode(&s.Users[0], "电脑", "ATT")
+	pc, _ := findUserNode(&s.Users[0], "电脑", "Relay A")
 	if pc.UploadMbps != 0 {
 		t.Fatal(fmt.Sprintf("other device node was changed: %#v", pc))
 	}

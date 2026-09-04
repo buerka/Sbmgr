@@ -9,9 +9,9 @@ import (
 
 func TestDetailViewportKeepsSelectedNodeAndDeleteVisible(t *testing.T) {
 	nodes := []Node{
-		{Name: "LAX", UUID: "11111111-1111-4111-8111-111111111111", AuthUser: "alice-lax"},
-		{Name: "ATT", UUID: "22222222-2222-4222-8222-222222222222", AuthUser: "alice-att"},
-		{Name: "Frontier", UUID: "33333333-3333-4333-8333-333333333333", AuthUser: "alice-frontier"},
+		{Name: "Node A", UUID: "11111111-1111-4111-8111-111111111111", AuthUser: "alice-node-a"},
+		{Name: "Relay A", UUID: "22222222-2222-4222-8222-222222222222", AuthUser: "alice-relay-a"},
+		{Name: "Relay B", UUID: "33333333-3333-4333-8333-333333333333", AuthUser: "alice-relay-b"},
 	}
 	m := tuiModel{
 		state:    &State{Users: []User{{Name: "alice", Enabled: true, Nodes: nodes}}},
@@ -32,7 +32,7 @@ func TestDetailViewportKeepsSelectedNodeAndDeleteVisible(t *testing.T) {
 	if height := strings.Count(detail, "\n") + 1; height > m.height {
 		t.Fatalf("detail exceeded terminal height: got %d, want <= %d\n%s", height, m.height, detail)
 	}
-	for _, want := range []string{"节点 3/3", "3.", "Frontier", "R 重置本月流量", "D 删除用户"} {
+	for _, want := range []string{"节点 3/3", "3.", "Relay B", "R 重置本月流量", "D 删除用户"} {
 		if !strings.Contains(detail, want) {
 			t.Fatalf("detail viewport does not contain %q:\n%s", want, detail)
 		}
@@ -65,14 +65,14 @@ func TestDetailMonthlyTrafficResetShortcutIsVisibleAndConfirmed(t *testing.T) {
 func TestUserNftCounterBaselinesPreventPreResetTrafficFromReturning(t *testing.T) {
 	s := &State{Counters: map[string]int64{"unrelated": 99}}
 	u := &User{Name: "alice", Nodes: []Node{
-		{Name: "LAX", Device: "phone", RateMark: 0x53420001},
-		{Name: "ATT", Device: "phone", RateMark: 0x53420002},
+		{Name: "Node A", Device: "phone", RateMark: 0x53420001},
+		{Name: "Relay A", Device: "phone", RateMark: 0x53420002},
 	}}
 	counters := map[string]int64{
-		deviceNodeLabel("alice", "phone", "LAX") + " upload":   100,
-		deviceNodeLabel("alice", "phone", "LAX") + " download": 200,
-		deviceNodeLabel("alice", "phone", "ATT") + " upload":   300,
-		deviceNodeLabel("bob", "phone", "LAX") + " upload":     400,
+		deviceNodeLabel("alice", "phone", "Node A") + " upload":   100,
+		deviceNodeLabel("alice", "phone", "Node A") + " download": 200,
+		deviceNodeLabel("alice", "phone", "Relay A") + " upload":  300,
+		deviceNodeLabel("bob", "phone", "Node A") + " upload":     400,
 	}
 	applyUserNftCounterBaselines(s, u, counters)
 	want := map[string]int64{

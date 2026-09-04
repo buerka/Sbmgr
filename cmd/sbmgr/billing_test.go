@@ -12,7 +12,7 @@ func TestBillingCycleArchivesAndResetsQuotaDisabledUser(t *testing.T) {
 	s := &State{Users: []User{{
 		Name: "alice", Enabled: false, DisabledReason: "quota", QuotaBytes: 100, ExtraQuotaBytes: 20, Upload: 80, Download: 40,
 		Billing: BillingPolicy{Enabled: true, CycleDay: 3, TimeZone: "Asia/Shanghai", LastReset: "2026-07-03T00:00:00+08:00", NextReset: "2026-08-03T00:00:00+08:00"},
-		Nodes:   []Node{{Name: "ATT", Upload: 80, Download: 40, CurrentUploadMbps: 2}}, UsageHistory: []UsagePoint{{At: "2026-08-02T23:55:00+08:00"}}, QuotaAlertStage: 2,
+		Nodes:   []Node{{Name: "Relay A", Upload: 80, Download: 40, CurrentUploadMbps: 2}}, UsageHistory: []UsagePoint{{At: "2026-08-02T23:55:00+08:00"}}, QuotaAlertStage: 2,
 	}}}
 	if !evaluateBillingCycles(s, now) {
 		t.Fatal("due billing cycle was not evaluated")
@@ -54,7 +54,7 @@ func TestManualMonthlyTrafficResetArchivesUsageAndPreservesPlan(t *testing.T) {
 		TrafficSamples: []TrafficSample{{At: now.Add(-time.Minute).Format(time.RFC3339), Bytes: 120}},
 		UsageHistory:   []UsagePoint{{At: now.Add(-time.Minute).Format(time.RFC3339), UploadBytes: 80, DownloadBytes: 40}},
 		BlockedUntil:   now.Add(time.Hour).Format(time.RFC3339), BlockReason: "test", QuotaAlertStage: 2,
-		Nodes: []Node{{Name: "LAX", Upload: 80, Download: 40, CurrentUploadMbps: 3, CurrentDownloadMbps: 4}},
+		Nodes: []Node{{Name: "Node A", Upload: 80, Download: 40, CurrentUploadMbps: 3, CurrentDownloadMbps: 4}},
 	}}}
 
 	manualResetUserMonthlyTraffic(s, &s.Users[0], now)

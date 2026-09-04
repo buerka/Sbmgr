@@ -13,6 +13,7 @@
 
 - [ ] 未提交真实配置、服务器凭据、UUID、token、密钥、证书、日志、导出或备份
 - [ ] 敏感字段不会出现在界面、错误或审计中
+- [ ] `python3 ./scripts/check_public_tree.py` 已通过
 
 ## 验证
 

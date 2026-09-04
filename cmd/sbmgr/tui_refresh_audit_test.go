@@ -12,8 +12,8 @@ import (
 )
 
 func TestTUIStateRefreshPreservesNavigationState(t *testing.T) {
-	oldState := &State{Users: []User{{Name: "alice", Nodes: []Node{{Name: "LAX"}, {Name: "ATT"}}}}}
-	newState := &State{Users: []User{{Name: "alice", Upload: 123, Nodes: []Node{{Name: "LAX"}, {Name: "ATT"}}}}, IPApplyPending: true}
+	oldState := &State{Users: []User{{Name: "alice", Nodes: []Node{{Name: "Node A"}, {Name: "Relay A"}}}}}
+	newState := &State{Users: []User{{Name: "alice", Upload: 123, Nodes: []Node{{Name: "Node A"}, {Name: "Relay A"}}}}, IPApplyPending: true}
 	m := tuiModel{
 		state: oldState, mode: tuiDetail, selected: "alice", cursor: 4, nodeCursor: 1,
 		detailOffset: 7, filter: "ali", checkedUsers: map[string]bool{"alice": true},
@@ -156,7 +156,7 @@ func detailAuditTestState(now time.Time) *State {
 	return &State{
 		IPApplyPending: true,
 		ActiveConnections: map[string]ActiveConnection{
-			"one": {ID: "one", User: "alice", Device: "phone", Node: "LAX", SourceIP: "203.0.113.10", LastSeen: now.Format(time.RFC3339)},
+			"one": {ID: "one", User: "alice", Device: "phone", Node: "Node A", SourceIP: "203.0.113.10", LastSeen: now.Format(time.RFC3339)},
 		},
 		Alerts: []Alert{{At: now.Format(time.RFC3339), User: "alice", Kind: "ip_violation", Message: "新 IP 等待换绑", Acknowledged: false}},
 		Users: []User{{
@@ -164,7 +164,7 @@ func detailAuditTestState(now time.Time) *State {
 			CurrentUploadMbps: 1.25, CurrentDownloadMbps: 2.5,
 			IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "dynamic", MaxIPs: 1, HandoverSeconds: 60, BoundIPs: []string{"203.0.113.10"}},
 			Devices:  []Device{{Name: "phone", Enabled: true, IPPolicy: IPPolicy{Enabled: true, Mode: "monitor", Binding: "dynamic", MaxIPs: 1, HandoverSeconds: 60}}},
-			Nodes:    []Node{{Name: "LAX", Device: "phone", AuthUser: "alice:lax", UUID: "11111111-1111-4111-8111-111111111111"}},
+			Nodes:    []Node{{Name: "Node A", Device: "phone", AuthUser: "alice:node-a", UUID: "11111111-1111-4111-8111-111111111111"}},
 		}},
 	}
 }

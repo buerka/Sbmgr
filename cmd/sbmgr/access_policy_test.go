@@ -12,8 +12,8 @@ func TestDeviceAccessRulesOnlyTargetDeviceAuthUsers(t *testing.T) {
 		{Name: "phone", Enabled: true, Access: AccessPolicy{AllowedDomains: []string{"example.com"}, BlockedDomains: []string{"tracker.test"}, BlockedPorts: []int{25}}},
 		{Name: "pc", Enabled: true},
 	}, Nodes: []Node{
-		{Name: "ATT", Device: "phone", AuthUser: "alice-phone", UUID: "11111111-1111-4111-8111-111111111111"},
-		{Name: "ATT", Device: "pc", AuthUser: "alice-pc", UUID: "22222222-2222-4222-8222-222222222222"},
+		{Name: "Relay A", Device: "phone", AuthUser: "alice-phone", UUID: "11111111-1111-4111-8111-111111111111"},
+		{Name: "Relay A", Device: "pc", AuthUser: "alice-pc", UUID: "22222222-2222-4222-8222-222222222222"},
 	}}}}
 	raw, _ := json.Marshal(accessRestrictionRules(s, time.Now()))
 	text := string(raw)

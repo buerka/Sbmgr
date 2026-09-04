@@ -1,4 +1,4 @@
-.PHONY: fmt fmt-check vet test deploy-check check build build-linux
+.PHONY: fmt fmt-check vet test privacy-check deploy-check check build build-linux
 
 fmt:
 	gofmt -w ./cmd/sbmgr
@@ -12,10 +12,13 @@ vet:
 test:
 	go test ./...
 
+privacy-check:
+	python3 ./scripts/check_public_tree.py
+
 deploy-check:
 	sh ./deploy/test-deploy-scripts.sh
 
-check: fmt-check vet test deploy-check
+check: privacy-check fmt-check vet test deploy-check
 
 build:
 	go build -trimpath -o sbmgr ./cmd/sbmgr

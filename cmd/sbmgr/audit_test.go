@@ -9,7 +9,7 @@ import (
 
 func TestMutationsAreAuditedAndSecretsRedacted(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
-	s := &State{Users: []User{{Name: "alice", Enabled: true, Nodes: []Node{{Name: "ATT", AuthUser: "alice", UUID: "11111111-1111-4111-8111-111111111111"}}}}}
+	s := &State{Users: []User{{Name: "alice", Enabled: true, Nodes: []Node{{Name: "Relay A", AuthUser: "alice", UUID: "11111111-1111-4111-8111-111111111111"}}}}}
 	if err := saveState(statePath, s); err != nil {
 		t.Fatal(err)
 	}

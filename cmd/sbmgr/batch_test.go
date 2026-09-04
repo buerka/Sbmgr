@@ -52,7 +52,7 @@ func TestApplyBatchUserSettingsChangesEverySelectedUserAndPreservesOtherFields(t
 func TestApplyBatchNodeRatesTargetsNamedLineAcrossUsers(t *testing.T) {
 	s := batchTestState()
 	upload, download := 100.0, 300.0
-	op := batchOperation{Kind: batchNodeRates, Users: []string{"alice", "bob"}, Node: batchNodeRatesPatch{NodeName: "LAX", UploadMbps: &upload, DownloadMbps: &download}}
+	op := batchOperation{Kind: batchNodeRates, Users: []string{"alice", "bob"}, Node: batchNodeRatesPatch{NodeName: "Node A", UploadMbps: &upload, DownloadMbps: &download}}
 	updated, result, err := applyBatchOperation(s, op, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestApplyBatchNodeRatesTargetsNamedLineAcrossUsers(t *testing.T) {
 	}
 	for _, name := range []string{"alice", "bob"} {
 		u := findUser(updated, name)
-		lax, err := findUserNode(u, defaultDeviceName, "LAX")
+		nodeA, err := findUserNode(u, defaultDeviceName, "Node A")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,8 +70,8 @@ func TestApplyBatchNodeRatesTargetsNamedLineAcrossUsers(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if lax.UploadMbps != upload || lax.DownloadMbps != download || !validRateMark(lax.RateMark) {
-			t.Fatalf("LAX rate not updated for %s: %#v", name, *lax)
+		if nodeA.UploadMbps != upload || nodeA.DownloadMbps != download || !validRateMark(nodeA.RateMark) {
+			t.Fatalf("Node A rate not updated for %s: %#v", name, *nodeA)
 		}
 		if via.UploadMbps != 25 || via.DownloadMbps != 25 {
 			t.Fatalf("non-target Via rate changed for %s: %#v", name, *via)
@@ -88,16 +88,16 @@ func TestBatchNodeRateMigratesLegacyFallbackWithoutChangingOtherLines(t *testing
 		u.Nodes[index].UploadMbps, u.Nodes[index].DownloadMbps, u.Nodes[index].RateMark = 0, 0, 0
 	}
 	unlimited := 0.0
-	op := batchOperation{Kind: batchNodeRates, Users: []string{"alice"}, Node: batchNodeRatesPatch{NodeName: "LAX", UploadMbps: &unlimited, DownloadMbps: &unlimited}}
+	op := batchOperation{Kind: batchNodeRates, Users: []string{"alice"}, Node: batchNodeRatesPatch{NodeName: "Node A", UploadMbps: &unlimited, DownloadMbps: &unlimited}}
 	updated, _, err := applyBatchOperation(s, op, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	u = findUser(updated, "alice")
-	lax, _ := findUserNode(u, defaultDeviceName, "LAX")
+	nodeA, _ := findUserNode(u, defaultDeviceName, "Node A")
 	via, _ := findUserNode(u, defaultDeviceName, "Via")
-	if u.UploadMbps != 0 || u.DownloadMbps != 0 || lax.UploadMbps != 0 || lax.DownloadMbps != 0 {
-		t.Fatalf("selected legacy line was not made unlimited: user=%#v node=%#v", *u, *lax)
+	if u.UploadMbps != 0 || u.DownloadMbps != 0 || nodeA.UploadMbps != 0 || nodeA.DownloadMbps != 0 {
+		t.Fatalf("selected legacy line was not made unlimited: user=%#v node=%#v", *u, *nodeA)
 	}
 	if via.UploadMbps != 10 || via.DownloadMbps != 20 || !validRateMark(via.RateMark) {
 		t.Fatalf("untouched legacy line lost its effective rate: %#v", *via)
@@ -177,7 +177,7 @@ func TestBatchOperationIsAtomicWhenOneUserFails(t *testing.T) {
 	findUser(s, "bob").Nodes = findUser(s, "bob").Nodes[1:]
 	before, _ := json.Marshal(s)
 	upload := 100.0
-	op := batchOperation{Kind: batchNodeRates, Users: []string{"alice", "bob"}, Node: batchNodeRatesPatch{NodeName: "LAX", UploadMbps: &upload}}
+	op := batchOperation{Kind: batchNodeRates, Users: []string{"alice", "bob"}, Node: batchNodeRatesPatch{NodeName: "Node A", UploadMbps: &upload}}
 	updated, _, err := applyBatchOperation(s, op, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "批量修改已取消") {
 		t.Fatalf("expected atomic cancellation, got state=%#v err=%v", updated, err)
@@ -375,7 +375,7 @@ func batchTestState() *State {
 			IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "auto", MaxIPs: 1, BoundIPs: []string{ips[index]}},
 			Devices:  []Device{{Name: defaultDeviceName, Enabled: true, SubscriptionToken: strings.Repeat(string(rune('a'+index)), 32), CreatedAt: "2026-08-01T00:00:00Z"}},
 			Nodes: []Node{
-				{Name: "LAX", Device: defaultDeviceName, AuthUser: name + "-lax", UUID: name + "-lax-uuid"},
+				{Name: "Node A", Device: defaultDeviceName, AuthUser: name + "-node-a", UUID: name + "-node-a-uuid"},
 				{Name: "Via", Device: defaultDeviceName, AuthUser: name + "-via", UUID: name + "-via-uuid", UploadMbps: 25, DownloadMbps: 25},
 			},
 		})

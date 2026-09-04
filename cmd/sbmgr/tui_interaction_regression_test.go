@@ -134,12 +134,12 @@ func TestDangerousConfirmationRequiresYBeforeStartingAction(t *testing.T) {
 func TestEndpointPageShowsRowsAndOpensSelectedEditor(t *testing.T) {
 	_, state := writeOutboundEndpointFixture(t, outboundEndpointFixture)
 	state.Client = ClientSettings{Server: "198.51.100.10", Port: 443}
-	state.Users = []User{{Name: "alice", Nodes: []Node{{Outbound: "to-att"}}}}
+	state.Users = []User{{Name: "alice", Nodes: []Node{{Outbound: "to-relay-a"}}}}
 	m := tuiModel{state: state, width: 100, height: 24, mode: tuiHealth, healthCursor: 0}
 
 	rendered := m.renderHealth()
 	for _, want := range []string{
-		"中转入口", "198.51.100.10:443", "出站与端点", "to-att", "192.0.2.10:443",
+		"中转入口", "198.51.100.10:443", "出站与端点", "to-relay-a", "192.0.2.10:443",
 		"↑↓ 选择", "enter 对象操作", "e 常用字段", "a 新增", "s 健康/通知",
 	} {
 		if !strings.Contains(rendered, want) {
@@ -172,13 +172,13 @@ func TestEndpointPageShowsRowsAndOpensSelectedEditor(t *testing.T) {
 		return -1
 	}
 	selectedOutbound := m
-	selectedOutbound.healthCursor = indexFor("to-att")
+	selectedOutbound.healthCursor = indexFor("to-relay-a")
 	model, cmd = selectedOutbound.updateHealth(tuiRegressionKey(tea.KeyEnter))
 	if cmd != nil {
 		t.Fatal("opening outbound action menu unexpectedly returned a command")
 	}
 	menu := model.(tuiModel)
-	if menu.mode != tuiProxyMenu || menu.proxyTag != "to-att" || menu.proxyKind != ManagedProxyOutbound {
+	if menu.mode != tuiProxyMenu || menu.proxyTag != "to-relay-a" || menu.proxyKind != ManagedProxyOutbound {
 		t.Fatalf("outbound row opened mode=%v kind=%v tag=%q", menu.mode, menu.proxyKind, menu.proxyTag)
 	}
 	model, cmd = selectedOutbound.updateHealth(tuiRegressionKey('e'))
@@ -186,16 +186,16 @@ func TestEndpointPageShowsRowsAndOpensSelectedEditor(t *testing.T) {
 		t.Fatal("opening common outbound form unexpectedly returned a command")
 	}
 	outboundForm := model.(tuiModel)
-	if outboundForm.mode != tuiFormMode || outboundForm.form.kind != formOutboundEndpoint || outboundForm.form.endpointTag != "to-att" {
+	if outboundForm.mode != tuiFormMode || outboundForm.form.kind != formOutboundEndpoint || outboundForm.form.endpointTag != "to-relay-a" {
 		t.Fatalf("outbound row opened mode=%v form=%v tag=%q", outboundForm.mode, outboundForm.form.kind, outboundForm.form.endpointTag)
 	}
 	if len(outboundForm.form.fields) != 3 || outboundForm.form.fields[0].value != "192.0.2.10" || outboundForm.form.fields[1].value != "443" || outboundForm.form.fields[2].label != "新密码" || !outboundForm.form.fields[2].secret || outboundForm.form.fields[2].value != "" {
 		t.Fatalf("outbound endpoint form values = %#v", outboundForm.form.fields)
 	}
 
-	frontier := m
-	frontier.healthCursor = indexFor("to-frontier")
-	model, cmd = frontier.updateHealth(tuiRegressionKey('e'))
+	relayB := m
+	relayB.healthCursor = indexFor("to-relay-b")
+	model, cmd = relayB.updateHealth(tuiRegressionKey('e'))
 	if cmd != nil {
 		t.Fatal("opening SOCKS endpoint form unexpectedly returned a command")
 	}
@@ -213,7 +213,7 @@ func TestSOCKSEndpointCredentialsStayMaskedThroughConfirmation(t *testing.T) {
 	}
 	var endpoint OutboundEndpointSummary
 	for _, candidate := range endpoints {
-		if candidate.Tag == "to-frontier" {
+		if candidate.Tag == "to-relay-b" {
 			endpoint = candidate
 			break
 		}
@@ -270,12 +270,12 @@ func TestWideEndpointRowsNeverWrapStatusToRightEdge(t *testing.T) {
 	_, state := writeOutboundEndpointFixture(t, outboundEndpointFixture)
 	state.Client = ClientSettings{Server: "198.51.100.10", Port: 443}
 	state.OutboundHealth = map[string]OutboundHealth{
-		"to-att": {
-			Tag: "to-att", Target: "192.0.2.10:443", Healthy: true,
+		"to-relay-a": {
+			Tag: "to-relay-a", Target: "192.0.2.10:443", Healthy: true,
 			LatencyMS: 8, CheckedAt: "2026-08-25T22:33:16+08:00",
 		},
-		"to-frontier": {
-			Tag: "to-frontier", Target: "frontier.example.com:8443", Healthy: false,
+		"to-relay-b": {
+			Tag: "to-relay-b", Target: "relay-b.example:8443", Healthy: false,
 			Failures: 522, CheckedAt: "2026-08-25T22:33:16+08:00", Error: "connection refused",
 		},
 	}
@@ -289,7 +289,7 @@ func TestWideEndpointRowsNeverWrapStatusToRightEdge(t *testing.T) {
 				if got := lipgloss.Width(line); got > width {
 					t.Errorf("line %d width = %d, want <= %d: %q", index+1, got, width, line)
 				}
-				if strings.Contains(line, "to-att") && strings.Contains(line, "192.0.2.10:443") {
+				if strings.Contains(line, "to-relay-a") && strings.Contains(line, "192.0.2.10:443") {
 					healthyRow = line
 				}
 			}

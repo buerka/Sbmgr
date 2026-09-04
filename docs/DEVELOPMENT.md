@@ -23,12 +23,12 @@ go build -o sbmgr ./cmd/sbmgr
 
 ## Git 版本模型
 
-软件历史只存在于 Git。正式版本使用 `vX.Y.Z` 注释 tag，例如：
+软件历史只存在于 Git。正式版本使用 `vX.Y.Z` 注释 tag：
 
 ```bash
 git status --short
 go test ./...
-git tag -a v0.22.0 -m "sbmgr v0.22.0"
+git tag -a vX.Y.Z -m "sbmgr vX.Y.Z"
 ./deploy/build-linux.sh
 ```
 
@@ -41,7 +41,7 @@ git tag -a v0.22.0 -m "sbmgr v0.22.0"
 1. 修改结构并递增 `stateVersion`。
 2. 修改表结构时递增独立的 SQLite schema 版本并编写事务迁移；业务模型版本与数据库 schema 版本不能混用。
 3. 在迁移逻辑中为旧数据设置兼容默认值，并增加从旧 `state.json` 无损导入、重复迁移幂等、损坏输入不留半成品的测试。
-4. 高频统计应使用结构化表、稳定主键和增量 UPSERT；不要在每个后台周期清空并重插全部历史。
+4. 高频统计使用结构化表、稳定主键和增量 UPSERT；后台周期不得清空并重插全部历史。
 5. 确认提交使用 SQLite 事务，数据库和 sidecar 权限为 `0600`，CUI 与 daemon 共用状态锁，备份通过 `integrity_check`。
 6. 用生产数据的脱敏副本验证时，不得把副本放入仓库或测试夹具。
 
@@ -55,7 +55,7 @@ git tag -a v0.22.0 -m "sbmgr v0.22.0"
 6. 部署后检查 `sbmgr version`、`systemctl is-active sbmgr sing-box`、443 入站和 HTTPS 订阅。
 7. 部署成功后确认临时旧二进制已经删除；状态与配置备份仍然存在。
 
-软件需要回退时，从 Git 检出目标 tag，重新构建并走同一套外部部署流程。不要把旧二进制长期堆放在服务器，也不要让运行程序替换自身。
+软件回退时，从 Git 检出目标 tag，重新构建并执行同一套外部部署流程。旧二进制只在部署事务中临时存在，运行程序不替换自身。
 
 部署脚本默认从自身所在 `deploy/` 的父目录推导 `<SBMGR_HOME>`；也可以使用 `SBMGR_HOME` 或 `--home` 显式指定安全的绝对目录。候选程序放在 `<SBMGR_HOME>/.sbmgr-release.candidate`，并要求显式传入 SHA256 或服务器上的校验文件路径。例如：
 
@@ -68,12 +68,13 @@ git tag -a v0.22.0 -m "sbmgr v0.22.0"
 
 ## 敏感信息检查
 
-提交前至少检查：
+提交前运行仓库隐私检查，并审阅暂存内容：
 
 ```bash
+python3 ./scripts/check_public_tree.py
 git status --short
 git diff --cached --stat
 git diff --cached
 ```
 
-不要使用 `git add .` 盲目暂存。应明确加入源码、测试、文档和工程脚本，并确认真实 YAML/JSON、密钥、证书、token、日志、导出、备份与 `.dist/` 未进入索引。
+暂存范围应明确限定为源码、测试、文档和工程脚本。真实 YAML/JSON、密钥、证书、token、日志、导出、备份与构建目录属于部署资料。

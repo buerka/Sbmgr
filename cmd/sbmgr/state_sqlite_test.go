@@ -27,11 +27,11 @@ func sqliteFixtureState(sampleCount int) *State {
 		InboundTag:        "vless-in",
 		SingBoxBin:        "sing-box",
 		Service:           "sing-box",
-		Counters:          map[string]int64{"user>>>alice:lax>>>traffic>>>uplink": 101},
+		Counters:          map[string]int64{"user>>>alice:node-a>>>traffic>>>uplink": 101},
 		JournalCursor:     "cursor-1",
-		PendingSources:    map[string]PendingSource{"alice:lax": {IP: "203.0.113.10", At: now.Format(time.RFC3339Nano)}},
+		PendingSources:    map[string]PendingSource{"alice:node-a": {IP: "203.0.113.10", At: now.Format(time.RFC3339Nano)}},
 		IPApplyPending:    true,
-		ActiveConnections: map[string]ActiveConnection{"c1": {ID: "c1", User: "alice", Device: "phone", Node: "LAX", AuthUser: "alice:lax", SourceIP: "203.0.113.10", Target: "example.com:443", StartedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339)}},
+		ActiveConnections: map[string]ActiveConnection{"c1": {ID: "c1", User: "alice", Device: "phone", Node: "Node A", AuthUser: "alice:node-a", SourceIP: "203.0.113.10", Target: "example.com:443", StartedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339)}},
 		OutboundHealth:    map[string]OutboundHealth{"direct": {Tag: "direct", Target: "127.0.0.1:443", Healthy: true, LatencyMS: 2, CheckedAt: now.Format(time.RFC3339)}},
 		LastHealthCheck:   now.Format(time.RFC3339),
 		Alerts:            []Alert{{At: now.Format(time.RFC3339Nano), User: "alice", Kind: "quota", Message: "test", Acknowledged: true}},
@@ -46,16 +46,16 @@ func sqliteFixtureState(sampleCount int) *State {
 			CurrentUploadMbps:   1.25,
 			CurrentDownloadMbps: 2.5,
 			SourceIPs: map[string]SourceIPStat{
-				"203.0.113.10": {Count: 4, FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), LastNode: "LAX"},
+				"203.0.113.10": {Count: 4, FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), LastNode: "Node A"},
 			},
 			TrafficSamples: samples,
 			UsageHistory:   []UsagePoint{{At: now.Format(time.RFC3339Nano), UploadBytes: 100, DownloadBytes: 200, UploadMbps: 1.25, DownloadMbps: 2.5}},
 			BillingHistory: []BillingRecord{{StartedAt: now.AddDate(0, -1, 0).Format(time.RFC3339), EndedAt: now.Format(time.RFC3339), UploadBytes: 90, DownloadBytes: 180, QuotaBytes: 20 << 30}},
-			RecentAccesses: []RecentAccess{{Target: "example.com", Device: "phone", Node: "LAX", FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), Count: 3}},
+			RecentAccesses: []RecentAccess{{Target: "example.com", Device: "phone", Node: "Node A", FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), Count: 3}},
 			Devices: []Device{{Name: "phone", Enabled: true, CreatedAt: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), SubscriptionToken: strings.Repeat("a", 32), SourceIPs: map[string]SourceIPStat{
-				"203.0.113.10": {Count: 4, FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), LastNode: "LAX"},
+				"203.0.113.10": {Count: 4, FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), LastNode: "Node A"},
 			}}},
-			Nodes: []Node{{Name: "LAX", Device: "phone", AuthUser: "alice:lax", UUID: "11111111-1111-4111-8111-111111111111", Outbound: "direct", RateMark: rateMarkPrefix | 1, Upload: 100, Download: 200, Destinations: map[string]AccessStat{
+			Nodes: []Node{{Name: "Node A", Device: "phone", AuthUser: "alice:node-a", UUID: "11111111-1111-4111-8111-111111111111", Outbound: "direct", RateMark: rateMarkPrefix | 1, Upload: 100, Download: 200, Destinations: map[string]AccessStat{
 				"example.com": {Count: 3, LastSeen: now.Format(time.RFC3339)},
 			}}},
 		}},
@@ -562,7 +562,7 @@ func TestSQLiteRecentAccessReorderingRoundTrips(t *testing.T) {
 	if err := saveState(path, state); err != nil {
 		t.Fatal(err)
 	}
-	newer := RecentAccess{Target: "new.example", Device: "phone", Node: "LAX", FirstSeen: "2026-09-04T02:00:00Z", LastSeen: "2026-09-04T02:00:00Z", Count: 1}
+	newer := RecentAccess{Target: "new.example", Device: "phone", Node: "Node A", FirstSeen: "2026-09-04T02:00:00Z", LastSeen: "2026-09-04T02:00:00Z", Count: 1}
 	state.Users[0].RecentAccesses = []RecentAccess{newer, older}
 	if err := saveState(path, state); err != nil {
 		t.Fatal(err)
@@ -589,7 +589,7 @@ func TestSQLiteRestoreAllowsReusedNodeCredentials(t *testing.T) {
 	}
 	bob := sqliteFixtureState(0)
 	bob.Users[0].Name = "bob"
-	bob.Users[0].Nodes[0].AuthUser = "bob:lax"
+	bob.Users[0].Nodes[0].AuthUser = "bob:node-a"
 	// UUID is deliberately reused after alice has been removed.
 	if err := saveState(path, &State{Version: stateVersion}); err != nil {
 		t.Fatal(err)

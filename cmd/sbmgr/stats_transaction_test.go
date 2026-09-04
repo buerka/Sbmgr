@@ -62,8 +62,8 @@ func statsTransactionState(api string, quota int64) *State {
 			Enabled:    true,
 			QuotaBytes: quota,
 			Nodes: []Node{{
-				Name:     "ATT",
-				AuthUser: "alice:att",
+				Name:     "Relay A",
+				AuthUser: "alice:relay-a",
 				UUID:     "11111111-1111-4111-8111-111111111111",
 			}},
 		}},
@@ -73,8 +73,8 @@ func statsTransactionState(api string, quota int64) *State {
 func TestMergeUserStatsUsesCallerStateAndCounterBaseline(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	s := statsTransactionState("", 1_000)
-	s.Counters = map[string]int64{"user>>>alice:att>>>traffic>>>uplink": 30}
-	item := &stat{Name: "user>>>alice:att>>>traffic>>>uplink", Value: 42}
+	s.Counters = map[string]int64{"user>>>alice:relay-a>>>traffic>>>uplink": 30}
+	item := &stat{Name: "user>>>alice:relay-a>>>traffic>>>uplink", Value: 42}
 
 	result := mergeUserStats(s, []*stat{item}, now, 5*time.Second)
 	if result.Added != 12 || !result.Changed || result.EligibilityChanged {
@@ -101,9 +101,9 @@ func TestMergeUserStatsReportsOnlyEligibilityTransition(t *testing.T) {
 	s := statsTransactionState("", 100)
 	s.Users[0].Upload = 90
 	s.Users[0].Nodes[0].Upload = 90
-	s.Counters = map[string]int64{"user>>>alice:att>>>traffic>>>uplink": 90}
+	s.Counters = map[string]int64{"user>>>alice:relay-a>>>traffic>>>uplink": 90}
 
-	result := mergeUserStats(s, []*stat{{Name: "user>>>alice:att>>>traffic>>>uplink", Value: 100}}, now, time.Minute)
+	result := mergeUserStats(s, []*stat{{Name: "user>>>alice:relay-a>>>traffic>>>uplink", Value: 100}}, now, time.Minute)
 	if result.Added != 10 || !result.Changed || !result.EligibilityChanged {
 		t.Fatalf("quota transition result = %#v", result)
 	}
@@ -116,7 +116,7 @@ func TestMergeUserStatsReportsOnlyEligibilityTransition(t *testing.T) {
 }
 
 func TestSyncApplyDoesNotReloadForOrdinaryStats(t *testing.T) {
-	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:att>>>traffic>>>uplink", Value: 42})
+	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:relay-a>>>traffic>>>uplink", Value: 42})
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	// BaseConfig and ConfigPath are intentionally empty. Any accidental apply
 	// for this ordinary traffic sample would fail while rendering the config.
@@ -137,7 +137,7 @@ func TestSyncApplyDoesNotReloadForOrdinaryStats(t *testing.T) {
 }
 
 func TestSyncApplyFailureKeepsEligibilityPendingAndUsage(t *testing.T) {
-	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:att>>>traffic>>>uplink", Value: 42})
+	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:relay-a>>>traffic>>>uplink", Value: 42})
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	if err := saveState(statePath, statsTransactionState(api, 40)); err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestSyncApplyFailureKeepsEligibilityPendingAndUsage(t *testing.T) {
 }
 
 func TestRealtimeCycleStatsAPIPersistsWithoutDoubleChargingOrOrdinaryApply(t *testing.T) {
-	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:att>>>traffic>>>uplink", Value: 42})
+	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:relay-a>>>traffic>>>uplink", Value: 42})
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	// An empty base config makes any accidental full apply fail. Ordinary
 	// five-second counter samples must only persist their new baseline.
@@ -190,7 +190,7 @@ func TestRealtimeCycleStatsAPIPersistsWithoutDoubleChargingOrOrdinaryApply(t *te
 }
 
 func TestRealtimeStatsApplyFailureKeepsEligibilityPendingAndCounterBaseline(t *testing.T) {
-	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:att>>>traffic>>>uplink", Value: 42})
+	api := startStaticStatsServer(t, &stat{Name: "user>>>alice:relay-a>>>traffic>>>uplink", Value: 42})
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	if err := saveState(statePath, statsTransactionState(api, 40)); err != nil {
 		t.Fatal(err)

@@ -53,7 +53,7 @@ func TestSubscriptionOverviewFits64x18AndShowsOperationalFields(t *testing.T) {
 		users[index] = User{
 			Name: "user-" + string(rune('a'+index)), Enabled: true, QuotaBytes: 20 << 30, QuotaMode: quotaModeDownload, Expires: "2026-12-31",
 			Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat(string(rune('a'+index)), 32)}},
-			Nodes:   []Node{{Name: "LAX", Device: "phone", Upload: 1 << 20, Download: 2 << 20}},
+			Nodes:   []Node{{Name: "Node A", Device: "phone", Upload: 1 << 20, Download: 2 << 20}},
 		}
 	}
 	m := tuiModel{state: &State{Subscription: SubscriptionSettings{Enabled: true, Listen: "127.0.0.1:18080"}, Users: users}, mode: tuiSubscriptions, width: 64, height: 18, checkedUsers: map[string]bool{}}
@@ -77,9 +77,9 @@ func TestSubscriptionOverviewFits64x18AndShowsOperationalFields(t *testing.T) {
 func TestSubscriptionOverviewUsesRuntimeAvailabilityReasons(t *testing.T) {
 	now := time.Now()
 	state := &State{Subscription: SubscriptionSettings{Enabled: true, Listen: "127.0.0.1:18080"}, Users: []User{
-		{Name: "available", Enabled: true, Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("a", 32)}}, Nodes: []Node{{Name: "LAX", Device: "phone"}}},
-		{Name: "quota", Enabled: true, Upload: 10, QuotaBytes: 10, Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("b", 32)}}, Nodes: []Node{{Name: "LAX", Device: "phone"}}},
-		{Name: "blocked", Enabled: true, BlockedUntil: now.Add(time.Hour).Format(time.RFC3339Nano), Burst: BurstPolicy{Enabled: true, Action: burstActionHard}, Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("c", 32)}}, Nodes: []Node{{Name: "LAX", Device: "phone"}}},
+		{Name: "available", Enabled: true, Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("a", 32)}}, Nodes: []Node{{Name: "Node A", Device: "phone"}}},
+		{Name: "quota", Enabled: true, Upload: 10, QuotaBytes: 10, Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("b", 32)}}, Nodes: []Node{{Name: "Node A", Device: "phone"}}},
+		{Name: "blocked", Enabled: true, BlockedUntil: now.Add(time.Hour).Format(time.RFC3339Nano), Burst: BurstPolicy{Enabled: true, Action: burstActionHard}, Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("c", 32)}}, Nodes: []Node{{Name: "Node A", Device: "phone"}}},
 		{Name: "empty", Enabled: true, Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("d", 32)}}},
 	}}
 	m := tuiModel{state: state, mode: tuiSubscriptions, width: 140, height: 60, checkedUsers: map[string]bool{}}
@@ -127,7 +127,7 @@ func qrTUITestState() *State {
 	return &State{Subscription: SubscriptionSettings{Enabled: true, Listen: "127.0.0.1:18080"}, Users: []User{{
 		Name: "alice", Enabled: true,
 		Devices: []Device{{Name: "phone", Enabled: true, SubscriptionToken: strings.Repeat("a", 32)}},
-		Nodes:   []Node{{Name: "LAX", Device: "phone"}},
+		Nodes:   []Node{{Name: "Node A", Device: "phone"}},
 	}}}
 }
 

@@ -1,20 +1,20 @@
 # AGENTS.md
 
-本文件供 Codex、Claude Code、GitHub Copilot 等编码代理以及人工维护者共同使用。它描述的是仓库约束，不是服务器运行配置。
+本文件定义自动化编码工具和维护者共同遵循的仓库约束。内容不构成部署配置。
 
 ## 开始之前
 
 1. 阅读 `README.md`、`docs/ARCHITECTURE.md` 和 `docs/DEVELOPMENT.md`。
 2. 先运行 `go test ./...`，修改后再次运行；Go 文件必须通过 `gofmt`。
-3. 保留用户已有改动。不要用 `git reset --hard`、`git checkout --` 或批量删除清理工作树。
+3. 保留工作树中的既有改动；清理操作应限定到当前任务生成的文件。
 
 ## 不可越过的边界
 
-- Git 只管理源码、测试、文档、CI、构建和部署脚本。不得提交 `state.db`、旧版 `state.json`、`state.json.migrated`、SQLite sidecar、真实 sing-box/Mihomo 配置、节点 YAML、UUID、订阅 token、密码、私钥、证书、导出、日志、备份或编译产物。
-- sbmgr 不负责管理自身版本。不要重新加入自更新、二进制下载、历史二进制列表或 CUI 内的软件回滚。`sbmgr version` 仅用于显示 Git 构建标识。
+- Git 只管理源码、测试、文档、CI、构建和部署脚本。`state.db`、旧版 `state.json`、`state.json.migrated`、SQLite sidecar、真实 sing-box/Mihomo 配置、节点 YAML、UUID、订阅 token、密码、私钥、证书、导出、日志、备份和编译产物属于部署资料。
+- sbmgr 不负责管理自身版本。自更新、二进制下载、历史二进制列表和 CUI 内的软件回滚不属于应用职责；`sbmgr version` 仅显示 Git 构建标识。
 - 程序允许管理和恢复业务状态与配置。状态备份、基础模板备份、运行配置备份和应用失败回滚必须保留。
-- 不要让新的受管用户接管基础配置中的旧凭据；只有明确导入或由 sbmgr 创建的身份才可进入受管集合。
-- 不在界面、日志、审计、错误或测试快照中回显密码、UUID、token、私钥及完整代理 JSON。
+- 新的受管用户不得接管基础配置中的既有凭据；只有明确导入或由 sbmgr 创建的身份可进入受管集合。
+- 界面、日志、审计、错误和测试快照不得回显密码、UUID、token、私钥及完整代理 JSON。
 
 ## 状态与事务
 
@@ -43,11 +43,11 @@ go vet ./...
 go test ./...
 ```
 
-涉及 Linux 限速、systemd、部署或证书时，还要做 Linux 构建和脚本语法检查；只有用户明确授权后才可连接测试服务器或改变远端状态。部署前后验证 sbmgr、sing-box、订阅 HTTPS 和 443 入站，不以“进程启动”代替端到端检查。
+涉及 Linux 限速、systemd、部署或证书时，还需要 Linux 构建和脚本语法检查。远端集成测试默认禁用，仅在目标环境和操作范围获得显式授权后执行。部署前后验证 sbmgr、sing-box、订阅 HTTPS 和代理入站，不以进程状态代替端到端检查。
 
 ## 发布
 
-- 发布版本来自 Git tag，由 `deploy/build-linux.sh` 注入。不要手改代码来维护版本历史。
+- 发布版本来自 Git tag，由 `deploy/build-linux.sh` 注入；版本历史不得通过手工修改代码维护。
 - 外部部署可以在一次事务内临时保留旧二进制以便失败恢复，但部署成功必须删除临时副本。
 - 发布前持久保存状态与配置备份；这些备份不进入 Git，也不与历史二进制绑定。
 - 任何包含真实服务器地址、凭据或状态的文件在 `git add` 前都要重新检查，即使 `.gitignore` 已覆盖。

@@ -166,7 +166,7 @@ func TestProxyAdminCredentialsPreserveAddressAndRedactValues(t *testing.T) {
   "inbounds":[{"type":"vless","tag":"vless-in","users":[]}],
   "outbounds":[
     {"type":"direct","tag":"direct"},
-    {"type":"socks","tag":"to-frontier","server":"existing.example","server_port":41080,"username":"old-user","password":"old-password"}
+    {"type":"socks","tag":"to-relay-b","server":"existing.example","server_port":41080,"username":"old-user","password":"old-password"}
   ],
   "route":{"final":"direct","rules":[]}
 }`
@@ -177,7 +177,7 @@ func TestProxyAdminCredentialsPreserveAddressAndRedactValues(t *testing.T) {
 	patchPath := writeProxyAdminInput(t, directory, "credentials.json", `{"username":"`+username+`","password":"`+password+`"}`)
 	var output, stderr bytes.Buffer
 	application := &app{statePath: statePath, out: &output, err: &stderr}
-	if err := application.proxyAdminCmd([]string{"credentials", "to-frontier", "--file", patchPath}); err != nil {
+	if err := application.proxyAdminCmd([]string{"credentials", "to-relay-b", "--file", patchPath}); err != nil {
 		t.Fatal(err)
 	}
 	base, err := os.ReadFile(basePath)
@@ -200,7 +200,7 @@ func TestProxyAdminCredentialsPreserveAddressAndRedactValues(t *testing.T) {
 			t.Fatalf("credential operation leaked %q: %s", forbidden, visible)
 		}
 	}
-	for _, safe := range []string{"to-frontier", "username-change", "password-change", "replace"} {
+	for _, safe := range []string{"to-relay-b", "username-change", "password-change", "replace"} {
 		if !strings.Contains(visible, safe) {
 			t.Fatalf("safe credential metadata %q missing: %s", safe, visible)
 		}

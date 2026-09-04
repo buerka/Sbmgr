@@ -22,9 +22,9 @@ func TestCloneUserTemplateCopiesConfigurationWithFreshCredentials(t *testing.T) 
 		Access:         AccessPolicy{BlockedDomains: []string{"tracker.test"}, MaxConnections: 5, ConnectionAction: "alert", LastConnectionAlert: now.Format(time.RFC3339Nano)},
 		Billing:        BillingPolicy{Enabled: true, CycleDay: 5, TimeZone: "Asia/Shanghai", LastReset: now.Add(-24 * time.Hour).Format(time.RFC3339), NextReset: now.Add(24 * time.Hour).Format(time.RFC3339)},
 		SourceIPs:      map[string]SourceIPStat{"203.0.113.10": {Count: 10}},
-		RecentAccesses: []RecentAccess{{Target: "example.com", Device: "phone", Node: "LAX", FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), Count: 8}},
+		RecentAccesses: []RecentAccess{{Target: "example.com", Device: "phone", Node: "Node A", FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), Count: 8}},
 		Devices:        []Device{{Name: "phone", Enabled: true, CreatedAt: now.Add(-time.Hour).Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), SubscriptionToken: strings.Repeat("a", 32), SourceIPs: map[string]SourceIPStat{"203.0.113.10": {Count: 10}}, Access: AccessPolicy{BlockedPorts: []int{25}, LastConnectionAlert: now.Format(time.RFC3339Nano)}, IPPolicy: IPPolicy{Enabled: true, Mode: "monitor", Binding: "manual", MaxIPs: 1, BoundIPs: []string{"203.0.113.10"}, TemporaryIPs: []string{"198.51.100.20"}, TemporaryUntil: now.Add(time.Hour).Format(time.RFC3339Nano)}}},
-		Nodes:          []Node{{Name: "LAX", Device: "phone", AuthUser: "source-phone-lax", UUID: "11111111-1111-4111-8111-111111111111", Outbound: "direct", UploadMbps: 100, DownloadMbps: 300, Upload: 99, Download: 100, Destinations: map[string]AccessStat{"example.com": {Count: 8, LastSeen: now.Format(time.RFC3339)}}}},
+		Nodes:          []Node{{Name: "Node A", Device: "phone", AuthUser: "source-phone-node-a", UUID: "11111111-1111-4111-8111-111111111111", Outbound: "direct", UploadMbps: 100, DownloadMbps: 300, Upload: 99, Download: 100, Destinations: map[string]AccessStat{"example.com": {Count: 8, LastSeen: now.Format(time.RFC3339)}}}},
 	}}}
 	if err := saveState(statePath, s); err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestCloneUserTemplateCopiesConfigurationWithFreshCredentials(t *testing.T) 
 
 func TestCloneUserFormCreatesFromSelectedTemplate(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
-	s := &State{Version: stateVersion, Users: []User{{Name: "source", Enabled: true, Devices: []Device{{Name: defaultDeviceName, Enabled: true}}, Nodes: []Node{{Name: "LAX", Device: defaultDeviceName, AuthUser: "source", UUID: "11111111-1111-4111-8111-111111111111"}}}}}
+	s := &State{Version: stateVersion, Users: []User{{Name: "source", Enabled: true, Devices: []Device{{Name: defaultDeviceName, Enabled: true}}, Nodes: []Node{{Name: "Node A", Device: defaultDeviceName, AuthUser: "source", UUID: "11111111-1111-4111-8111-111111111111"}}}}}
 	if err := saveState(statePath, s); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestCloneTemplateClearsLearnedAutomaticIPButKeepsManualIP(t *testing.T) {
 		Name:     "source",
 		IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "dynamic", MaxIPs: 1, BoundIPs: []string{"203.0.113.10"}},
 		Devices:  []Device{{Name: "phone", Enabled: true, IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "manual", MaxIPs: 1, BoundIPs: []string{"198.51.100.20"}}}},
-		Nodes:    []Node{{Name: "LAX", Device: "phone", AuthUser: "source", UUID: "11111111-1111-4111-8111-111111111111"}},
+		Nodes:    []Node{{Name: "Node A", Device: "phone", AuthUser: "source", UUID: "11111111-1111-4111-8111-111111111111"}},
 	}}}
 	cloned, err := cloneUserFromTemplate(s, "source", "new-user", time.Now())
 	if err != nil {

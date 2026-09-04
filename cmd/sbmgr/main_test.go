@@ -22,12 +22,12 @@ import (
 const sampleConfig = `{
   "inbounds": [{
     "type": "vless", "tag": "vless-in", "listen_port": 443,
-    "users": [{"name":"LAX","uuid":"11111111-1111-4111-8111-111111111111"}],
-    "tls": {"server_name":"www.cloudflare.com","reality":{"short_id":["abcd1234"]}}
+    "users": [{"name":"Node A","uuid":"11111111-1111-4111-8111-111111111111"}],
+    "tls": {"server_name":"tls.example","reality":{"short_id":["abcd1234"]}}
   }],
-  "outbounds": [{"type":"direct","tag":"direct"},{"type":"shadowsocks","tag":"to-att"}],
+  "outbounds": [{"type":"direct","tag":"direct"},{"type":"shadowsocks","tag":"to-relay-a"}],
   "route": {"rules":[
-    {"auth_user":["LAX"],"action":"route","outbound":"to-att"},
+    {"auth_user":["Node A"],"action":"route","outbound":"to-relay-a"},
     {"ip_is_private":true,"action":"route","outbound":"direct"}
   ],"final":"direct"}
 }`
@@ -41,7 +41,7 @@ func TestImportAndRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Users) != 1 || s.Users[0].Nodes[0].Outbound != "to-att" {
+	if len(s.Users) != 1 || s.Users[0].Nodes[0].Outbound != "to-relay-a" {
 		t.Fatalf("bad import: %#v", s.Users)
 	}
 	dir := t.TempDir()
@@ -50,13 +50,13 @@ func TestImportAndRender(t *testing.T) {
 	if err := os.WriteFile(s.BaseConfig, b, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s.Users = append(s.Users, User{Name: "alice", Enabled: true, Nodes: []Node{{Name: "ATT", AuthUser: "alice:att", UUID: "22222222-2222-4222-8222-222222222222", Outbound: "to-att"}}})
+	s.Users = append(s.Users, User{Name: "alice", Enabled: true, Nodes: []Node{{Name: "Relay A", AuthUser: "alice:relay-a", UUID: "22222222-2222-4222-8222-222222222222", Outbound: "to-relay-a"}}})
 	out, err := renderConfig(s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(out)
-	if !strings.Contains(text, "alice:att") {
+	if !strings.Contains(text, "alice:relay-a") {
 		t.Fatal("managed user missing")
 	}
 	if strings.Count(text, "auth_user") != 2 {
@@ -76,12 +76,12 @@ func TestInitPreservesExistingCredentialsAsUnmanaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Users) != 0 || len(s.ReservedAuthUsers) != 1 || s.ReservedAuthUsers[0] != "LAX" {
+	if len(s.Users) != 0 || len(s.ReservedAuthUsers) != 1 || s.ReservedAuthUsers[0] != "Node A" {
 		t.Fatalf("existing credential was not reserved: %#v", s)
 	}
 	inbounds := base["inbounds"].([]any)
 	users := inbounds[0].(map[string]any)["users"].([]any)
-	if len(users) != 1 || users[0].(map[string]any)["name"] != "LAX" {
+	if len(users) != 1 || users[0].(map[string]any)["name"] != "Node A" {
 		t.Fatalf("existing inbound user was removed: %#v", users)
 	}
 	rules := base["route"].(map[string]any)["rules"].([]any)
@@ -155,13 +155,13 @@ func TestDeriveRealityPublicKey(t *testing.T) {
 }
 
 func TestMihomoOnlyExportsOwnNodes(t *testing.T) {
-	s := &State{Client: ClientSettings{Server: "example.com", Port: 443, ServerName: "www.cloudflare.com", PublicKey: "pub", ShortID: "abcd"}}
-	u := User{Name: "alice", Enabled: true, Nodes: []Node{{Name: "ATT", UUID: "u1"}}}
+	s := &State{Client: ClientSettings{Server: "service.example", Port: 443, ServerName: "tls.example", PublicKey: "pub", ShortID: "abcd"}}
+	u := User{Name: "alice", Enabled: true, Nodes: []Node{{Name: "Relay A", UUID: "u1"}}}
 	b, err := renderMihomo(s, u)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "alice-ATT") || strings.Contains(string(b), "bob") {
+	if !strings.Contains(string(b), "alice-Relay A") || strings.Contains(string(b), "bob") {
 		t.Fatal(string(b))
 	}
 }
@@ -180,8 +180,8 @@ func TestFormatDisplayTimeUsesBeijingTime(t *testing.T) {
 }
 
 func TestParseUserStatName(t *testing.T) {
-	auth, direction, ok := parseUserStatName("user>>>alice:att>>>traffic>>>downlink")
-	if !ok || auth != "alice:att" || direction != "downlink" {
+	auth, direction, ok := parseUserStatName("user>>>alice:relay-a>>>traffic>>>downlink")
+	if !ok || auth != "alice:relay-a" || direction != "downlink" {
 		t.Fatalf("got %q %q %v", auth, direction, ok)
 	}
 	if _, _, ok := parseUserStatName("outbound>>>direct>>>traffic>>>uplink"); ok {
@@ -322,20 +322,20 @@ func TestTieredThrottleUsesQuotaStages(t *testing.T) {
 }
 
 func TestParseNftCountersAndAccessLog(t *testing.T) {
-	raw := []byte(`{"nftables":[{"rule":{"comment":"alice/LAX upload","expr":[{"match":{"op":"=="}},{"counter":{"packets":3,"bytes":4242}}]}}]}`)
+	raw := []byte(`{"nftables":[{"rule":{"comment":"alice/Node A upload","expr":[{"match":{"op":"=="}},{"counter":{"packets":3,"bytes":4242}}]}}]}`)
 	counters, err := parseNftCounterJSON(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counters["alice/LAX upload"] != 4242 {
+	if counters["alice/Node A upload"] != 4242 {
 		t.Fatalf("unexpected counters: %#v", counters)
 	}
-	auth, target, ok := parseAccessLog(`inbound/vless[vless-in]: [alice:lax] inbound connection to api.openai.com:443`)
-	if !ok || auth != "alice:lax" || target != "api.openai.com" {
+	auth, target, ok := parseAccessLog(`inbound/vless[vless-in]: [alice:node-a] inbound connection to service.example:443`)
+	if !ok || auth != "alice:node-a" || target != "service.example" {
 		t.Fatalf("unexpected access parse: %q %q %v", auth, target, ok)
 	}
-	encoded, _ := json.Marshal([]byte(`inbound/vless[vless-in]: [alice:lax] inbound connection to api.openai.com:443`))
-	if decoded := decodeJournalMessage(encoded); !strings.Contains(decoded, "alice:lax") {
+	encoded, _ := json.Marshal([]byte(`inbound/vless[vless-in]: [alice:node-a] inbound connection to service.example:443`))
+	if decoded := decodeJournalMessage(encoded); !strings.Contains(decoded, "alice:node-a") {
 		t.Fatalf("journal byte-array message was not decoded: %q", decoded)
 	}
 }
@@ -361,13 +361,13 @@ func TestSourceAfterAccessStillArchivesAndEnforcesIP(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	s := &State{
 		ActiveConnections: map[string]ActiveConnection{
-			"42": {ID: "42", User: "alice", Device: "phone", Node: "LAX", AuthUser: "alice:lax", LastSeen: now.Format(time.RFC3339)},
+			"42": {ID: "42", User: "alice", Device: "phone", Node: "Node A", AuthUser: "alice:node-a", LastSeen: now.Format(time.RFC3339)},
 		},
 		Users: []User{{
 			Name: "alice", Enabled: true,
 			IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "dynamic", MaxIPs: 1},
 			Devices:  []Device{{Name: "phone", Enabled: true}},
-			Nodes:    []Node{{Name: "LAX", Device: "phone", AuthUser: "alice:lax"}},
+			Nodes:    []Node{{Name: "Node A", Device: "phone", AuthUser: "alice:node-a"}},
 		}},
 	}
 	if !attachSourceToKnownConnection(s, "42", "203.0.113.10", now.Add(time.Second)) {
@@ -489,7 +489,7 @@ func TestCLIWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := &app{statePath: statePath, out: io.Discard, err: io.Discard}
-	if err := a.initCmd([]string{"--config", configPath, "--base", basePath, "--server", "lax.example.com", "--public-key", "pub"}); err != nil {
+	if err := a.initCmd([]string{"--config", configPath, "--base", basePath, "--server", "node-a.example", "--public-key", "pub"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.userCmd([]string{"add", "alice", "--quota", "100G", "--expire", "2026-12-31"}); err != nil {
@@ -505,7 +505,7 @@ func TestCLIWorkflow(t *testing.T) {
 	if err := a.userCmd([]string{"set", "alice", "--quota", "200G", "--clear-expire", "--up-mbps", "12.5", "--down-mbps", "50"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.nodeCmd([]string{"add", "alice", "--name", "ATT", "--outbound", "to-att"}); err != nil {
+	if err := a.nodeCmd([]string{"add", "alice", "--name", "Relay A", "--outbound", "to-relay-a"}); err != nil {
 		t.Fatal(err)
 	}
 	exportPath := filepath.Join(dir, "alice.yaml")
@@ -516,7 +516,7 @@ func TestCLIWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "alice-ATT") || strings.Contains(string(b), "LAX-LAX") {
+	if !strings.Contains(string(b), "alice-Relay A") || strings.Contains(string(b), "Node A-Node A") {
 		t.Fatalf("unexpected export:\n%s", b)
 	}
 	s, err := loadState(statePath)
@@ -543,7 +543,7 @@ func TestCLIWorkflow(t *testing.T) {
 
 func TestTUIRendersEmptyAndUserViews(t *testing.T) {
 	m := tuiModel{
-		state:  &State{ReservedAuthUsers: []string{"LAX", "ATT via LAX", "Frontier via LAX"}},
+		state:  &State{ReservedAuthUsers: []string{"Node A", "Relay A via Node A", "Relay B via Node A"}},
 		width:  110,
 		height: 30,
 	}
@@ -661,8 +661,8 @@ func TestPerNodeLimitsUseIndependentMarks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Users = []User{{Name: "alice", Enabled: true, Nodes: []Node{
-		{Name: "LAX", AuthUser: "alice:lax", UUID: "u1", Outbound: "direct", UploadMbps: 10, DownloadMbps: 20, RateMark: rateMarkPrefix | 1},
-		{Name: "ATT", AuthUser: "alice:att", UUID: "u2", Outbound: "to-att", UploadMbps: 30, DownloadMbps: 40, RateMark: rateMarkPrefix | 2},
+		{Name: "Node A", AuthUser: "alice:node-a", UUID: "u1", Outbound: "direct", UploadMbps: 10, DownloadMbps: 20, RateMark: rateMarkPrefix | 1},
+		{Name: "Relay A", AuthUser: "alice:relay-a", UUID: "u2", Outbound: "to-relay-a", UploadMbps: 30, DownloadMbps: 40, RateMark: rateMarkPrefix | 2},
 	}}}
 
 	rendered, err := renderConfig(s)
@@ -670,7 +670,7 @@ func TestPerNodeLimitsUseIndependentMarks(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(rendered)
-	for _, want := range []string{"sbmgr-rate-0001-direct", "sbmgr-rate-0002-to-att", "alice:lax", "alice:att"} {
+	for _, want := range []string{"sbmgr-rate-0001-direct", "sbmgr-rate-0002-to-relay-a", "alice:node-a", "alice:relay-a"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("rendered config missing %q:\n%s", want, text)
 		}
@@ -679,7 +679,7 @@ func TestPerNodeLimitsUseIndependentMarks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"meta mark 0x53420001", "meta mark 0x53420002", "alice/LAX upload", "alice/ATT download", "1250000 bytes/second", "5000000 bytes/second"} {
+	for _, want := range []string{"meta mark 0x53420001", "meta mark 0x53420002", "alice/Node A upload", "alice/Relay A download", "1250000 bytes/second", "5000000 bytes/second"} {
 		if !strings.Contains(nft, want) {
 			t.Fatalf("nft rules missing %q:\n%s", want, nft)
 		}
@@ -701,7 +701,7 @@ func TestNodeTemplatesComeFromPreservedServerRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	templates := nodeTemplates(s)
-	if len(templates) != 1 || templates[0].Name != "LAX" || templates[0].Outbound != "to-att" {
+	if len(templates) != 1 || templates[0].Name != "Node A" || templates[0].Outbound != "to-relay-a" {
 		t.Fatalf("unexpected templates: %#v", templates)
 	}
 }
@@ -716,14 +716,14 @@ func TestNodeTemplatesIncludeAdditionalOutboundsButNotEndpoints(t *testing.T) {
     {"type":"urltest","tag":"automatic","outbounds":["existing"]}
   ],
   "endpoints": [{"type":"wireguard","tag":"wg-egress"}],
-  "route": {"final":"direct","rules":[{"auth_user":["LAX"],"outbound":"existing"}]}
+  "route": {"final":"direct","rules":[{"auth_user":["Node A"],"outbound":"existing"}]}
 }`
 	if err := os.WriteFile(base, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s := &State{BaseConfig: base, ReservedAuthUsers: []string{"LAX"}}
+	s := &State{BaseConfig: base, ReservedAuthUsers: []string{"Node A"}}
 	templates := nodeTemplates(s)
-	want := map[string]string{"LAX": "existing", "automatic": "automatic"}
+	want := map[string]string{"Node A": "existing", "automatic": "automatic"}
 	if len(templates) != len(want) {
 		t.Fatalf("templates = %#v, want %d", templates, len(want))
 	}
@@ -740,9 +740,9 @@ func TestLegacyDefaultNodeUsesDefaultServerTemplateName(t *testing.T) {
 	if err := os.WriteFile(basePath, []byte(`{"route":{"final":"direct"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s := &State{BaseConfig: basePath, ReservedAuthUsers: []string{"LAX"}, Users: []User{{Name: "alice", Nodes: []Node{{Name: "default"}}}}}
+	s := &State{BaseConfig: basePath, ReservedAuthUsers: []string{"Node A"}, Users: []User{{Name: "alice", Nodes: []Node{{Name: "default"}}}}}
 	normalizeLegacyNodeNames(s)
-	if s.Users[0].Nodes[0].Name != "LAX" {
+	if s.Users[0].Nodes[0].Name != "Node A" {
 		t.Fatalf("legacy default node was not normalized: %#v", s.Users[0].Nodes[0])
 	}
 }
@@ -761,8 +761,8 @@ func TestRateMarkAllocationAndValidation(t *testing.T) {
 func TestDuplicateRateMarkAcrossSameNamedDeviceNodesIsRejected(t *testing.T) {
 	mark := rateMarkPrefix | 9
 	s := &State{Users: []User{{Name: "alice", Nodes: []Node{
-		{Name: "LAX", Device: "phone", UploadMbps: 1, RateMark: mark},
-		{Name: "LAX", Device: "pc", UploadMbps: 1, RateMark: mark},
+		{Name: "Node A", Device: "phone", UploadMbps: 1, RateMark: mark},
+		{Name: "Node A", Device: "pc", UploadMbps: 1, RateMark: mark},
 	}}}}
 	if err := validateRateMarks(s); err == nil {
 		t.Fatal("duplicate mark across devices was accepted")
@@ -773,14 +773,14 @@ func TestNftCountersExcludeDroppedBytesAndSurviveReplacement(t *testing.T) {
 	mark := rateMarkPrefix | 1
 	s := &State{
 		Counters: map[string]int64{fmt.Sprintf("nft:%08x:upload", mark): 12345},
-		Users:    []User{{Name: "alice", Nodes: []Node{{Name: "LAX", UploadMbps: 10, RateMark: mark}}}},
+		Users:    []User{{Name: "alice", Nodes: []Node{{Name: "Node A", UploadMbps: 10, RateMark: mark}}}},
 	}
 	rules, err := renderNftables(s)
 	if err != nil {
 		t.Fatal(err)
 	}
 	drop := strings.Index(rules, "limit rate over 1250000 bytes/second")
-	counter := strings.Index(rules, "counter packets 0 bytes 12345 comment \"alice/LAX upload\"")
+	counter := strings.Index(rules, "counter packets 0 bytes 12345 comment \"alice/Node A upload\"")
 	if drop < 0 || counter < 0 || counter <= drop || strings.Contains(rules[drop:counter], " counter ") {
 		t.Fatalf("accepted-byte counter is not after the drop rule:\n%s", rules)
 	}
@@ -837,7 +837,7 @@ func (fakeStatsServer) QueryStats(_ context.Context, req *queryStatsRequest) (*q
 	if req.Pattern != "user>>>" {
 		return nil, errors.New("unexpected pattern")
 	}
-	return &queryStatsResponse{Stat: []*stat{{Name: "user>>>alice:att>>>traffic>>>uplink", Value: 42}}}, nil
+	return &queryStatsResponse{Stat: []*stat{{Name: "user>>>alice:relay-a>>>traffic>>>uplink", Value: 42}}}, nil
 }
 
 func TestQueryUserStatsWireCompatibility(t *testing.T) {

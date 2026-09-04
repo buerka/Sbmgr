@@ -3,7 +3,7 @@ set -eu
 
 usage() {
     echo "用法: $0 [--home 绝对安装目录] PUBLIC_IP [HTTPS_PORT] [EMAIL]" >&2
-    echo "示例: $0 --home /srv/sbmgr 203.0.113.10 8443 admin@example.com" >&2
+    echo "示例: $0 --home /srv/sbmgr 203.0.113.10 8443" >&2
     echo "默认取本脚本所在 deploy/ 的父目录，也可通过 SBMGR_HOME 覆盖。" >&2
     exit 2
 }

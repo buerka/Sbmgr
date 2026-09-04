@@ -11,7 +11,7 @@ import (
 func TestRecordRealtimeUsageCalculatesRatesAndHistory(t *testing.T) {
 	now := time.Date(2026, 8, 3, 12, 1, 0, 0, time.UTC)
 	s := &State{Users: []User{{Name: "alice", Nodes: []Node{{
-		Name: "ATT", Device: "phone", AuthUser: "alice-phone", RateUpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
+		Name: "Relay A", Device: "phone", AuthUser: "alice-phone", RateUpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
 	}}}}}
 	changed := recordRealtimeUsage(s, map[string]trafficDelta{"alice-phone": {upload: 7_500_000, download: 15_000_000}}, now)
 	if !changed {
@@ -51,7 +51,7 @@ func TestRecordRealtimeUsageDoesNotCreateContinuousZeroHistory(t *testing.T) {
 	s := &State{Users: []User{{
 		Name: "alice",
 		Nodes: []Node{{
-			Name: "LAX", AuthUser: "alice:lax",
+			Name: "Node A", AuthUser: "alice:node-a",
 			RateUpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
 		}},
 		UsageHistory: []UsagePoint{{At: now.Add(-time.Minute).Format(time.RFC3339)}},
@@ -70,8 +70,8 @@ func TestRecordRealtimeUsageDoesNotCreateContinuousZeroHistory(t *testing.T) {
 
 func TestRecordRealtimeUsageUsesInMemorySampleWindowAfterIdle(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
-	fresh := &State{Users: []User{{Name: "fresh", Nodes: []Node{{Name: "LAX", AuthUser: "fresh:lax"}}}}}
-	freshDelta := map[string]trafficDelta{"fresh:lax": {download: 6_250_000}}
+	fresh := &State{Users: []User{{Name: "fresh", Nodes: []Node{{Name: "Node A", AuthUser: "fresh:node-a"}}}}}
+	freshDelta := map[string]trafficDelta{"fresh:node-a": {download: 6_250_000}}
 	if !recordRealtimeUsageAt(fresh, freshDelta, now, 5*time.Second) {
 		t.Fatal("first in-memory sample was not recorded")
 	}
@@ -80,9 +80,9 @@ func TestRecordRealtimeUsageUsesInMemorySampleWindowAfterIdle(t *testing.T) {
 	}
 
 	s := &State{Users: []User{{Name: "alice", Nodes: []Node{{
-		Name: "LAX", AuthUser: "alice:lax", RateUpdatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano),
+		Name: "Node A", AuthUser: "alice:node-a", RateUpdatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano),
 	}}}}}
-	delta := map[string]trafficDelta{"alice:lax": {download: 6_250_000}}
+	delta := map[string]trafficDelta{"alice:node-a": {download: 6_250_000}}
 	if !recordRealtimeUsageAt(s, delta, now, 5*time.Second) {
 		t.Fatal("resumed traffic was not recorded")
 	}
@@ -140,10 +140,10 @@ func TestThrottleTransitionQueuesDurableRateApply(t *testing.T) {
 }
 
 func TestDeviceCounterLabelsStayDistinct(t *testing.T) {
-	if got := deviceNodeLabel("alice", defaultDeviceName, "ATT"); got != "alice/ATT" {
+	if got := deviceNodeLabel("alice", defaultDeviceName, "Relay A"); got != "alice/Relay A" {
 		t.Fatalf("legacy counter label changed: %q", got)
 	}
-	if got := deviceNodeLabel("alice", "phone", "ATT"); got != "alice/phone/ATT" {
+	if got := deviceNodeLabel("alice", "phone", "Relay A"); got != "alice/phone/Relay A" {
 		t.Fatalf("device counter label is not isolated: %q", got)
 	}
 }
