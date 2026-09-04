@@ -191,6 +191,44 @@ func TestMihomoTemplateEmptyPartialGroupFallsBackToPrimary(t *testing.T) {
 	}
 }
 
+func TestPrimaryMihomoGroupNameIsDeterministic(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "uses document order",
+			yaml: "proxy-groups:\n  - name: First\n  - name: Second\n",
+			want: "First",
+		},
+		{
+			name: "preserves legacy preferred group",
+			yaml: "proxy-groups:\n  - name: First\n  - name: 节点选择\n",
+			want: "节点选择",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var document yaml.Node
+			if err := yaml.Unmarshal([]byte(tt.yaml), &document); err != nil {
+				t.Fatal(err)
+			}
+			root, err := yamlRootMapping(&document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			groups, ok := yamlMapValue(root, "proxy-groups")
+			if !ok {
+				t.Fatal("missing proxy-groups")
+			}
+			if got := primaryMihomoGroupName(groups); got != tt.want {
+				t.Fatalf("primary group = %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTemplateCommandRejectsInvalidFileWithoutChangingState(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.json")

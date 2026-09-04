@@ -192,17 +192,7 @@ func buildMihomoProxy(template *yaml.Node, name string, client ClientSettings, u
 }
 
 func rewriteMihomoProxyGroups(groups *yaml.Node, oldNames map[string]string, nameByNode map[string]string, newNames []string) {
-	groupNames := yamlProxyGroupNames(groups)
-	primary := ""
-	for name := range groupNames {
-		if primary == "" {
-			primary = name
-		}
-		if name == "节点选择" {
-			primary = name
-			break
-		}
-	}
+	primary := primaryMihomoGroupName(groups)
 	for _, group := range groups.Content {
 		if group.Kind != yaml.MappingNode {
 			continue
@@ -257,6 +247,26 @@ func rewriteMihomoProxyGroups(groups *yaml.Node, oldNames map[string]string, nam
 			proxies.Content = append(proxies.Content, yamlScalarNode(value))
 		}
 	}
+}
+
+func primaryMihomoGroupName(groups *yaml.Node) string {
+	if groups == nil || groups.Kind != yaml.SequenceNode {
+		return ""
+	}
+	primary := ""
+	for _, group := range groups.Content {
+		name := yamlStringMapValue(group, "name")
+		if name == "" {
+			continue
+		}
+		if primary == "" {
+			primary = name
+		}
+		if name == "节点选择" {
+			return name
+		}
+	}
+	return primary
 }
 
 func yamlProxyGroupNames(groups *yaml.Node) map[string]bool {
