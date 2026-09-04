@@ -41,6 +41,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: sbmgr-linux-amd64
+          include-hidden-files: true
           path: |
             .dist/sbmgr-*-linux-amd64
             .dist/sbmgr-*-linux-amd64.sha256
