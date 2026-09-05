@@ -163,6 +163,9 @@ func dropSubscriptionPrivileges(uid, gid int) error {
 	if err := subscriptionPrctlAll(unix.PR_SET_NO_NEW_PRIVS, 1); err != nil {
 		return fmt.Errorf("set no-new-privileges: %w", err)
 	}
+	if err := subscriptionPrctlAll(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL); err != nil {
+		return fmt.Errorf("clear ambient capabilities: %w", err)
+	}
 	if err := subscriptionPrctlAll(unix.PR_SET_KEEPCAPS, 0); err != nil {
 		return fmt.Errorf("disable keep-caps: %w", err)
 	}

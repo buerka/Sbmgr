@@ -96,8 +96,8 @@ grep -Fq 'ExecStart=/srv/sbmgr/sbmgr daemon' "$test_root/units/sbmgr.service" ||
     fail "主服务 ExecStart 路径错误"
 grep -Fq 'CAP_SETUID CAP_SETGID' "$test_root/units/sbmgr.service" || \
     fail "主服务缺少子进程降权所需能力"
-grep -Fxq 'AmbientCapabilities=' "$test_root/units/sbmgr.service" || \
-    fail "不应向 HTTP 子进程传递 ambient capabilities"
+grep -Fxq 'AmbientCapabilities=CAP_SETUID' "$test_root/units/sbmgr.service" || \
+    fail "systemd 必须仅为启动降权保留 SETUID ambient capability"
 
 # Account provisioning is tested with shell-local stubs: never create a real
 # account while running deployment unit/transaction tests.

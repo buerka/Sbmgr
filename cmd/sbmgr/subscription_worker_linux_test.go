@@ -80,7 +80,8 @@ func TestSubscriptionPrivilegeDropProbe(t *testing.T) {
 			hdr := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
 			err := unix.Capget(&hdr, &caps[0])
 			nnp, nnpErr := unix.PrctlRetInt(unix.PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
-			problems <- err != nil || caps != [2]unix.CapUserData{} || os.Geteuid() != 65534 || os.Getegid() != 65534 || nnpErr != nil || nnp != 1
+			ambient, ambientErr := unix.PrctlRetInt(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_IS_SET, unix.CAP_SETUID, 0, 0)
+			problems <- err != nil || caps != [2]unix.CapUserData{} || os.Geteuid() != 65534 || os.Getegid() != 65534 || nnpErr != nil || nnp != 1 || ambientErr != nil || ambient != 0
 		}()
 	}
 	group.Wait()

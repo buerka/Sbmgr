@@ -23,6 +23,8 @@ https://<PUBLIC_HOST>:<SUBSCRIPTION_PORT>/qr/<TOKEN>.png
 
 升级时先运行 `deploy/install-systemd.sh --home <SBMGR_HOME> --component core`，创建专用账号并更新 capability 边界，再按部署流程更新程序。主服务增加的 `CAP_SETUID` / `CAP_SETGID` 仅供工作进程启动降权使用；HTTP 处理阶段不保留这些能力。证书续期后仍通过重启主服务更换工作进程内的证书，私钥文件不需要改变权限。
 
+unit 显式设置 `AmbientCapabilities=CAP_SETUID`，避免 systemd 在设置 root 身份并应用 seccomp 时提前移除此启动能力。子进程先对所有线程清空 ambient 集合，再切换身份并清空 permitted/effective/inheritable 集合；CI 会核对处理 HTTP 时这些能力均为零。不会关闭 NoNewPrivileges 或放宽系统调用过滤组。
+
 ## 用量信息
 
 成功响应包含兼容 Mihomo 面板的用量元数据：
