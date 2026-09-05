@@ -20,7 +20,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -222,15 +221,8 @@ func subscriptionClientIP(request *http.Request) string {
 		host = request.RemoteAddr
 	}
 	remoteIP := net.ParseIP(strings.Trim(host, "[]"))
-	// A same-host reverse proxy may overwrite X-Real-IP with the connection it
-	// accepted. Do not consume X-Forwarded-For here: the common
-	// $proxy_add_x_forwarded_for form preserves a client-supplied leftmost value,
-	// which would let callers forge rate-limit buckets.
-	if remoteIP != nil && remoteIP.IsLoopback() {
-		if parsed := net.ParseIP(strings.TrimSpace(request.Header.Get("X-Real-IP"))); parsed != nil {
-			return parsed.String()
-		}
-	}
+	// Limit the authenticated TCP peer. Forwarded headers are untrusted,
+	// including on loopback; local reverse proxies share a peer budget.
 	if remoteIP != nil {
 		return remoteIP.String()
 	}
@@ -352,29 +344,8 @@ func (a *app) startSubscriptionServer(ctx context.Context) (*http.Server, error)
 	if err != nil {
 		return nil, fmt.Errorf("启动订阅服务 %s: %w", settings.Listen, err)
 	}
-	var rateMu sync.Mutex
-	rates := map[string]subscriptionRateEntry{}
-	lastPrune := time.Time{}
-	allow := func(host string) bool {
-		now := time.Now()
-		rateMu.Lock()
-		defer rateMu.Unlock()
-		if lastPrune.IsZero() || now.Sub(lastPrune) >= time.Minute {
-			for key, value := range rates {
-				if now.Sub(value.window) >= 2*time.Minute {
-					delete(rates, key)
-				}
-			}
-			lastPrune = now
-		}
-		entry := rates[host]
-		if entry.window.IsZero() || now.Sub(entry.window) >= time.Minute {
-			entry = subscriptionRateEntry{window: now}
-		}
-		entry.count++
-		rates[host] = entry
-		return entry.count <= 60
-	}
+	limiter := &subscriptionLimiter{}
+	requests := make(chan struct{}, 4)
 	handler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		response.Header().Set("X-Content-Type-Options", "nosniff")
 		response.Header().Set("Cache-Control", "no-store")
@@ -391,7 +362,7 @@ func (a *app) startSubscriptionServer(ctx context.Context) (*http.Server, error)
 			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !allow(subscriptionClientIP(request)) {
+		if !limiter.allow(subscriptionClientIP(request), time.Now()) {
 			http.Error(response, "too many requests", http.StatusTooManyRequests)
 			return
 		}
@@ -401,6 +372,28 @@ func (a *app) startSubscriptionServer(ctx context.Context) (*http.Server, error)
 			return
 		}
 		token := strings.TrimSuffix(parts[1], ".png")
+		if !subscriptionTokenPattern.MatchString(token) {
+			http.NotFound(response, request)
+			return
+		}
+		select {
+		case requests <- struct{}{}:
+			defer func() { <-requests }()
+		default:
+			http.Error(response, "busy", http.StatusServiceUnavailable)
+			return
+		}
+		lookupCtx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
+		exists, lookupErr := subscriptionTokenExists(lookupCtx, a.statePath, token)
+		cancel()
+		if lookupErr != nil {
+			http.Error(response, "state unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !exists {
+			http.NotFound(response, request)
+			return
+		}
 		state, err := loadState(a.statePath)
 		if err != nil {
 			http.Error(response, "state unavailable", http.StatusServiceUnavailable)
@@ -413,6 +406,10 @@ func (a *app) startSubscriptionServer(ctx context.Context) (*http.Server, error)
 		u, device := findSubscriptionDevice(state, token)
 		if u == nil || device == nil {
 			http.NotFound(response, request)
+			return
+		}
+		if err := subscriptionDeviceAvailable(*u, *device, time.Now()); err != nil {
+			http.Error(response, "subscription unavailable", http.StatusForbidden)
 			return
 		}
 		if parts[0] == "qr" {
@@ -444,7 +441,7 @@ func (a *app) startSubscriptionServer(ctx context.Context) (*http.Server, error)
 		}
 		yaml, err := renderMihomoDevice(state, *u, device.Name)
 		if err != nil {
-			http.Error(response, err.Error(), http.StatusForbidden)
+			http.Error(response, "subscription generation unavailable", http.StatusInternalServerError)
 			return
 		}
 		if err := setSubscriptionProfileHeaders(response, *u, *device); err != nil {
@@ -454,6 +451,7 @@ func (a *app) startSubscriptionServer(ctx context.Context) (*http.Server, error)
 		_, _ = response.Write(yaml)
 	})
 	server := &http.Server{
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
 		Addr:              listener.Addr().String(),
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,

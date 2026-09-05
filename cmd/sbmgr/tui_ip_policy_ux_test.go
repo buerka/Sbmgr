@@ -32,9 +32,9 @@ func TestIPPolicyFormHelpExplainsEveryOperatingMode(t *testing.T) {
 			want:   []string{"任何 IP 都可连接", "不会下发拒绝规则", "动态单活"},
 		},
 		{
-			name:   "automatic binding does not rotate",
+			name:   "automatic binding releases idle slots",
 			policy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "auto", MaxIPs: 1},
-			want:   []string{"第一次观察到", "加入固定列表", "不会因旧 IP 闲置而自动换绑"},
+			want:   []string{"首次观察到", "加入固定列表", "24 小时无活动", "后台释放并自动应用"},
 		},
 		{
 			name:   "manual empty list warns about reject all",

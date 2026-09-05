@@ -74,8 +74,27 @@ func sanitizeAuditArgs(args []string) []string {
 			continue
 		}
 		name := strings.SplitN(result[index], "=", 2)[0]
+		if strings.Contains(result[index], "://") {
+			if strings.HasPrefix(name, "--") && strings.Contains(result[index], "=") {
+				result[index] = safeTerminalText(name) + "=[REDACTED]"
+			} else {
+				result[index] = "[REDACTED]"
+			}
+			continue
+		}
+		if !strings.HasPrefix(name, "--") {
+			if strings.Contains(result[index], "://") {
+				result[index] = "[REDACTED]"
+			} else {
+				result[index] = safeTerminalText(result[index])
+			}
+			continue
+		}
 		switch name {
-		case "--webhook-secret", "--uuid", "--private-key", "--token", "--password", "--outbound-password":
+		// New flags are confidential until explicitly reviewed here.
+		case "--upload", "--download", "--quota", "--expires", "--enabled", "--mode", "--interval", "--timeout", "--failures", "--webhook-timeout", "--max-connections", "--connection-action", "--device", "--name", "--apply", "--restart", "--force", "--dry-run", "--tag", "--type", "--from", "--to", "--username-change", "--password-change":
+			result[index] = safeTerminalText(result[index])
+		default:
 			if strings.Contains(result[index], "=") {
 				result[index] = name + "=[REDACTED]"
 			} else {

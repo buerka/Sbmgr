@@ -18,6 +18,11 @@ func normalizedAccessPolicy(policy AccessPolicy) AccessPolicy {
 }
 
 func validateAccessPolicy(policy AccessPolicy) error {
+	if policy.ConnectionBlockedUntil != "" {
+		if _, err := time.Parse(time.RFC3339Nano, policy.ConnectionBlockedUntil); err != nil {
+			return errors.New("并发连接封禁到期时间无效")
+		}
+	}
 	policy = normalizedAccessPolicy(policy)
 	if policy.MaxConnections < 0 || policy.MaxConnections > 100000 {
 		return errors.New("最大并发连接必须在 0–100000 之间；0 表示不限制")
@@ -129,6 +134,9 @@ func appendAccessPolicyRules(rules []any, authUsers []any, policy AccessPolicy) 
 }
 
 func evaluateConnectionPolicies(s *State, now time.Time) (stateChanged, configChanged bool) {
+	if recoverConnectionBlocks(s, now) {
+		stateChanged, configChanged = true, true
+	}
 	userCounts := map[string]int{}
 	deviceCounts := map[string]int{}
 	for _, connection := range s.ActiveConnections {
@@ -177,13 +185,24 @@ func evaluateConnectionPolicy(s *State, u *User, device *Device, policy *AccessP
 	actionText := "已告警"
 	switch normalized.ConnectionAction {
 	case "disable-user":
+		if !u.Enabled {
+			return false
+		}
 		u.Enabled = false
 		u.DisabledReason = "connections"
-		actionText = "已禁用用户"
+		u.Access.ConnectionBlockedUntil = now.Add(connectionBlockDuration).Format(time.RFC3339Nano)
+		if policy == &u.Access {
+			normalized.ConnectionBlockedUntil = u.Access.ConnectionBlockedUntil
+		}
+		actionText = "已临时禁用用户 10 分钟，到期自动复检恢复"
 	case "disable-device":
 		if device != nil {
+			if !device.Enabled {
+				return false
+			}
 			device.Enabled = false
-			actionText = "已禁用设备"
+			normalized.ConnectionBlockedUntil = now.Add(connectionBlockDuration).Format(time.RFC3339Nano)
+			actionText = "已临时禁用设备 10 分钟，到期自动复检恢复"
 		}
 	}
 	normalized.LastConnectionAlert = now.Format(time.RFC3339Nano)

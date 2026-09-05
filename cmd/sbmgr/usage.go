@@ -52,12 +52,13 @@ func snapshotUserTrafficCounterBaselines(s *State, u *User) error {
 }
 
 func applyUserNftCounterBaselines(s *State, u *User, counters map[string]int64) {
+	counters = canonicalNftCounters(s, counters)
 	if s.Counters == nil {
 		s.Counters = map[string]int64{}
 	}
 	for _, node := range u.Nodes {
 		for _, direction := range []string{"upload", "download"} {
-			comment := deviceNodeLabel(u.Name, node.Device, node.Name) + " " + direction
+			comment := fmt.Sprintf("sbmgr:%08x %s", node.RateMark, direction)
 			if current, ok := counters[comment]; ok {
 				s.Counters[fmt.Sprintf("nft:%08x:%s", node.RateMark, direction)] = current
 			}
@@ -68,6 +69,7 @@ func applyUserNftCounterBaselines(s *State, u *User, counters map[string]int64) 
 type nftJSONDocument struct {
 	Nftables []struct {
 		Rule *struct {
+			Chain   string            `json:"chain"`
 			Comment string            `json:"comment"`
 			Expr    []json.RawMessage `json:"expr"`
 		} `json:"rule,omitempty"`
@@ -107,6 +109,7 @@ func syncNftUsageAt(s *State, now time.Time, sampleInterval time.Duration) (int6
 	if err != nil {
 		return 0, false, err
 	}
+	counters = canonicalNftCounters(s, counters)
 	if s.Counters == nil {
 		s.Counters = map[string]int64{}
 	}
@@ -119,7 +122,7 @@ func syncNftUsageAt(s *State, now time.Time, sampleInterval time.Duration) (int6
 		for nodeIndex := range u.Nodes {
 			n := &u.Nodes[nodeIndex]
 			for _, direction := range []string{"upload", "download"} {
-				comment := deviceNodeLabel(u.Name, n.Device, n.Name) + " " + direction
+				comment := fmt.Sprintf("sbmgr:%08x %s", n.RateMark, direction)
 				current, ok := counters[comment]
 				if !ok {
 					continue
@@ -247,6 +250,23 @@ func parseNftCounterJSON(out []byte) (map[string]int64, error) {
 		if item.Rule == nil || item.Rule.Comment == "" {
 			continue
 		}
+		stableKey := ""
+		if item.Rule.Chain == "upload" || item.Rule.Chain == "download" {
+			for _, raw := range item.Rule.Expr {
+				var e struct {
+					Match *struct {
+						Op   string `json:"op"`
+						Left map[string]struct {
+							Key string `json:"key"`
+						} `json:"left"`
+						Right uint32 `json:"right"`
+					} `json:"match"`
+				}
+				if json.Unmarshal(raw, &e) == nil && e.Match != nil && e.Match.Op == "==" && validRateMark(e.Match.Right) && (e.Match.Left["meta"].Key == "mark" || e.Match.Left["ct"].Key == "mark") {
+					stableKey = fmt.Sprintf("sbmgr:%08x %s", e.Match.Right, item.Rule.Chain)
+				}
+			}
+		}
 		for _, raw := range item.Rule.Expr {
 			var expression struct {
 				Counter *struct {
@@ -255,6 +275,9 @@ func parseNftCounterJSON(out []byte) (map[string]int64, error) {
 			}
 			if json.Unmarshal(raw, &expression) == nil && expression.Counter != nil {
 				counters[item.Rule.Comment] = expression.Counter.Bytes
+				if stableKey != "" {
+					counters[stableKey] = expression.Counter.Bytes
+				}
 			}
 		}
 	}
@@ -267,10 +290,7 @@ type journalRecord struct {
 	Timestamp string          `json:"__REALTIME_TIMESTAMP"`
 }
 
-var (
-	ansiEscapePattern   = regexp.MustCompile("\\x1b\\[[0-9;]*m")
-	connectionIDPattern = regexp.MustCompile(`\[(\d+)\s+[^\]]+\]`)
-)
+var ansiEscapePattern = regexp.MustCompile("\\x1b\\[[0-9;]*m")
 
 func syncAccessStats(s *State) (int, bool, error) {
 	if runtime.GOOS != "linux" {
@@ -293,6 +313,10 @@ func syncAccessStats(s *State) (int, bool, error) {
 	if err != nil {
 		return 0, false, fmt.Errorf("读取 sing-box 访问日志: %w", err)
 	}
+	return ingestAccessJournal(s, out, baseline)
+}
+
+func ingestAccessJournal(s *State, out []byte, baseline bool) (int, bool, error) {
 	type authOwner struct {
 		user   *User
 		device *Device
@@ -355,6 +379,7 @@ func syncAccessStats(s *State) (int, bool, error) {
 			}
 			trimPendingSources(s.PendingSources, pendingSourceLimit)
 			changed = true
+			continue // source and access events are mutually exclusive
 		}
 		auth, target, ok := parseAccessLog(message)
 		if !ok {
@@ -392,7 +417,7 @@ func syncAccessStats(s *State) (int, bool, error) {
 			connection.SourceIP = pending.IP
 		}
 		if connectionID != "" {
-			s.ActiveConnections[connectionID] = connection
+			trackActiveConnection(s, connection)
 		}
 		if node.Destinations == nil {
 			node.Destinations = map[string]AccessStat{}
@@ -423,6 +448,10 @@ func syncAccessStats(s *State) (int, bool, error) {
 	return count, changed, nil
 }
 
+func recentAccessKey(target, device, node string) string {
+	return strings.ToLower(target + "\x00" + device + "\x00" + node)
+}
+
 func recordRecentAccess(u *User, device *Device, nodeName, target string, observedAt time.Time) {
 	if u == nil || strings.TrimSpace(target) == "" {
 		return
@@ -431,30 +460,44 @@ func recordRecentAccess(u *User, device *Device, nodeName, target string, observ
 	if device != nil {
 		deviceName = device.Name
 	}
-	pruneRecentAccesses(u, observedAt)
-	for index := range u.RecentAccesses {
-		item := &u.RecentAccesses[index]
-		if strings.EqualFold(item.Target, target) && strings.EqualFold(item.Device, deviceName) && strings.EqualFold(item.Node, nodeName) {
-			item.Count++
-			item.LastSeen = observedAt.Format(time.RFC3339)
-			sortRecentAccesses(u.RecentAccesses)
-			return
+	key := recentAccessKey(target, deviceName, nodeName)
+	if u.recentIndex == nil || len(u.recentIndex) != len(u.RecentAccesses) {
+		u.recentIndex = make(map[string]int, len(u.RecentAccesses))
+		for i, item := range u.RecentAccesses {
+			u.recentIndex[recentAccessKey(item.Target, item.Device, item.Node)] = i
 		}
 	}
+	if index, exists := u.recentIndex[key]; exists {
+		item := &u.RecentAccesses[index]
+		item.Count++
+		item.LastSeen = observedAt.Format(time.RFC3339)
+		return
+	}
+	if len(u.RecentAccesses) >= recentAccessLimit {
+		oldest := 0
+		for i := range u.RecentAccesses {
+			if u.RecentAccesses[i].LastSeen < u.RecentAccesses[oldest].LastSeen {
+				oldest = i
+			}
+		}
+		old := u.RecentAccesses[oldest]
+		delete(u.recentIndex, recentAccessKey(old.Target, old.Device, old.Node))
+		u.RecentAccesses[oldest] = RecentAccess{Target: target, Device: deviceName, Node: nodeName, FirstSeen: observedAt.Format(time.RFC3339), LastSeen: observedAt.Format(time.RFC3339), Count: 1}
+		u.recentIndex[key] = oldest
+		return
+	}
+	u.recentIndex[key] = len(u.RecentAccesses)
 	u.RecentAccesses = append(u.RecentAccesses, RecentAccess{
 		Target: target, Device: deviceName, Node: nodeName,
 		FirstSeen: observedAt.Format(time.RFC3339), LastSeen: observedAt.Format(time.RFC3339), Count: 1,
 	})
-	sortRecentAccesses(u.RecentAccesses)
-	if len(u.RecentAccesses) > recentAccessLimit {
-		u.RecentAccesses = append([]RecentAccess(nil), u.RecentAccesses[:recentAccessLimit]...)
-	}
 }
 
 func pruneRecentAccesses(u *User, now time.Time) bool {
 	if u == nil || len(u.RecentAccesses) == 0 {
 		return false
 	}
+	u.recentIndex = nil
 	cutoff := now.Add(-recentAccessWindow)
 	kept := u.RecentAccesses[:0]
 	for _, item := range u.RecentAccesses {
@@ -577,6 +620,7 @@ func connectionActiveWithinAt(connection ActiveConnection, now time.Time, ttl ti
 }
 
 func pruneConnectionTracking(s *State, now time.Time) bool {
+	s.connectionIndex = nil
 	changed := false
 	for id, pending := range s.PendingSources {
 		at, err := time.Parse(time.RFC3339Nano, pending.At)
@@ -620,8 +664,8 @@ func attachSourceToKnownConnection(s *State, connectionID, sourceIP string, obse
 }
 
 func connectionClosed(message string) bool {
-	message = strings.ToLower(cleanLogMessage(message))
-	return strings.Contains(message, "connection closed") || strings.Contains(message, "connection close:") || strings.Contains(message, "closed connection")
+	message, ok := safeLogMessage(message)
+	return ok && closeLogPattern.MatchString(message)
 }
 
 func trimPendingSources(values map[string]PendingSource, limit int) {
@@ -661,34 +705,19 @@ func decodeJournalMessage(raw json.RawMessage) string {
 }
 
 func parseAccessLog(message string) (auth, target string, ok bool) {
-	message = cleanLogMessage(message)
-	marker := "] inbound connection to "
-	if strings.Contains(message, "] inbound packet connection to ") {
-		marker = "] inbound packet connection to "
-	}
-	position := strings.Index(message, marker)
-	if position < 0 {
+	message, ok = safeLogMessage(message)
+	if !ok {
 		return "", "", false
 	}
-	left := message[:position]
-	open := strings.LastIndex(left, "[")
-	if open < 0 || open+1 >= len(left) {
+	m := accessLogPattern.FindStringSubmatch(message)
+	if m == nil {
 		return "", "", false
 	}
-	auth = strings.TrimSpace(left[open+1:])
-	fields := strings.Fields(message[position+len(marker):])
-	if len(fields) == 0 {
+	target, ok = logAddress(m[3])
+	if !ok {
 		return "", "", false
 	}
-	target = fields[0]
-	if host, _, err := net.SplitHostPort(target); err == nil {
-		target = host
-	} else if colon := strings.LastIndex(target, ":"); colon > 0 {
-		if _, err := strconv.Atoi(target[colon+1:]); err == nil {
-			target = target[:colon]
-		}
-	}
-	return auth, strings.Trim(target, "[]"), auth != "" && target != ""
+	return m[2], strings.ToLower(target), true
 }
 
 func cleanLogMessage(message string) string {
@@ -696,31 +725,30 @@ func cleanLogMessage(message string) string {
 }
 
 func parseConnectionID(message string) string {
-	match := connectionIDPattern.FindStringSubmatch(cleanLogMessage(message))
-	if len(match) != 2 {
+	message, ok := safeLogMessage(message)
+	if !ok {
 		return ""
 	}
-	return match[1]
+	for _, pattern := range []*regexp.Regexp{accessLogPattern, sourceLogPattern, closeLogPattern} {
+		if match := pattern.FindStringSubmatch(message); match != nil {
+			return match[1]
+		}
+	}
+	return ""
 }
 
 func parseSourceLog(message string) (string, bool) {
-	message = cleanLogMessage(message)
-	marker := "inbound connection from "
-	position := strings.Index(message, marker)
-	if position < 0 {
+	message, ok := safeLogMessage(message)
+	if !ok {
 		return "", false
 	}
-	fields := strings.Fields(message[position+len(marker):])
-	if len(fields) == 0 {
+	m := sourceLogPattern.FindStringSubmatch(message)
+	if m == nil {
 		return "", false
 	}
-	address := strings.TrimSpace(fields[0])
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return "", false
-	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	if ip == nil {
+	host, ok := logAddress(m[2])
+	ip := net.ParseIP(host)
+	if !ok || ip == nil {
 		return "", false
 	}
 	return ip.String(), true
@@ -786,7 +814,7 @@ func topDestinations(node Node, limit int) []string {
 	}
 	result := make([]string, 0, len(items))
 	for _, item := range items {
-		result = append(result, fmt.Sprintf("%s (%d)", item.name, item.stat.Count))
+		result = append(result, fmt.Sprintf("%s (%d)", safeTerminalText(item.name), item.stat.Count))
 	}
 	return result
 }

@@ -207,9 +207,13 @@ func (a *app) deviceCmdLocked(args []string) error {
 		}
 		u.Devices = append(u.Devices, Device{Name: strings.TrimSpace(*name), Enabled: true, CreatedAt: time.Now().Format(time.RFC3339), SubscriptionToken: newSubscriptionToken()})
 		for _, source := range nodesForDevice(*u, sourceName) {
+			mark, err := allocateRateMark(s)
+			if err != nil {
+				return err
+			}
 			node := Node{
 				Name: source.Name, Device: strings.TrimSpace(*name), AuthUser: uniqueAuthUser(s, u.Name+"-"+slug(*name)+"-"+slug(source.Name)), UUID: newUUID(),
-				Outbound: source.Outbound, UploadMbps: source.UploadMbps, DownloadMbps: source.DownloadMbps, RateMark: allocateRateMark(s),
+				Outbound: source.Outbound, UploadMbps: source.UploadMbps, DownloadMbps: source.DownloadMbps, RateMark: mark,
 			}
 			u.Nodes = append(u.Nodes, node)
 		}
@@ -315,6 +319,7 @@ func (a *app) deviceCmdLocked(args []string) error {
 			return fmt.Errorf("设备 %q 不存在", args[2])
 		}
 		device.Enabled = args[0] == "enable"
+		device.Access.ConnectionBlockedUntil = ""
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}

@@ -12,21 +12,31 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Check public repository tree
-        run: python3 ./scripts/check_public_tree.py
-      - uses: actions/setup-go@v7
+        run: |
+          python3 ./scripts/test_check_public_tree.py
+          python3 ./scripts/check_public_tree.py
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: '1.27.1'
           cache: true
       - name: Check formatting
         shell: bash
         run: test -z "$(gofmt -l ./cmd)"
       - name: Vet
         run: go vet ./...
+      - name: Check reachable Go vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
       - name: Test
         shell: bash
         run: |
@@ -50,8 +60,13 @@ jobs:
       - name: Build tagged Linux release
         if: startsWith(github.ref, 'refs/tags/v')
         run: ./deploy/build-linux.sh
+      - name: Attest tagged Linux release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: '.dist/sbmgr-*-linux-amd64'
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sbmgr-linux-amd64
           include-hidden-files: true

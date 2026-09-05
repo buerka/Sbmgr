@@ -894,7 +894,7 @@ func (m tuiModel) updateHealth(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			{label: "超时（秒）", value: strconv.Itoa(settings.TimeoutSeconds)},
 			{label: "失败告警次数", value: strconv.Itoa(settings.AlertAfterFailures)},
 			{label: "自定义目标", value: formatHealthTargets(settings.Targets), placeholder: "tag=host:port,tag2=host:port"},
-			{label: "Webhook URL", value: notifications.WebhookURL, placeholder: "留空关闭外部通知"},
+			{label: "Webhook URL", value: notifications.WebhookURL, placeholder: "留空关闭外部通知", secret: true},
 			{label: "现有密钥", value: "保留", options: []string{"保留", "清除"}},
 			{label: "Webhook 新密钥", placeholder: "留空不修改", secret: true},
 			{label: "Webhook 超时", value: strconv.Itoa(notifications.TimeoutSeconds)},
@@ -3315,7 +3315,7 @@ func (m tuiModel) render() string {
 	case tuiConfirmMode:
 		body = m.renderConfirm()
 	}
-	return body
+	return safeTerminalView(body)
 }
 
 func (m tuiModel) renderHeader(section string) string {
@@ -3653,8 +3653,8 @@ func (m tuiModel) renderDetail() string {
 		content = append(content, row)
 		if i == m.nodeCursor {
 			content = append(content,
-				tuiDimStyle.Render(singleLine(fmt.Sprintf("     出站 %s · UUID %s", dash(n.Outbound), n.UUID), max(24, m.width-6))),
-				tuiDimStyle.Render(singleLine(fmt.Sprintf("     auth_user %s · mark %s · 更新 %s", n.AuthUser, rateMarkText(mark), formatDisplayTime(n.RateUpdatedAt)), max(24, m.width-6))))
+				tuiDimStyle.Render(singleLine(fmt.Sprintf("     出站 %s · UUID %s", dash(n.Outbound), "[已隐藏]"), max(24, m.width-6))),
+				tuiDimStyle.Render(singleLine(fmt.Sprintf("     auth_user %s · mark %s · 更新 %s", "[已隐藏]", rateMarkText(mark), formatDisplayTime(n.RateUpdatedAt)), max(24, m.width-6))))
 			if (throttleStage(*u) > 0 || burstSoftBlocked(*u, time.Now())) && (baseUp != upMbps || baseDown != downMbps) {
 				content = append(content, tuiDimStyle.Render(fmt.Sprintf("     基础限速 ↑ %s / ↓ %s Mbps", formatMbpsUI(baseUp), formatMbpsUI(baseDown))))
 			}
@@ -3739,10 +3739,10 @@ func (m tuiModel) renderDevices() string {
 				lines = append(lines, tuiDimStyle.Render("     最近来源   "+strings.Join(sources, "  ·  ")))
 			}
 			for _, node := range nodesForDevice(*u, device.Name) {
-				lines = append(lines, tuiDimStyle.Render(fmt.Sprintf("     · %s  %s  ↑%s/↓%s Mbps", node.Name, node.UUID, formatMbpsUI(node.UploadMbps), formatMbpsUI(node.DownloadMbps))))
+				lines = append(lines, tuiDimStyle.Render(fmt.Sprintf("     · %s  %s  ↑%s/↓%s Mbps", node.Name, "[已隐藏]", formatMbpsUI(node.UploadMbps), formatMbpsUI(node.DownloadMbps))))
 			}
 			if m.state.Subscription.Enabled {
-				lines = append(lines, "     订阅链接   "+subscriptionURL(m.state, device))
+				lines = append(lines, "     订阅链接   "+subscriptionPublishedBase(m.state.Subscription)+"/sub/[已隐藏]")
 			} else {
 				lines = append(lines, tuiDimStyle.Render("     订阅链接   服务未开启（用户列表按 u 设置）"))
 			}
@@ -3882,9 +3882,9 @@ func (m tuiModel) renderSubscriptions() string {
 		if availabilityReason != "" {
 			content = append(content, tuiBadStyle.Render(singleLine("     原因 "+availabilityReason, max(20, m.width-5))))
 		}
-		link := "服务关闭 · 开启后使用 " + subscriptionURL(m.state, entry.Device)
+		link := "服务关闭 · 开启后使用 " + subscriptionPublishedBase(m.state.Subscription) + "/sub/[已隐藏]"
 		if settings.Enabled {
-			link = subscriptionURL(m.state, entry.Device)
+			link = subscriptionPublishedBase(m.state.Subscription) + "/sub/[已隐藏]"
 		}
 		content = append(content, tuiDimStyle.Render("     URL "+singleLine(link, max(14, m.width-10))))
 		if index == cursor {
@@ -3985,7 +3985,7 @@ func (m tuiModel) renderQRCode() string {
 	availabilityLine := availabilityStyle.Render(singleLine("  "+availability, max(20, m.width-2)))
 	footer := m.footer("esc 返回")
 	footerLines := strings.Split(footer, "\n")
-	linkLine := "  URL " + singleLine(link, max(12, m.width-8))
+	linkLine := "  URL [已隐藏] · 二维码为敏感访问凭据，请勿截图分享"
 	qr := subscriptionQRText(link)
 	qrLines := []string{}
 	if qr != "" {
@@ -4406,6 +4406,8 @@ func (m tuiModel) formHelpLines(width int) []string {
 		paragraphs = ipPolicyFormHelp(m.form)
 	} else {
 		switch m.form.kind {
+		case formAccessPolicy, formBatchAccess:
+			paragraphs = []string{"连接数默认不限；超限默认仅告警。选择禁用设备或用户时，临时封禁 10 分钟后自动恢复；手动禁用不会自动恢复。保存后需应用配置；后台处罚与恢复自动应用，失败保留待应用状态并重试。"}
 		case formSubscriptionSettings:
 			paragraphs = []string{
 				"证书和私钥路径同时填写会启用原生 HTTPS；都留空则关闭。私钥内容不会显示或写入审计日志。",
@@ -4492,7 +4494,7 @@ func (m tuiModel) ipPolicyFormHelpContent(width int) []string {
 		{title: "关闭", body: []string{"不会因来源 IP 拒绝或告警，但服务器看到的公网 IP 仍会存档。它不会关闭配额、到期、异常保护、访问或并发规则。"}},
 		{title: "执行模式", body: []string{"“强制限制”会下发 sing-box 拒绝规则；“仅记录告警”允许所有 IP，绑定列表只用于存档和报告不匹配。"}},
 		{title: "动态单活", body: []string{"只保留 1 个公网 IP。同一 NAT/路由器后的多台设备显示为同一 IP，可同时使用。旧绑定 IP 在配置的静默秒数（1–3600，默认 60）内无新活动后，新 IP 重试即可接管。新 IP 首次尝试可能短暂失败；旧 IP 仍在静默窗口内时，新 IP 在强制模式下会被拒绝。"}},
-		{title: "自动绑定", body: []string{"第一次观察到的 IP 会加入固定列表，直到达到“最多允许 IP”。列表满后不会自动换绑；强制模式下需手动改列表或使用临时替代 IP。"}},
+		{title: "自动绑定", body: []string{"第一次观察到的 IP 会加入固定列表，直到达到“最多允许 IP”。连续 24 小时无活动的绑定由后台释放并自动应用；列表仍满时，强制模式下其他 IP 会被拒绝。手动指定的 IP 不会因闲置释放。"}},
 		{title: "手动指定", body: []string{"只允许“固定 IP”列表，不会随地址变化自动更新。强制模式下列表为空会拒绝全部受管连接；仅告警模式下不会拒绝。"}},
 		{title: "临时替代 IP", body: []string{"用于换地点后的临时换绑/解锁。有效期内临时列表会取代固定列表，不是两者同时允许；到期后自动恢复原绑定。"}},
 		{title: "判定、等待与叠加", body: []string{"系统按服务器看到的公网出口 IP 判定，不识别内网地址。活跃状态来自 sing-box 日志，后台定时识别、更新和应用，换网后应在静默窗口结束后重试。用户级和设备级规则会同时检查，任一层不允许都会拒绝，即“取更严”。"}},
@@ -4560,11 +4562,11 @@ func ipPolicyFormHelp(form tuiForm) []string {
 		paragraphs = append(paragraphs, "动态单活：只保留 1 个公网 IP。同一 IP/NAT 后的多设备可同时用；旧绑定 IP 连续 "+handoverSeconds+" 秒无新活动后，新 IP 再次连接即可接管。")
 		paragraphs = append(paragraphs, "新 IP 的首次尝试可能短暂失败；等待后台识别、应用后重试。旧 IP 仍在静默窗口内时，新 IP 在强制模式下会被拒绝。")
 	case "自动绑定":
-		paragraphs = append(paragraphs, "自动绑定：第一次观察到的 IP 会加入固定列表；数量满后不会因旧 IP 闲置而自动换绑，其他 IP 在强制模式下会被拒绝。")
+		paragraphs = append(paragraphs, "自动绑定：首次观察到的 IP 加入固定列表；连续 24 小时无活动后后台释放并自动应用。列表仍满时，其他 IP 在强制模式下会被拒绝。")
 	case "手动指定":
 		paragraphs = append(paragraphs, "手动指定：只使用“固定 IP”列表，地址变化不会自动换绑；强制模式下列表为空会拒绝该用户/设备的全部连接。")
 	default:
-		paragraphs = append(paragraphs, "绑定方式保持不变：动态单活会换绑，自动绑定只填满固定列表，手动指定只信任填写的 IP。")
+		paragraphs = append(paragraphs, "绑定方式保持不变：动态单活会换绑，自动绑定会释放闲置 24 小时的 IP，手动指定只信任填写的 IP。")
 	}
 
 	if temporaryIP != "" && temporaryIP != "-" {
@@ -5186,6 +5188,7 @@ func normalizeQuotaInput(value string) string {
 }
 
 func cell(value string, width int) string {
+	value = safeTerminalText(value)
 	plainWidth := lipgloss.Width(value)
 	if plainWidth > width-1 {
 		var b strings.Builder
@@ -5220,7 +5223,7 @@ func lastOutputLine(s string) string {
 }
 
 func singleLine(s string, width int) string {
-	s = strings.Join(strings.Fields(s), " ")
+	s = safeTerminalText(strings.Join(strings.Fields(s), " "))
 	if lipgloss.Width(s) <= width {
 		return s
 	}

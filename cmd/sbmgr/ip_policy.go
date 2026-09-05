@@ -87,6 +87,14 @@ func validateIPPolicy(policy IPPolicy) error {
 			return errors.New("临时 IP 缺少有效的到期时间")
 		}
 	}
+	for ip, last := range policy.BoundLastSeen {
+		if net.ParseIP(ip) == nil {
+			return errors.New("绑定活动记录包含无效 IP")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, last); err != nil {
+			return errors.New("绑定活动记录包含无效时间")
+		}
+	}
 	return nil
 }
 
@@ -168,6 +176,14 @@ func hasCompetingActiveBoundIP(s *State, userName, deviceName, candidateIP strin
 	}
 	policy = normalizedIPPolicy(policy)
 	grace := time.Duration(policy.HandoverSeconds) * time.Second
+	for _, ip := range policy.BoundIPs {
+		if containsIP([]string{candidateIP}, ip) {
+			continue
+		}
+		if last, err := time.Parse(time.RFC3339Nano, policy.BoundLastSeen[ip]); err == nil && now.Sub(last) <= grace {
+			return true
+		}
+	}
 	for _, connection := range s.ActiveConnections {
 		if !connectionActiveWithinAt(connection, now, grace) {
 			continue
@@ -265,6 +281,10 @@ func recordUserSourceIP(s *State, u *User, nodeName, ip string, now time.Time) b
 			s.IPApplyPending = true
 		}
 	}
+	if policy.Enabled && containsIP(policy.BoundIPs, ip) {
+		rememberBoundActivity(&policy, ip, now)
+		u.IPPolicy = policy
+	}
 	u.SourceIPs[ip] = stat
 	trimSourceIPs(u.SourceIPs, sourceIPArchiveLimit)
 	return true
@@ -328,6 +348,10 @@ func recordDeviceSourceIP(s *State, u *User, device *Device, nodeName, ip string
 			s.IPApplyPending = true
 		}
 	}
+	if policy.Enabled && containsIP(policy.BoundIPs, ip) {
+		rememberBoundActivity(&policy, ip, now)
+		device.IPPolicy = policy
+	}
 	device.SourceIPs[ip] = stat
 	trimSourceIPs(device.SourceIPs, sourceIPArchiveLimit)
 	return true
@@ -358,7 +382,7 @@ func trimSourceIPs(values map[string]SourceIPStat, limit int) {
 }
 
 func expireTemporaryIPPolicies(s *State, now time.Time) bool {
-	changed := false
+	changed := releaseIdleBindings(s, now)
 	for i := range s.Users {
 		u := &s.Users[i]
 		if len(u.IPPolicy.TemporaryIPs) > 0 {

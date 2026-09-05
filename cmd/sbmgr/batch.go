@@ -173,6 +173,7 @@ func applyBatchToUser(s *State, u *User, op batchOperation, now time.Time) (int,
 func applyBatchUserSettings(u *User, patch batchUserSettingsPatch, now time.Time) error {
 	if patch.Enabled != nil {
 		u.Enabled = *patch.Enabled
+		u.Access.ConnectionBlockedUntil = ""
 		if u.Enabled {
 			u.DisabledReason = ""
 		} else {
@@ -266,7 +267,11 @@ func applyBatchNodeRates(s *State, u *User, patch batchNodeRatesPatch) (int, err
 			}
 			node.UploadMbps, node.DownloadMbps = u.UploadMbps, u.DownloadMbps
 			if nodeRateLimited(*node) && !validRateMark(node.RateMark) {
-				node.RateMark = allocateRateMark(s)
+				mark, err := allocateRateMark(s)
+				if err != nil {
+					return 0, err
+				}
+				node.RateMark = mark
 			}
 			changed[index] = true
 		}
@@ -294,7 +299,11 @@ func applyBatchNodeRates(s *State, u *User, patch batchNodeRatesPatch) (int, err
 		}
 		node.UploadMbps, node.DownloadMbps = up, down
 		if nodeRateLimited(*node) && !validRateMark(node.RateMark) {
-			node.RateMark = allocateRateMark(s)
+			mark, err := allocateRateMark(s)
+			if err != nil {
+				return 0, err
+			}
+			node.RateMark = mark
 		}
 		changed[index] = true
 	}

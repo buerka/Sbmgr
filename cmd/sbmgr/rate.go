@@ -168,7 +168,7 @@ func formatMbps(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-func allocateRateMark(s *State) uint32 {
+func allocateRateMark(s *State) (uint32, error) {
 	used := make(map[uint32]bool, len(s.Users))
 	for _, u := range s.Users {
 		if validRateMark(u.RateMark) {
@@ -183,10 +183,10 @@ func allocateRateMark(s *State) uint32 {
 	for id := uint32(1); id <= 0xffff; id++ {
 		mark := rateMarkPrefix | id
 		if !used[mark] {
-			return mark
+			return mark, nil
 		}
 	}
-	panic("sbmgr rate mark space exhausted")
+	return 0, errors.New("节点 mark 空间已耗尽（上限 65535）；请删除不再使用的节点后重试")
 }
 
 func validRateMark(mark uint32) bool {
@@ -194,6 +194,9 @@ func validRateMark(mark uint32) bool {
 }
 
 func validateRateMarks(s *State) error {
+	if countNodes(s.Users) > 0xffff {
+		return errors.New("节点数量超过 mark 容量上限 65535")
+	}
 	seen := map[uint32]string{}
 	for _, u := range s.Users {
 		for _, n := range u.Nodes {
@@ -211,7 +214,7 @@ func validateRateMarks(s *State) error {
 			if !validRateMark(mark) {
 				return fmt.Errorf("节点 %s/%s 的 rate_mark 0x%08x 无效；请重新保存该节点限速", u.Name, n.Name, mark)
 			}
-			if previous, ok := seen[mark]; ok && previous != owner {
+			if previous, ok := seen[mark]; ok {
 				return fmt.Errorf("%s 与 %s 使用了重复的 rate_mark 0x%08x", owner, previous, mark)
 			}
 			seen[mark] = owner
@@ -460,7 +463,10 @@ func renderNftables(s *State) (string, error) {
 
 func renderNftablesWithCounters(s *State, liveCounters map[string]int64) (string, error) {
 	normalizeDeviceModel(s)
-	ensureNodeMarks(s)
+	if _, err := ensureNodeMarks(s); err != nil {
+		return "", err
+	}
+	liveCounters = canonicalNftCounters(s, liveCounters)
 	if err := validateRateMarks(s); err != nil {
 		return "", err
 	}
@@ -475,7 +481,7 @@ func renderNftablesWithCounters(s *State, liveCounters map[string]int64) (string
 	for _, u := range s.Users {
 		for _, n := range u.Nodes {
 			up, down, mark := effectiveNodeRate(u, n)
-			label := deviceNodeLabel(u.Name, n.Device, n.Name)
+			label := fmt.Sprintf("sbmgr:%08x", mark)
 			bucketsByMark[mark] = bucket{mark: mark, upload: up, download: down, label: label, soft: burstSoftBlocked(u, time.Now())}
 		}
 	}

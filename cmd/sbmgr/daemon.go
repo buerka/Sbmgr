@@ -292,7 +292,8 @@ func ipRestrictionSetSignature(s *State, now time.Time) (string, error) {
 }
 
 func (a *app) daemonCycle() error {
-	return a.withStateLock(a.daemonCycleLocked)
+	cycleErr := a.withStateLock(a.daemonCycleLocked)
+	return errors.Join(cycleErr, a.networkMaintenance())
 }
 
 func (a *app) daemonCycleLocked() error {
@@ -301,7 +302,11 @@ func (a *app) daemonCycleLocked() error {
 		return err
 	}
 	var cycleErrors []error
-	if ensureNodeMarks(s) {
+	marksChanged, marksErr := ensureNodeMarks(s)
+	if marksErr != nil {
+		return marksErr
+	}
+	if marksChanged {
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
@@ -382,14 +387,6 @@ func (a *app) daemonCycleLocked() error {
 	if expireTemporaryIPPolicies(s, time.Now()) {
 		stateChanged = true
 	}
-	if changed, err := checkOutboundHealth(s, time.Now(), false); err != nil {
-		cycleErrors = append(cycleErrors, fmt.Errorf("探测出口健康: %w", err))
-	} else {
-		stateChanged = stateChanged || changed
-	}
-	if fleetCheckDue(s, time.Now()) && refreshFleet(s, time.Now()) {
-		stateChanged = true
-	}
 	burstStateChanged, burstConfigChanged, burstHardDisconnect, burstAlerts := evaluateBurstPolicies(s, time.Now())
 	stateChanged = stateChanged || burstStateChanged
 	if burstConfigChanged {
@@ -401,12 +398,6 @@ func (a *app) daemonCycleLocked() error {
 	}
 	if evaluateLifecycleAlerts(s, time.Now()) {
 		stateChanged = true
-	}
-	if changed, err := deliverPendingAlerts(s, time.Now()); err != nil {
-		stateChanged = stateChanged || changed
-		cycleErrors = append(cycleErrors, fmt.Errorf("发送 Webhook 告警: %w", err))
-	} else {
-		stateChanged = stateChanged || changed
 	}
 	tierChanged := queueThrottleStageApply(stages, s)
 	if tierChanged {

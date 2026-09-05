@@ -109,8 +109,13 @@ if [ ! -x "$certbot" ]; then
         apt-get install -y python3-venv
         python3 -m venv "$venv"
     fi
-    "$venv/bin/pip" install --disable-pip-version-check --no-cache-dir 'certbot>=5.4,<6'
 fi
+
+# Every install/upgrade uses the reviewed Linux wheel set, including transitive
+# dependencies. Missing wheels or a hash mismatch fail before certificate work.
+"$venv/bin/pip" install --disable-pip-version-check --no-cache-dir \
+    --require-hashes --only-binary=:all: -r "$script_dir/certbot-requirements.txt"
+"$venv/bin/pip" check
 
 certbot_version=$($certbot --version 2>&1 | awk '{print $2}')
 "$venv/bin/python" - "$certbot_version" <<'PY'

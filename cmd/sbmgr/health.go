@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -196,10 +197,15 @@ func deliverPendingAlerts(s *State, now time.Time) (bool, error) {
 		return false, nil
 	}
 	client := &http.Client{Timeout: time.Duration(settings.TimeoutSeconds) * time.Second}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	changed := false
 	var deliveryErrors []error
 	delivered := 0
 	for index := range s.Alerts {
+		if ctx.Err() != nil {
+			break
+		}
 		alert := &s.Alerts[index]
 		if alert.NotifiedAt != "" || delivered >= 10 {
 			continue
@@ -208,7 +214,7 @@ func deliverPendingAlerts(s *State, now time.Time) (bool, error) {
 			continue
 		}
 		body, _ := json.Marshal(map[string]any{"source": "sbmgr", "version": appVersion, "alert": alert})
-		request, err := http.NewRequest(http.MethodPost, settings.WebhookURL, bytes.NewReader(body))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, settings.WebhookURL, bytes.NewReader(body))
 		if err == nil {
 			request.Header.Set("Content-Type", "application/json")
 			if settings.WebhookSecret != "" {
@@ -230,8 +236,9 @@ func deliverPendingAlerts(s *State, now time.Time) (bool, error) {
 		changed = true
 		delivered++
 		if err != nil {
-			alert.NotifyError = err.Error()
-			deliveryErrors = append(deliveryErrors, fmt.Errorf("告警 %s: %w", alert.Kind, err))
+			// net/url errors contain the full webhook URL, often a credential.
+			alert.NotifyError = "Webhook 投递失败（连接、超时或非成功状态码）"
+			deliveryErrors = append(deliveryErrors, errors.New(alert.NotifyError))
 			continue
 		}
 		alert.NotifiedAt = now.Format(time.RFC3339)

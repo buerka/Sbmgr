@@ -130,7 +130,7 @@ def forbidden_path_reason(relative: str) -> str | None:
             return "runtime configuration"
     if any(part in FORBIDDEN_DIRS or part.startswith("letsencrypt") for part in lower_parts[:-1]):
         return "runtime or credential directory"
-    if not example_file and any(basename.endswith(suffix) for suffix in FORBIDDEN_SUFFIXES):
+    if any(basename.endswith(suffix) for suffix in FORBIDDEN_SUFFIXES):
         return "runtime or credential file type"
     if basename.startswith(".env") and basename != ".env.example":
         return "environment file"
@@ -149,7 +149,7 @@ def is_unexpected_public_ipv4(value: str) -> bool:
 
 def scan_content(relative: str, raw: bytes) -> list[tuple[int, str]]:
     if b"\0" in raw:
-        return []
+        return [(1, "unexpected binary content; review and explicitly allow a safe source asset")]
     text = raw.decode("utf-8", "replace")
     findings: list[tuple[int, str]] = []
     for line_number, line in enumerate(text.splitlines(), 1):

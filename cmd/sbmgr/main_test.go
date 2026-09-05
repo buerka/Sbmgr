@@ -679,7 +679,7 @@ func TestPerNodeLimitsUseIndependentMarks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"meta mark 0x53420001", "meta mark 0x53420002", "alice/Node A upload", "alice/Relay A download", "1250000 bytes/second", "5000000 bytes/second"} {
+	for _, want := range []string{"meta mark 0x53420001", "meta mark 0x53420002", "sbmgr:53420001 upload", "sbmgr:53420002 download", "1250000 bytes/second", "5000000 bytes/second"} {
 		if !strings.Contains(nft, want) {
 			t.Fatalf("nft rules missing %q:\n%s", want, nft)
 		}
@@ -749,7 +749,7 @@ func TestLegacyDefaultNodeUsesDefaultServerTemplateName(t *testing.T) {
 
 func TestRateMarkAllocationAndValidation(t *testing.T) {
 	s := &State{Users: []User{{Name: "one", Nodes: []Node{{Name: "a", UploadMbps: 1, RateMark: rateMarkPrefix | 1}}}}}
-	if got := allocateRateMark(s); got != rateMarkPrefix|2 {
+	if got, err := allocateRateMark(s); err != nil || got != rateMarkPrefix|2 {
 		t.Fatalf("got mark 0x%x", got)
 	}
 	s.Users = append(s.Users, User{Name: "two", Nodes: []Node{{Name: "b", DownloadMbps: 1, RateMark: rateMarkPrefix | 1}}})
@@ -780,7 +780,7 @@ func TestNftCountersExcludeDroppedBytesAndSurviveReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	drop := strings.Index(rules, "limit rate over 1250000 bytes/second")
-	counter := strings.Index(rules, "counter packets 0 bytes 12345 comment \"alice/Node A upload\"")
+	counter := strings.Index(rules, "counter packets 0 bytes 12345 comment \"sbmgr:53420001 upload\"")
 	if drop < 0 || counter < 0 || counter <= drop || strings.Contains(rules[drop:counter], " counter ") {
 		t.Fatalf("accepted-byte counter is not after the drop rule:\n%s", rules)
 	}
@@ -792,7 +792,7 @@ func TestImportPreservesComplexAuthUserRules(t *testing.T) {
 		map[string]any{"auth_user": []any{"alice"}, "domain_suffix": []any{"example.com"}, "action": "reject"},
 		map[string]any{"auth_user": []any{"alice"}, "outbound": "proxy", "domain_suffix": []any{"internal.example"}},
 	}}}
-	stripManagedRoutes(cfg)
+	stripManagedRoutes(cfg, map[string]bool{"alice": true})
 	rules := cfg["route"].(map[string]any)["rules"].([]any)
 	if len(rules) != 2 {
 		t.Fatalf("complex auth_user rules were removed: %#v", rules)

@@ -195,12 +195,12 @@ func TestSubscriptionHEADDoesNotRenderMihomoTemplate(t *testing.T) {
 	}
 }
 
-func TestSubscriptionClientIPTrustsOnlyLoopbackProxy(t *testing.T) {
+func TestSubscriptionClientIPNeverTrustsForwardedHeaders(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "http://example/sub/token", nil)
 	request.RemoteAddr = "127.0.0.1:1234"
 	request.Header.Set("X-Forwarded-For", "192.0.2.66, 203.0.113.10")
 	request.Header.Set("X-Real-IP", "203.0.113.10")
-	if got := subscriptionClientIP(request); got != "203.0.113.10" {
+	if got := subscriptionClientIP(request); got != "127.0.0.1" {
 		t.Fatalf("loopback proxy IP = %q", got)
 	}
 	request.Header.Del("X-Real-IP")

@@ -2,7 +2,7 @@
 
 ## 环境
 
-- Go 1.25 或更新版本
+- Go 1.26.8 或更新版本；推荐使用 `go.mod` 指定的 Go 1.27.1
 - Linux 运行环境需要 sing-box、nftables、conntrack 和 systemd
 - Windows 可以开发和运行大部分单元测试；Linux 集成功能应另外验证
 
@@ -47,6 +47,8 @@ git tag -a vX.Y.Z -m "sbmgr vX.Y.Z"
 
 ## 发布检查表
 
+安全审计修复与升级前检查见 [2026-09-05 修复记录](SECURITY-REMEDIATION-20260905.md)。标签 CI 会生成构建来源证明；在可信工作站使用 `gh attestation verify <artifact> -R buerka/Sbmgr` 检查仓库、工作流和预期 tag 后，再把校验和传给部署脚本。SHA256 本身只检验内容一致性。
+
 1. 工作树干净，目标 tag 指向已审核 commit。
 2. `gofmt`、`go vet ./...`、`go test ./...` 全部通过。
 3. 执行 `deploy/build-linux.sh`，记录生成文件的 SHA256。
@@ -65,6 +67,12 @@ git tag -a vX.Y.Z -m "sbmgr vX.Y.Z"
 ```
 
 脚本会在状态锁内保存 `state.db` 的一致性副本、兼容期旧 `state.json`、迁移标记、`config.base.json`、`sing-box.json` 和校验清单到 `backups/state-config/`，并保留最近 20 组；首次升级会在停服状态下同步完成 JSON → SQLite 影子验证与正式迁移，确认数据库完整后才启动服务。root 服务的应用目录与父目录必须由 root 持有且不可被组/其他用户写入。旧程序只存在于权限为 `0700` 的临时文件，成功或失败恢复后都会删除。
+
+## Fleet 专用密钥
+
+Fleet 巡检应使用独立密钥。目标机器的 `authorized_keys` 用 `restrict` 禁止转发、PTY 与用户 rc，并将命令固定为 `/srv/sbmgr/deploy/fleet-readonly-snapshot.sh --home /srv/sbmgr`（按实际安装目录调整）。配置格式为 `restrict,command="<固定脚本路径> --home <固定安装目录>" <巡检公钥>`；脚本、应用目录和父目录须由 root 所有且不能被其他用户写入。
+
+该脚本忽略 `SSH_ORIGINAL_COMMAND`，只运行 `admin snapshot`，不提供交互 shell。安装权限为 0700，并确保同目录有 `path-lib.sh`。不要把真实 SSH 公钥、私钥或服务器地址提交到仓库。
 
 ## 敏感信息检查
 

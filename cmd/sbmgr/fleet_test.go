@@ -41,11 +41,11 @@ func TestFleetValidationAllowsRemoteHomeDefault(t *testing.T) {
 		t.Fatalf("remote-home command = %q", got)
 	}
 	server.AppDir = "/srv/sbmgr"
-	if got := fleetSnapshotCommand(server); got != "SBMGR_HOME=/srv/sbmgr /srv/sbmgr/sbmgr admin snapshot" {
+	if got := fleetSnapshotCommand(server); got != "SBMGR_HOME='/srv/sbmgr' '/srv/sbmgr/sbmgr' admin snapshot" {
 		t.Fatalf("explicit-directory command = %q", got)
 	}
 	server.AppDir = "/srv/sbmgr/"
-	if got := fleetSnapshotCommand(server); got != "SBMGR_HOME=/srv/sbmgr /srv/sbmgr/sbmgr admin snapshot" {
+	if got := fleetSnapshotCommand(server); got != "SBMGR_HOME='/srv/sbmgr' '/srv/sbmgr/sbmgr' admin snapshot" {
 		t.Fatalf("trailing-slash directory command = %q", got)
 	}
 }

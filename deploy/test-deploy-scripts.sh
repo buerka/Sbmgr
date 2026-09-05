@@ -53,6 +53,12 @@ trap 'rm -rf -- "$test_root" "$transaction_root"' EXIT HUP INT TERM
 ln -s /etc "$test_root/etc-link"
 assert_rejected "$test_root/etc-link/sbmgr"
 
+# Validate the resolved spelling, including a symlink whose input spelling is
+# safe but target contains systemd/shell metacharacters.
+mkdir -p "$transaction_root/unsafe space"
+ln -s "$transaction_root/unsafe space" "$transaction_root/safe-link"
+assert_rejected "$transaction_root/safe-link"
+
 mkdir -p "$test_root/app" "$test_root/units"
 printf '{}\n' >"$test_root/app/state.json"
 [ "$(sbmgr_select_state_file "$test_root/app")" = "$test_root/app/state.json" ] || \
@@ -81,6 +87,11 @@ done
 
 grep -Fq 'Environment=SBMGR_HOME=/srv/sbmgr' "$test_root/units/sbmgr.service" || \
     fail "主服务未写入绝对 SBMGR_HOME"
+for hardened_unit in sbmgr.service sbmgr-ip-cert-renew.service; do
+    for directive in CapabilityBoundingSet RestrictNamespaces SystemCallFilter ProtectProc ProtectHostname; do
+        grep -q "^$directive=" "$test_root/units/$hardened_unit" || fail "$hardened_unit 缺少 $directive"
+    done
+done
 grep -Fq 'ExecStart=/srv/sbmgr/sbmgr daemon' "$test_root/units/sbmgr.service" || \
     fail "主服务 ExecStart 路径错误"
 grep -Fq 'ExecStart=/srv/sbmgr/deploy/renew-ip-https.sh --home /srv/sbmgr' \
@@ -377,6 +388,17 @@ export SBMGR_TEST_STAT_RESULT
 trusted_sing_box=$(sbmgr_resolve_executable "$mock_bin/sing-box")
 [ -n "$trusted_sing_box" ] && [ -x "$trusted_sing_box" ] || \
     fail "受信 sing-box 可执行文件被误拒绝"
+
+reset_transaction_fixture fleet-forced-command
+cat >"$app/sbmgr" <<'SH'
+#!/bin/sh
+printf 'fleet|%s\n' "$*" >>"$SBMGR_TEST_EVENTS"
+SH
+chmod 0700 "$app/sbmgr"
+SSH_ORIGINAL_COMMAND="touch $app/unexpected-execution" \
+    sh "$script_dir/fleet-readonly-snapshot.sh" --home "$app" >/dev/null
+[ ! -e "$app/unexpected-execution" ] || fail "Fleet 强制命令执行了客户端 shell 输入"
+grep -q 'admin snapshot' "$events" || fail "Fleet 强制命令未调用只读快照"
 
 reset_transaction_fixture success
 SBMGR_TEST_FAIL_LIVE_CHECK=0 SBMGR_TEST_CORRUPT_SNAPSHOT=0 \

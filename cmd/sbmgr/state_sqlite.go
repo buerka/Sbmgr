@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 1
+	sqliteSchemaVersion = 2
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -88,6 +88,7 @@ var sqliteSchema = []string{
 		UNIQUE(user_id, name_key)
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS devices_user_ordinal_idx ON devices(user_id, ordinal)`,
+	`CREATE INDEX IF NOT EXISTS devices_subscription_token_idx ON devices(subscription_token)`,
 	`CREATE TABLE IF NOT EXISTS nodes (
 		id INTEGER PRIMARY KEY,
 		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -276,7 +277,9 @@ func loadSQLiteStateWithCanonicalChange(path string) (*State, bool, error) {
 	}
 	normalizeQuotaModes(s)
 	normalizeDeviceModel(s)
-	ensureNodeMarks(s)
+	if _, err := ensureNodeMarks(s); err != nil {
+		return nil, false, err
+	}
 	normalizeLegacyNodeNames(s)
 	if err := validateState(s); err != nil {
 		return nil, false, fmt.Errorf("状态数据库校验失败: %w", err)
@@ -298,7 +301,9 @@ func loadSQLiteBackupState(path string) (*State, error) {
 	}
 	normalizeQuotaModes(s)
 	normalizeDeviceModel(s)
-	ensureNodeMarks(s)
+	if _, err := ensureNodeMarks(s); err != nil {
+		return nil, err
+	}
 	normalizeLegacyNodeNames(s)
 	if err := validateState(s); err != nil {
 		return nil, fmt.Errorf("SQLite 备份校验失败: %w", err)
@@ -568,6 +573,25 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 			}
 			ok = true
 			version = sqliteSchemaVersion
+		case 1:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS devices_subscription_token_idx ON devices(subscription_token)`); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(`UPDATE metadata SET value = '2' WHERE key = 'schema_version'`); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(`PRAGMA user_version = 2`); err != nil {
+				return err
+			}
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+			version = 2
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
@@ -743,6 +767,8 @@ func stripSQLiteRuntime(state *State) {
 		user.QuotaAlertStage = 0
 		user.ExpiryAlertStage = 0
 		user.Access.LastConnectionAlert = ""
+		user.IPPolicy.BoundLastSeen = nil
+		user.Access.ConnectionBlockedUntil = ""
 		user.SourceIPs = nil
 		user.TrafficSamples = nil
 		user.UsageHistory = nil
@@ -752,6 +778,8 @@ func stripSQLiteRuntime(state *State) {
 			device := &user.Devices[deviceIndex]
 			device.LastSeen = ""
 			device.Access.LastConnectionAlert = ""
+			device.IPPolicy.BoundLastSeen = nil
+			device.Access.ConnectionBlockedUntil = ""
 			device.SourceIPs = nil
 		}
 		for nodeIndex := range user.Nodes {

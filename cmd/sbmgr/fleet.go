@@ -328,7 +328,11 @@ func fleetSnapshotCommand(server FleetServer) string {
 	if server.AppDir == "" {
 		return `SBMGR_HOME="$HOME/sbmgr" "$HOME/sbmgr/sbmgr" admin snapshot`
 	}
-	return "SBMGR_HOME=" + server.AppDir + " " + server.AppDir + "/sbmgr admin snapshot"
+	return "SBMGR_HOME=" + posixShellQuote(server.AppDir) + " " + posixShellQuote(server.AppDir+"/sbmgr") + " admin snapshot"
+}
+
+func posixShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func fleetSSHArgs(server FleetServer, command string) []string {
@@ -369,6 +373,8 @@ func (a *app) snapshotCmd(args []string) error {
 }
 
 func checkFleetServer(ctx context.Context, server FleetServer) FleetServerStatus {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	server = normalizedFleetServer(server)
 	status := FleetServerStatus{CheckedAt: time.Now().Format(time.RFC3339)}
 	if err := validateFleet(&State{Fleet: []FleetServer{server}}); err != nil {
@@ -386,6 +392,7 @@ func checkFleetServer(ctx context.Context, server FleetServer) FleetServerStatus
 	command := fleetSnapshotCommand(server)
 	started := time.Now()
 	cmd := exec.CommandContext(ctx, "ssh", fleetSSHArgs(server, command)...)
+	cmd.WaitDelay = time.Second
 	stdout := newFleetLimitedBuffer(fleetMaxStdoutBytes)
 	stderr := newFleetLimitedBuffer(fleetMaxStderrBytes)
 	cmd.Stdout = stdout

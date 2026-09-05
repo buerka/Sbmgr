@@ -63,8 +63,11 @@ func validateBurst(policy BurstPolicy) error {
 }
 
 func burstBlocked(u User, now time.Time) bool {
+	if u.BlockedUntil == "" {
+		return false
+	}
 	until, err := time.Parse(time.RFC3339Nano, u.BlockedUntil)
-	return err == nil && now.Before(until)
+	return err != nil || now.Before(until)
 }
 
 func burstSoftBlocked(u User, now time.Time) bool {

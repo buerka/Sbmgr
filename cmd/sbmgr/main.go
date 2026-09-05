@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,7 +23,7 @@ import (
 	"time"
 )
 
-const stateVersion = 9
+const stateVersion = 10
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -32,6 +33,7 @@ var (
 )
 
 type State struct {
+	connectionIndex   *connectionHeap
 	Version           int                          `json:"version"`
 	BaseConfig        string                       `json:"base_config"`
 	ConfigPath        string                       `json:"config_path"`
@@ -70,6 +72,8 @@ type ClientSettings struct {
 }
 
 type User struct {
+	recentIndex map[string]int // transient write-side lookup, rebuilt after pruning
+
 	Name                string                  `json:"name"`
 	Enabled             bool                    `json:"enabled"`
 	QuotaBytes          int64                   `json:"quota_bytes"`
@@ -229,23 +233,25 @@ type NotificationSettings struct {
 }
 
 type AccessPolicy struct {
-	AllowedDomains      []string `json:"allowed_domains,omitempty"`
-	BlockedDomains      []string `json:"blocked_domains,omitempty"`
-	BlockedPorts        []int    `json:"blocked_ports,omitempty"`
-	MaxConnections      int      `json:"max_connections,omitempty"`
-	ConnectionAction    string   `json:"connection_action,omitempty"`
-	LastConnectionAlert string   `json:"last_connection_alert,omitempty"`
+	ConnectionBlockedUntil string   `json:"connection_blocked_until,omitempty"`
+	AllowedDomains         []string `json:"allowed_domains,omitempty"`
+	BlockedDomains         []string `json:"blocked_domains,omitempty"`
+	BlockedPorts           []int    `json:"blocked_ports,omitempty"`
+	MaxConnections         int      `json:"max_connections,omitempty"`
+	ConnectionAction       string   `json:"connection_action,omitempty"`
+	LastConnectionAlert    string   `json:"last_connection_alert,omitempty"`
 }
 
 type IPPolicy struct {
-	Enabled         bool     `json:"enabled,omitempty"`
-	Mode            string   `json:"mode,omitempty"`
-	Binding         string   `json:"binding,omitempty"`
-	MaxIPs          int      `json:"max_ips,omitempty"`
-	HandoverSeconds int      `json:"handover_seconds,omitempty"`
-	BoundIPs        []string `json:"bound_ips,omitempty"`
-	TemporaryIPs    []string `json:"temporary_ips,omitempty"`
-	TemporaryUntil  string   `json:"temporary_until,omitempty"`
+	BoundLastSeen   map[string]string `json:"bound_last_seen,omitempty"`
+	Enabled         bool              `json:"enabled,omitempty"`
+	Mode            string            `json:"mode,omitempty"`
+	Binding         string            `json:"binding,omitempty"`
+	MaxIPs          int               `json:"max_ips,omitempty"`
+	HandoverSeconds int               `json:"handover_seconds,omitempty"`
+	BoundIPs        []string          `json:"bound_ips,omitempty"`
+	TemporaryIPs    []string          `json:"temporary_ips,omitempty"`
+	TemporaryUntil  string            `json:"temporary_until,omitempty"`
 }
 
 type SourceIPStat struct {
@@ -516,6 +522,9 @@ func (a *app) initCmd(args []string) error {
 		*base = filepath.Join(filepath.Dir(a.statePath), "config.base.json")
 	}
 	state.BaseConfig = absOrOriginal(*base)
+	if err := validateConfigPaths(state.BaseConfig, state.ConfigPath); err != nil {
+		return err
+	}
 	baseBytes, _ := json.MarshalIndent(clean, "", "  ")
 	baseBytes = append(baseBytes, '\n')
 	previousBase, readBaseErr := os.ReadFile(*base)
@@ -641,7 +650,21 @@ func importConfig(cfg map[string]any, inboundTag string, importUsers bool) (*Sta
 	}
 	if importUsers {
 		target["users"] = []any{}
-		stripManagedRoutes(clean)
+		imported := map[string]bool{}
+		for _, u := range state.Users {
+			for _, n := range u.Nodes {
+				imported[n.AuthUser] = true
+			}
+		}
+		stripManagedRoutes(clean, imported)
+	}
+	state.ReservedAuthUsers = nil
+	for name := range inboundAuthNames(clean) {
+		state.ReservedAuthUsers = append(state.ReservedAuthUsers, name)
+	}
+	sort.Strings(state.ReservedAuthUsers)
+	if err := validateBaseIdentities(state, clean); err != nil {
+		return nil, nil, err
 	}
 	return state, clean, nil
 }
@@ -656,13 +679,29 @@ func routeMap(cfg map[string]any) map[string]string {
 			continue
 		}
 		out := stringValue(m["outbound"])
-		if users, ok := m["auth_user"].([]any); ok {
+		if users, ok := authRouteUsers(m["auth_user"]); ok {
 			for _, u := range users {
 				result[stringValue(u)] = out
 			}
 		}
 	}
 	return result
+}
+
+func authRouteUsers(value any) ([]any, bool) {
+	if name, ok := value.(string); ok {
+		return []any{name}, name != ""
+	}
+	users, ok := value.([]any)
+	if !ok || len(users) == 0 {
+		return nil, false
+	}
+	for _, value := range users {
+		if name, ok := value.(string); !ok || name == "" {
+			return nil, false
+		}
+	}
+	return users, true
 }
 
 func nodeTemplates(s *State) []NodeTemplate {
@@ -738,7 +777,7 @@ func findNodeTemplate(s *State, name string) (NodeTemplate, bool) {
 	return NodeTemplate{}, false
 }
 
-func stripManagedRoutes(cfg map[string]any) {
+func stripManagedRoutes(cfg map[string]any, imported map[string]bool) {
 	route, _ := cfg["route"].(map[string]any)
 	if route == nil {
 		return
@@ -749,6 +788,22 @@ func stripManagedRoutes(cfg map[string]any) {
 		m, _ := item.(map[string]any)
 		if !isSimpleAuthRouteRule(m) {
 			kept = append(kept, item)
+			continue
+		}
+		users, ok := authRouteUsers(m["auth_user"])
+		if !ok {
+			kept = append(kept, item)
+			continue
+		}
+		remaining := make([]any, 0, len(users))
+		for _, auth := range users {
+			if !imported[stringValue(auth)] {
+				remaining = append(remaining, auth)
+			}
+		}
+		if len(remaining) > 0 {
+			m["auth_user"] = remaining
+			kept = append(kept, m)
 		}
 	}
 	route["rules"] = kept
@@ -832,7 +887,10 @@ func (a *app) userCmdLocked(args []string) error {
 		}
 		n := Node{Name: *nodeName, Device: defaultDeviceName, AuthUser: uniqueAuthUser(s, name), UUID: newUUID(), Outbound: *outbound, UploadMbps: *upMbps, DownloadMbps: *downMbps}
 		if nodeRateLimited(n) {
-			n.RateMark = allocateRateMark(s)
+			n.RateMark, err = allocateRateMark(s)
+			if err != nil {
+				return err
+			}
 		}
 		u.Nodes = append(u.Nodes, n)
 		s.Users = append(s.Users, u)
@@ -982,7 +1040,10 @@ func (a *app) userCmdLocked(args []string) error {
 					u.Nodes[i].DownloadMbps = *downMbps
 				}
 				if nodeRateLimited(u.Nodes[i]) && u.Nodes[i].RateMark == 0 {
-					u.Nodes[i].RateMark = allocateRateMark(s)
+					u.Nodes[i].RateMark, err = allocateRateMark(s)
+					if err != nil {
+						return err
+					}
 				}
 			}
 			u.UploadMbps, u.DownloadMbps, u.RateMark = 0, 0, 0
@@ -1201,6 +1262,7 @@ func (a *app) userCmdLocked(args []string) error {
 			return fmt.Errorf("用户 %q 不存在", args[1])
 		}
 		u.Enabled = args[0] == "enable"
+		u.Access.ConnectionBlockedUntil = ""
 		if u.Enabled {
 			u.DisabledReason = ""
 		} else {
@@ -1351,7 +1413,10 @@ func (a *app) nodeCmdLocked(args []string) error {
 		auth := uniqueAuthUser(s, u.Name+":"+slug(device.Name)+":"+slug(*name))
 		n := Node{Name: *name, Device: device.Name, AuthUser: auth, UUID: *uuid, Outbound: *outbound, UploadMbps: *upMbps, DownloadMbps: *downMbps}
 		if nodeRateLimited(n) {
-			n.RateMark = allocateRateMark(s)
+			n.RateMark, err = allocateRateMark(s)
+			if err != nil {
+				return err
+			}
 		}
 		u.Nodes = append(u.Nodes, n)
 		if err := saveState(a.statePath, s); err != nil {
@@ -1399,7 +1464,10 @@ func (a *app) nodeCmdLocked(args []string) error {
 		}
 		n.UploadMbps, n.DownloadMbps = *upMbps, *downMbps
 		if nodeRateLimited(*n) && n.RateMark == 0 {
-			n.RateMark = allocateRateMark(s)
+			n.RateMark, err = allocateRateMark(s)
+			if err != nil {
+				return err
+			}
 		}
 		if err := saveState(a.statePath, s); err != nil {
 			return err
@@ -1701,8 +1769,13 @@ func (a *app) exportCmd(args []string) error {
 }
 
 func renderConfig(s *State) ([]byte, error) {
+	if err := validateRuntimeSettings(s); err != nil {
+		return nil, err
+	}
 	normalizeDeviceModel(s)
-	ensureNodeMarks(s)
+	if _, err := ensureNodeMarks(s); err != nil {
+		return nil, err
+	}
 	raw, err := os.ReadFile(s.BaseConfig)
 	if err != nil {
 		return nil, fmt.Errorf("读取基础模板: %w", err)
@@ -1722,6 +1795,9 @@ func renderConfig(s *State) ([]byte, error) {
 	}
 	if target == nil {
 		return nil, fmt.Errorf("基础模板缺少入站 %q", s.InboundTag)
+	}
+	if err := validateBaseIdentities(s, cfg); err != nil {
+		return nil, err
 	}
 	route, _ := cfg["route"].(map[string]any)
 	if route == nil {
@@ -1920,14 +1996,7 @@ func applyState(s *State, noReload, restart bool, w io.Writer) error {
 }
 
 func reloadSingBoxService(s *State, restart bool, w io.Writer) error {
-	var cmd *exec.Cmd
-	if restart {
-		cmd = exec.Command("systemctl", "restart", s.Service)
-	} else {
-		cmd = exec.Command("systemctl", "kill", "-s", "HUP", s.Service)
-	}
-	cmd.Stdout, cmd.Stderr = w, w
-	return cmd.Run()
+	return reloadAndCheckService(s, restart, w)
 }
 
 func renderMihomo(s *State, u User) ([]byte, error) {
@@ -2092,7 +2161,9 @@ func loadJSONStateWithCanonicalChange(path string) (*State, bool, error) {
 	}
 	normalizeQuotaModes(&s)
 	normalizeDeviceModel(&s)
-	ensureNodeMarks(&s)
+	if _, err := ensureNodeMarks(&s); err != nil {
+		return nil, false, err
+	}
 	normalizeLegacyNodeNames(&s)
 	if err := validateState(&s); err != nil {
 		return nil, false, fmt.Errorf("状态文件校验失败: %w", err)
@@ -2169,6 +2240,11 @@ func migrateState(s *State) error {
 				s.Users[index].Burst = policy
 			}
 			s.Version = 9
+		case 9:
+			// Security limits and optional connection-policy recovery metadata.
+			boundConnectionTracking(s)
+			migrateSecurityPolicies(s, time.Now())
+			s.Version = 10
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}
@@ -2177,6 +2253,12 @@ func migrateState(s *State) error {
 }
 
 func validateState(s *State) error {
+	if err := validateRuntimeSettings(s); err != nil {
+		return err
+	}
+	if len(s.ActiveConnections) > activeConnectionLimit {
+		return errors.New("活跃连接记录超过安全上限")
+	}
 	if err := validateHealthSettings(normalizedHealthSettings(s.Health)); err != nil {
 		return err
 	}
@@ -2198,6 +2280,14 @@ func validateState(s *State) error {
 	subscriptionTokens := map[string]string{}
 	for _, u := range s.Users {
 		name := strings.TrimSpace(u.Name)
+		if err := validateManagedName(u.Name); err != nil {
+			return fmt.Errorf("用户名无效: %w", err)
+		}
+		if u.BlockedUntil != "" {
+			if _, err := time.Parse(time.RFC3339Nano, u.BlockedUntil); err != nil {
+				return errors.New("BlockedUntil 无效；请从一致性备份恢复或修正封禁到期时间")
+			}
+		}
 		if name == "" {
 			return errors.New("存在空用户名")
 		}
@@ -2238,12 +2328,15 @@ func validateState(s *State) error {
 		}
 		deviceNames := map[string]bool{}
 		for _, device := range u.Devices {
+			if err := validateManagedName(device.Name); err != nil {
+				return fmt.Errorf("设备名称无效: %w", err)
+			}
 			deviceKey := strings.ToLower(strings.TrimSpace(device.Name))
 			if deviceKey == "" || deviceNames[deviceKey] {
 				return fmt.Errorf("用户 %s 存在空设备名或重复设备 %q", u.Name, device.Name)
 			}
 			deviceNames[deviceKey] = true
-			if len(device.SubscriptionToken) < 20 {
+			if !subscriptionTokenPattern.MatchString(device.SubscriptionToken) {
 				return fmt.Errorf("用户 %s 的设备 %s 缺少有效订阅 token", u.Name, device.Name)
 			}
 			if owner, exists := subscriptionTokens[device.SubscriptionToken]; exists {
@@ -2259,6 +2352,9 @@ func validateState(s *State) error {
 		}
 		nodeNames := map[string]bool{}
 		for _, n := range u.Nodes {
+			if err := validateManagedName(n.Name); err != nil {
+				return fmt.Errorf("节点名称无效: %w", err)
+			}
 			nodeKey := strings.ToLower(strings.TrimSpace(n.Device)) + "\x00" + strings.ToLower(strings.TrimSpace(n.Name))
 			if strings.TrimSpace(n.Name) == "" || nodeNames[nodeKey] {
 				return fmt.Errorf("用户 %s 的设备 %s 存在空节点名或重复节点 %q", u.Name, n.Device, n.Name)
@@ -2270,8 +2366,11 @@ func validateState(s *State) error {
 			if strings.TrimSpace(n.AuthUser) == "" || strings.TrimSpace(n.UUID) == "" {
 				return fmt.Errorf("用户 %s 的节点 %s 缺少 auth_user 或 UUID", u.Name, n.Name)
 			}
+			if len(n.AuthUser) > 1024 || strings.ContainsAny(n.AuthUser, "[]") || safeTerminalText(n.AuthUser) != n.AuthUser {
+				return errors.New("auth_user 含不支持的字符或超过 1024 字节；请修正身份名称")
+			}
 			if owner, exists := authUsers[n.AuthUser]; exists {
-				return fmt.Errorf("节点 %s/%s 与 %s 使用重复 auth_user %q", u.Name, n.Name, owner, n.AuthUser)
+				return fmt.Errorf("节点 %s/%s 与 %s 使用重复 auth_user", u.Name, n.Name, owner)
 			}
 			authUsers[n.AuthUser] = u.Name + "/" + n.Name
 			if owner, exists := uuids[strings.ToLower(n.UUID)]; exists {
@@ -2311,9 +2410,13 @@ func normalizeLegacyNodeNames(s *State) {
 }
 func saveState(path string, s *State) error {
 	s.Version = stateVersion
+	boundConnectionTracking(s)
+	initializeBindingActivity(s, time.Now())
 	normalizeQuotaModes(s)
 	normalizeDeviceModel(s)
-	ensureNodeMarks(s)
+	if _, err := ensureNodeMarks(s); err != nil {
+		return err
+	}
 	sort.Slice(s.Users, func(i, j int) bool { return s.Users[i].Name < s.Users[j].Name })
 	if err := validateState(s); err != nil {
 		return fmt.Errorf("拒绝保存无效状态: %w", err)
@@ -2390,22 +2493,43 @@ func pruneDailyStateBackups(dir string, keep int) error {
 	return nil
 }
 
-func ensureNodeMarks(s *State) bool {
-	changed := false
-	for i := range s.Users {
-		for j := range s.Users[i].Nodes {
-			n := &s.Users[i].Nodes[j]
-			if !validRateMark(n.RateMark) {
-				n.RateMark = allocateRateMark(s)
-				changed = true
+func ensureNodeMarks(s *State) (bool, error) {
+	used := map[uint32]bool{}
+	missing := 0
+	for _, u := range s.Users {
+		if validRateMark(u.RateMark) {
+			used[u.RateMark] = true
+		}
+		for _, n := range u.Nodes {
+			if validRateMark(n.RateMark) {
+				used[n.RateMark] = true
+			} else {
+				missing++
 			}
 		}
 	}
-	return changed
+	if len(used)+missing > 0xffff {
+		return false, errors.New("节点 mark 空间已耗尽（上限 65535）；请删除不再使用的节点后重试")
+	}
+	id := uint32(1)
+	for i := range s.Users {
+		for j := range s.Users[i].Nodes {
+			n := &s.Users[i].Nodes[j]
+			if validRateMark(n.RateMark) {
+				continue
+			}
+			for used[rateMarkPrefix|id] {
+				id++
+			}
+			n.RateMark = rateMarkPrefix | id
+			used[n.RateMark] = true
+		}
+	}
+	return missing > 0, nil
 }
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(dir, ".sbmgr-*")
@@ -2593,7 +2717,7 @@ func parseSize(s string) (int64, error) {
 		}
 	}
 	v, err := strconv.ParseFloat(s, 64)
-	if err != nil || v < 0 {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v*float64(mult) >= math.Exp2(63) || (v > 0 && v*float64(mult) < 1) {
 		return 0, fmt.Errorf("无效容量 %q", s)
 	}
 	return int64(v * float64(mult)), nil

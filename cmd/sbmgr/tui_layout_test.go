@@ -69,10 +69,10 @@ func TestUserNftCounterBaselinesPreventPreResetTrafficFromReturning(t *testing.T
 		{Name: "Relay A", Device: "phone", RateMark: 0x53420002},
 	}}
 	counters := map[string]int64{
-		deviceNodeLabel("alice", "phone", "Node A") + " upload":   100,
-		deviceNodeLabel("alice", "phone", "Node A") + " download": 200,
-		deviceNodeLabel("alice", "phone", "Relay A") + " upload":  300,
-		deviceNodeLabel("bob", "phone", "Node A") + " upload":     400,
+		"sbmgr:53420001 upload":                               100,
+		"sbmgr:53420001 download":                             200,
+		"sbmgr:53420002 upload":                               300,
+		deviceNodeLabel("bob", "phone", "Node A") + " upload": 400,
 	}
 	applyUserNftCounterBaselines(s, u, counters)
 	want := map[string]int64{

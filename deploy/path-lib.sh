@@ -79,6 +79,10 @@ sbmgr_resolve_home() {
     fi
 
     case "$sbmgr_home_resolved" in
+        *[!A-Za-z0-9_./-]*)
+            sbmgr_path_error "解析后的安装目录含不安全字符"
+            return 2
+            ;;
         /|/bin|/bin/*|/boot|/boot/*|/dev|/dev/*|/etc|/etc/*|/home|/lib|/lib/*|/lib64|/lib64/*|/opt|/proc|/proc/*|/root|/root/.ssh|/root/.ssh/*|/root/.gnupg|/root/.gnupg/*|/run|/run/*|/sbin|/sbin/*|/srv|/sys|/sys/*|/tmp|/tmp/*|/usr|/usr/*|/var|/home/*/.ssh|/home/*/.ssh/*|/home/*/.gnupg|/home/*/.gnupg/*)
             sbmgr_path_error "拒绝把系统根目录、顶层目录或敏感系统目录作为安装目录：$sbmgr_home_resolved"
             return 2
