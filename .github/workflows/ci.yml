@@ -35,7 +35,7 @@ jobs:
         run: go vet ./...
       - name: Check reachable Go vulnerabilities
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
       - name: Test
         shell: bash
