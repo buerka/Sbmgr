@@ -300,6 +300,12 @@ func (a *app) newFlagSet(name string) *flag.FlagSet {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == subscriptionWorkerArg {
+		if runSubscriptionWorker() != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	a := &app{out: os.Stdout, err: os.Stderr}
 	if err := a.run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "错误:", err)

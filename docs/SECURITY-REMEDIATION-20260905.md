@@ -24,7 +24,7 @@
 | #16 | SBM-30 | 并发处罚保存 10 分钟恢复时间，后台恢复并应用；手动禁用清除自动恢复标记。`TestSecurityConnectionBlockRecoversWithoutEnablingManualDisable` |
 | #17 | SBM-06 | gRPC 1.82.1、x/net 0.56.0、x/text 0.39.0，构建工具链 Go 1.27.1；CI 增加 govulncheck、CodeQL、Dependabot |
 | #18 | SBM-07 | atomicWrite 新建父目录为 0700，文件继续 0600。`TestSecurityConfigSymlinkAndPrivateParent`（Linux） |
-| #19 | SBM-09 | 主服务补充系统调用、设备、进程可见性、地址族、主机名和 W^X 限制。采用报告的短期加固方案，HTTP 进程拆分仍是后续架构工作 |
+| #19 | SBM-09 | HTTP/TLS/二维码拆为专用 UID 的独立进程；所有线程接受公网请求前清除附加组和 capabilities、设置 NoNewPrivileges。匿名 socketpair 只提供有界、限流、单设备只读查询；父进程退出关闭监听，子进程异常由守护进程重启。`TestSubscriptionPrivilege*` 与 IPC 回归 |
 | #20 | SBM-20 | 订阅内部错误返回通用 500/503，避免路径和模板诊断进入公网响应。订阅错误响应回归测试 |
 | #21 | SBM-21 | QR、普通订阅和 HEAD 共用用户/设备可用性检查。禁用与 token 撤销回归测试 |
 | #22 | SBM-22 | 审计参数改用安全字段白名单，未知参数值及 URL 脱敏；Webhook 投递错误不保留 URL。`TestSecurityDefaultViewsAndAuditHideCredentials` |

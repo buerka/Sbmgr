@@ -94,6 +94,44 @@ for hardened_unit in sbmgr.service sbmgr-ip-cert-renew.service; do
 done
 grep -Fq 'ExecStart=/srv/sbmgr/sbmgr daemon' "$test_root/units/sbmgr.service" || \
     fail "主服务 ExecStart 路径错误"
+grep -Fq 'CAP_SETUID CAP_SETGID' "$test_root/units/sbmgr.service" || \
+    fail "主服务缺少子进程降权所需能力"
+grep -Fxq 'AmbientCapabilities=' "$test_root/units/sbmgr.service" || \
+    fail "不应向 HTTP 子进程传递 ambient capabilities"
+
+# Account provisioning is tested with shell-local stubs: never create a real
+# account while running deployment unit/transaction tests.
+(
+    account_created=0
+    account_invalid=0
+    account_extra_group=0
+    getent() {
+        [ "$account_created" -eq 1 ] || return 1
+        if [ "$account_invalid" -eq 1 ]; then
+            printf 'sbmgr-subscription:x:0:991::/root:/bin/sh\n'
+        else
+            printf 'sbmgr-subscription:x:991:991::/nonexistent:/sbin/nologin\n'
+        fi
+    }
+    id() {
+        [ "$*" = '-G sbmgr-subscription' ] || return 1
+        if [ "$account_extra_group" -eq 1 ]; then printf '991 0\n'; else printf '991\n'; fi
+    }
+    useradd() {
+        case " $* " in
+            *' --system --user-group --no-create-home --home-dir /nonexistent --shell '*sbmgr-subscription*) account_created=1 ;;
+            *) return 1 ;;
+        esac
+    }
+    nologin() { return 1; }
+    sbmgr_ensure_subscription_account || fail "未正确创建专用订阅账号"
+    sbmgr_ensure_subscription_account || fail "专用账号安装不幂等"
+    account_invalid=1
+    if sbmgr_ensure_subscription_account >/dev/null 2>&1; then fail "接受了已有 root/登录订阅账号"; fi
+    account_invalid=0
+    account_extra_group=1
+    if sbmgr_assert_subscription_account >/dev/null 2>&1; then fail "接受了带附加组的订阅账号"; fi
+)
 grep -Fq 'ExecStart=/srv/sbmgr/deploy/renew-ip-https.sh --home /srv/sbmgr' \
     "$test_root/units/sbmgr-ip-cert-renew.service" || \
     fail "续期服务 ExecStart 路径错误"

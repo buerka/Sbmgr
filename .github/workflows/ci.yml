@@ -52,6 +52,23 @@ jobs:
           exit 1
       - name: Validate deployment scripts
         run: sh ./deploy/test-deploy-scripts.sh
+      - name: Verify Linux subscription privilege isolation
+        run: |
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/sbmgr-privilege.test" ./cmd/sbmgr
+          sudo env SBMGR_RUN_PRIVILEGE_TEST=1 "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^TestSubscriptionPrivilege' -test.v
+          sudo systemd-run --quiet --wait --pipe --collect \
+            -p User=root -p Group=root -p NoNewPrivileges=true \
+            -p PrivateTmp=true -p PrivateDevices=true -p ProtectSystem=strict \
+            -p ProtectHome=read-only -p ProtectProc=invisible \
+            -p ProtectKernelTunables=true -p ProtectKernelModules=true \
+            -p ProtectControlGroups=true -p RestrictNamespaces=true \
+            -p RestrictSUIDSGID=true -p RestrictRealtime=true -p LockPersonality=true \
+            -p ProtectHostname=true -p MemoryDenyWriteExecute=true \
+            -p 'CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_KILL CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID' \
+            -p 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
+            -p 'SystemCallFilter=@system-service' -p SystemCallErrorNumber=EPERM \
+            -p LimitCORE=0 -p Environment=SBMGR_RUN_PRIVILEGE_TEST=1 \
+            "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^TestSubscriptionPrivilege' -test.v
       - name: Cross-build Linux AMD64
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |

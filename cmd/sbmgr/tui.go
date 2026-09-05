@@ -4412,6 +4412,7 @@ func (m tuiModel) formHelpLines(width int) []string {
 			paragraphs = []string{
 				"证书和私钥路径同时填写会启用原生 HTTPS；都留空则关闭。私钥内容不会显示或写入审计日志。",
 				"公网监听必须使用 TLS；也可只监听回环地址，再由同机 HTTPS 反向代理转发。",
+				"HTTP 由专用低权限进程提供；降权失败时订阅保持关闭，后台维护继续运行。保存后自动重启 sbmgr 生效，无需应用配置。",
 			}
 		case formAddUser:
 			paragraphs = []string{"配额计量决定配额、阶梯限速和订阅剩余流量采用双向合计、仅上传或仅下载；原始上下行始终分别保留。"}

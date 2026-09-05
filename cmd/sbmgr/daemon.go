@@ -97,15 +97,6 @@ func (a *app) daemonCmd(args []string) error {
 	}
 }
 
-func (a *app) startDaemonSubscription(ctx context.Context) {
-	if _, err := a.startSubscriptionServer(ctx); err != nil {
-		// Subscription delivery is an auxiliary surface. A missing/expired TLS
-		// certificate must not stop traffic accounting, quota enforcement, IP
-		// handover, or the pending-apply retry loop.
-		fmt.Fprintf(a.err, "订阅服务未启动: %v\n", err)
-	}
-}
-
 // realtimeCycle refreshes nft byte counters, current Mbps, access records and
 // dynamic source-IP handovers between normal maintenance runs. Both paths use
 // the same state lock, so a sample cannot race an interactive edit or the

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
@@ -285,22 +284,34 @@ func setSubscriptionProfileHeaders(response http.ResponseWriter, u User, device 
 }
 
 func setSubscriptionProfileHeadersAt(response http.ResponseWriter, u User, device Device, now time.Time) error {
-	userinfo, err := subscriptionUserInfo(u)
+	headers, err := subscriptionProfileHeadersAt(u, device, now)
 	if err != nil {
 		return err
 	}
+	for name := range headers {
+		response.Header()[name] = headers[name]
+	}
+	return nil
+}
+
+func subscriptionProfileHeadersAt(u User, device Device, now time.Time) (http.Header, error) {
+	headers := make(http.Header)
+	userinfo, err := subscriptionUserInfo(u)
+	if err != nil {
+		return nil, err
+	}
 	title := subscriptionProfileTitle(u.Name, device.Name)
-	response.Header().Set("Subscription-Userinfo", userinfo)
-	response.Header().Set("Profile-Update-Interval", "1")
-	response.Header().Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(title)))
+	headers.Set("Subscription-Userinfo", userinfo)
+	headers.Set("Profile-Update-Interval", "1")
+	headers.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(title)))
 	filename := title + "-" + now.In(applicationLocation()).Format("20060102-150405") + ".yaml"
 	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
 	if disposition == "" {
 		disposition = "attachment; filename=subscription-" + now.In(applicationLocation()).Format("20060102-150405") + ".yaml"
 	}
-	response.Header().Set("Content-Disposition", disposition)
-	response.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-	return nil
+	headers.Set("Content-Disposition", disposition)
+	headers.Set("Content-Type", "application/yaml; charset=utf-8")
+	return headers, nil
 }
 
 func subscriptionDeviceAvailable(u User, device Device, now time.Time) error {
@@ -323,166 +334,6 @@ func subscriptionDeviceAvailable(u User, device Device, now time.Time) error {
 		return fmt.Errorf("设备 %q 没有可导出的节点", device.Name)
 	}
 	return nil
-}
-
-func (a *app) startSubscriptionServer(ctx context.Context) (*http.Server, error) {
-	// Canonicalize under the state lock before this long-lived HTTP surface and
-	// its per-request readers diverge. In particular, a legacy missing bearer
-	// token must be generated and persisted exactly once.
-	s, err := a.loadCanonicalState()
-	if err != nil {
-		return nil, err
-	}
-	settings := normalizedSubscriptionSettings(s.Subscription)
-	if !settings.Enabled {
-		return nil, nil
-	}
-	if err := validateSubscriptionRuntime(settings); err != nil {
-		return nil, err
-	}
-	listener, err := net.Listen("tcp", settings.Listen)
-	if err != nil {
-		return nil, fmt.Errorf("启动订阅服务 %s: %w", settings.Listen, err)
-	}
-	limiter := &subscriptionLimiter{}
-	requests := make(chan struct{}, 4)
-	handler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		response.Header().Set("X-Content-Type-Options", "nosniff")
-		response.Header().Set("Cache-Control", "no-store")
-		response.Header().Set("Referrer-Policy", "no-referrer")
-		if request.TLS != nil {
-			response.Header().Set("Strict-Transport-Security", "max-age=31536000")
-		}
-		if request.URL.Path == "/healthz" {
-			response.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if request.Method != http.MethodGet && request.Method != http.MethodHead {
-			response.Header().Set("Allow", "GET, HEAD")
-			http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if !limiter.allow(subscriptionClientIP(request), time.Now()) {
-			http.Error(response, "too many requests", http.StatusTooManyRequests)
-			return
-		}
-		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
-		if len(parts) != 2 || (parts[0] != "sub" && parts[0] != "qr") {
-			http.NotFound(response, request)
-			return
-		}
-		token := strings.TrimSuffix(parts[1], ".png")
-		if !subscriptionTokenPattern.MatchString(token) {
-			http.NotFound(response, request)
-			return
-		}
-		select {
-		case requests <- struct{}{}:
-			defer func() { <-requests }()
-		default:
-			http.Error(response, "busy", http.StatusServiceUnavailable)
-			return
-		}
-		lookupCtx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
-		exists, lookupErr := subscriptionTokenExists(lookupCtx, a.statePath, token)
-		cancel()
-		if lookupErr != nil {
-			http.Error(response, "state unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if !exists {
-			http.NotFound(response, request)
-			return
-		}
-		state, err := loadState(a.statePath)
-		if err != nil {
-			http.Error(response, "state unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if !normalizedSubscriptionSettings(state.Subscription).Enabled {
-			http.Error(response, "subscription disabled", http.StatusServiceUnavailable)
-			return
-		}
-		u, device := findSubscriptionDevice(state, token)
-		if u == nil || device == nil {
-			http.NotFound(response, request)
-			return
-		}
-		if err := subscriptionDeviceAvailable(*u, *device, time.Now()); err != nil {
-			http.Error(response, "subscription unavailable", http.StatusForbidden)
-			return
-		}
-		if parts[0] == "qr" {
-			if request.Method != http.MethodGet {
-				response.Header().Set("Allow", "GET")
-				http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			png, err := qrcode.Encode(subscriptionURL(state, *device), qrcode.Medium, 384)
-			if err != nil {
-				http.Error(response, "qr unavailable", http.StatusInternalServerError)
-				return
-			}
-			response.Header().Set("Content-Type", "image/png")
-			_, _ = response.Write(png)
-			return
-		}
-		if request.Method == http.MethodHead {
-			if err := subscriptionDeviceAvailable(*u, *device, time.Now()); err != nil {
-				http.Error(response, err.Error(), http.StatusForbidden)
-				return
-			}
-			if err := setSubscriptionProfileHeaders(response, *u, *device); err != nil {
-				http.Error(response, "subscription metadata unavailable", http.StatusInternalServerError)
-				return
-			}
-			response.WriteHeader(http.StatusOK)
-			return
-		}
-		yaml, err := renderMihomoDevice(state, *u, device.Name)
-		if err != nil {
-			http.Error(response, "subscription generation unavailable", http.StatusInternalServerError)
-			return
-		}
-		if err := setSubscriptionProfileHeaders(response, *u, *device); err != nil {
-			http.Error(response, "subscription metadata unavailable", http.StatusInternalServerError)
-			return
-		}
-		_, _ = response.Write(yaml)
-	})
-	server := &http.Server{
-		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
-		Addr:              listener.Addr().String(),
-		Handler:           handler,
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       30 * time.Second,
-		MaxHeaderBytes:    16 * 1024,
-	}
-	go func() {
-		var serveErr error
-		if settings.TLSCertFile != "" {
-			serveErr = server.ServeTLS(listener, settings.TLSCertFile, settings.TLSKeyFile)
-		} else {
-			serveErr = server.Serve(listener)
-		}
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			fmt.Fprintln(a.err, "订阅服务异常:", serveErr)
-		}
-	}()
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
-	scheme := "HTTP"
-	if settings.TLSCertFile != "" {
-		scheme = "HTTPS"
-	}
-	fmt.Fprintf(a.out, "订阅服务已监听 %s (%s)\n", settings.Listen, scheme)
-	return server, nil
 }
 
 func subscriptionQRText(link string) string {

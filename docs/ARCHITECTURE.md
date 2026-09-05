@@ -12,7 +12,7 @@ CUI / 隐藏 admin 维护入口
             ▼
  跨进程锁 → SQLite 事务/迁移/校验 → 原子提交
             │                         │
-            │                         ├─ HTTPS 设备订阅 / 用量响应头
+            │                         ├─ 只读设备查询 → 匿名 IPC → 低权限 HTTP/TLS 进程
             │                         └─ 审计与告警
             ▼
  生成候选 sing-box 配置与 nftables 规则
@@ -44,7 +44,8 @@ CUI / 隐藏 admin 维护入口
 - `cmd/sbmgr/tui.go`：CUI 页面、菜单、表单和刷新。
 - `cmd/sbmgr/daemon.go`、`stats.go`、`usage.go`：后台维护、流量同步与实时数据。
 - `cmd/sbmgr/rate.go`：按 routing mark 的 nftables 限速与计数。
-- `cmd/sbmgr/subscription.go`：按设备 token 下发 HTTPS 订阅和用量响应头。
+- `cmd/sbmgr/subscription.go`、`subscription_backend.go`：订阅设置和仅针对单设备的只读查询。
+- `subscription_http.go`、`subscription_ipc.go`、`subscription_worker_linux.go`：低权限 HTTP/TLS、受限内部协议与 Linux 降权启动；`subscription_supervisor.go` 负责子进程故障恢复。
 - `cmd/sbmgr/ip_policy.go`、`access_policy.go`、`burst.go`：来源 IP、访问/并发和异常流量规则。
 - `cmd/sbmgr/outbound_*.go`、`proxy_admin.go`：中转入口、出站和 endpoint 的安全编辑。
 - `cmd/sbmgr/backup.go`：使用 SQLite 一致性快照的业务状态备份、完整性验证与恢复。
@@ -61,9 +62,9 @@ Git commit/tag 是软件源码版本的唯一事实来源。构建脚本将 `git
 - 访问统计仅保存目标域名/IP、聚合次数和时间，不解密 HTTPS 内容或 URL 路径。
 - 订阅 token 等同访问凭据；公网监听强制 TLS，并限制来源请求速率。
 - 完整代理 JSON 可能含凭据，只进入权限受限的临时文件，输出和审计必须脱敏。
-- systemd 单元限制权限；只有应用目录可写。
+- systemd 单元限制权限；root 守护进程管理应用目录。独立 HTTP 进程使用专用非 root UID，无附加组、无 capabilities，不获得数据库或配置目录访问权限。
 
-订阅入口先执行来源/并发预算与 token 格式校验，再使用 SQLite 索引确认 token 存在，最后读取用户状态生成响应。限流只使用实际连接来源，不信任转发头。
+低权限订阅入口先执行来源/并发预算与 token 格式校验，再通过匿名 socketpair 请求 root 端查询。root 端独立限制总预算和报文大小，只提供单设备只读结果；先用 SQLite 索引确认 token 存在，再读取当前状态生成响应。限流只使用实际连接来源，不信任转发头。exec 后的子进程不继承父进程业务堆、环境或状态文件描述符，接受公网连接前必须完成所有线程的降权。启动与升级要求见 [订阅服务](SUBSCRIPTIONS.md)。
 
 daemon 的网络维护采用“锁内快照 → 锁外探测/投递 → 锁内有条件合并”，避免慢 Webhook 或 Fleet 占据全局状态锁。日志解析只接受完整事件语法；活动连接与最近访问均有容量边界。
 

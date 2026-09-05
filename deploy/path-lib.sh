@@ -232,6 +232,33 @@ sbmgr_systemd_value() {
     systemctl show --value --property="$2" "$1"
 }
 
+sbmgr_assert_subscription_account() {
+    sbmgr_account=$(getent passwd sbmgr-subscription) || {
+        sbmgr_path_error "缺少专用订阅账号；请先运行 install-systemd.sh --component core"
+        return 1
+    }
+    printf '%s\n' "$sbmgr_account" | awk -F: '
+        NF == 7 && $1 == "sbmgr-subscription" && $3 ~ /^[0-9]+$/ && $3 > 0 &&
+        $4 ~ /^[0-9]+$/ && $4 > 0 && $6 == "/nonexistent" &&
+        ($7 ~ /\/nologin$/ || $7 == "/bin/false") { valid++ }
+        END { exit !(valid == 1 && NR == 1) }
+    ' || { sbmgr_path_error "已有订阅账号不符合专用非登录账号要求"; return 1; }
+    sbmgr_account_gid=$(printf '%s\n' "$sbmgr_account" | cut -d: -f4)
+    [ "$(id -G sbmgr-subscription)" = "$sbmgr_account_gid" ] || {
+        sbmgr_path_error "订阅账号不得加入其他附加组"
+        return 1
+    }
+}
+
+sbmgr_ensure_subscription_account() {
+    if ! getent passwd sbmgr-subscription >/dev/null; then
+        sbmgr_nologin=$(command -v nologin) || { sbmgr_path_error "缺少 nologin"; return 1; }
+        useradd --system --user-group --no-create-home --home-dir /nonexistent \
+            --shell "$sbmgr_nologin" sbmgr-subscription || return 1
+    fi
+    sbmgr_assert_subscription_account
+}
+
 sbmgr_assert_core_systemd_layout() {
     if [ "$#" -ne 2 ]; then
         sbmgr_path_error "sbmgr_assert_core_systemd_layout: 参数数量不正确"

@@ -27,7 +27,11 @@ RestrictNamespaces=true
 RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_KILL CAP_NET_BIND_SERVICE
+# SETUID/SETGID are used only by the exec'ed subscription bootstrap before
+# accepting HTTP; the worker clears all permitted/effective/inheritable caps.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_KILL CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
+AmbientCapabilities=
+LimitCORE=0
 PrivateDevices=true
 ProtectProc=invisible
 ProtectHostname=true

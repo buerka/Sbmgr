@@ -213,6 +213,9 @@ install_rendered_unit() {
 if [ "$run_systemctl" -eq 1 ]; then
     install -d -m 0700 "$app_dir"
     sbmgr_assert_root_trusted_path "$app_dir"
+    case "$component" in
+        all|core) sbmgr_ensure_subscription_account ;;
+    esac
     unit_backup=$(mktemp -d "$app_dir/.systemd-unit-backup.XXXXXX")
     chmod 0700 "$unit_backup"
     unit_manifest="$unit_backup/MANIFEST"

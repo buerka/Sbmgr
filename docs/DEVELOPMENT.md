@@ -21,6 +21,17 @@ go build -o sbmgr ./cmd/sbmgr
 ./sbmgr version
 ```
 
+Linux 生产订阅隔离要求 `CGO_ENABLED=0 go build ...`；标准发布脚本已禁用 CGO。工作进程通过 Go 的全线程系统调用降权，不支持该保证的构建会拒绝启动 HTTP。升级隔离版本前重新安装 core unit，以创建 `sbmgr-subscription` 非登录账号并允许启动时切换 UID/GID；无需放宽数据库或应用目录权限。
+
+Linux 权限回归会启动真实低权限子进程和本机回环 HTTPS，只使用临时测试文件。显式启用方式：
+
+```bash
+CGO_ENABLED=0 go test -c -o /tmp/sbmgr-privilege.test ./cmd/sbmgr
+sudo env SBMGR_RUN_PRIVILEGE_TEST=1 /tmp/sbmgr-privilege.test -test.run '^TestSubscriptionPrivilege' -test.v
+```
+
+CI 还在与主服务一致的 systemd sandbox 下执行这些测试，验证 UID/GID、capabilities、私有文件拒绝访问、HTTPS/二维码/撤销和父进程退出。它们不会连接真实服务器或调用生产 sing-box/nftables。新增协议回归覆盖畸形报文、内部预算、超时和通道关闭。
+
 ## Git 版本模型
 
 软件历史只存在于 Git。正式版本使用 `vX.Y.Z` 注释 tag：
