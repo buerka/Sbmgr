@@ -48,8 +48,12 @@ func TestSubscriptionPrivilegeDropProbe(t *testing.T) {
 		t.Skip("subprocess probe")
 	}
 	path := os.Getenv("SBMGR_PROBE_PRIVATE_FILE")
+	beforeCaps := [2]unix.CapUserData{}
+	beforeHeader := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	_ = unix.Capget(&beforeHeader, &beforeCaps[0])
+	secureBits, _ := unix.PrctlRetInt(unix.PR_GET_SECUREBITS, 0, 0, 0, 0)
 	if err := dropSubscriptionPrivileges(65534, 65534); err != nil {
-		t.Fatal("could not drop privileges:", err)
+		t.Fatalf("could not drop privileges: %v; initial capabilities=%+v securebits=%d", err, beforeCaps, secureBits)
 	}
 	if _, err := os.ReadFile(path); !os.IsPermission(err) {
 		t.Fatal("worker can read private state")

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -160,27 +161,27 @@ func dropSubscriptionPrivileges(uid, gid int) error {
 	// All Go threads must lose privileges. CGO builds that cannot guarantee
 	// this fail closed; production Linux builds already use CGO_ENABLED=0.
 	if err := subscriptionPrctlAll(unix.PR_SET_NO_NEW_PRIVS, 1); err != nil {
-		return err
+		return fmt.Errorf("set no-new-privileges: %w", err)
 	}
 	if err := subscriptionPrctlAll(unix.PR_SET_KEEPCAPS, 0); err != nil {
-		return err
+		return fmt.Errorf("disable keep-caps: %w", err)
 	}
 	if err := syscall.Setgroups([]int{}); err != nil {
-		return err
+		return fmt.Errorf("clear supplementary groups: %w", err)
 	}
 	if err := syscall.Setresgid(gid, gid, gid); err != nil {
-		return err
+		return fmt.Errorf("drop group identity: %w", err)
 	}
 	if err := syscall.Setresuid(uid, uid, uid); err != nil {
-		return err
+		return fmt.Errorf("drop user identity: %w", err)
 	}
 	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
 	data := [2]unix.CapUserData{}
 	if _, _, errno := syscall.AllThreadsSyscall(unix.SYS_CAPSET, uintptr(unsafe.Pointer(&header)), uintptr(unsafe.Pointer(&data[0])), 0); errno != 0 {
-		return errno
+		return fmt.Errorf("clear capabilities: %w", errno)
 	}
 	if err := subscriptionPrctlAll(unix.PR_SET_DUMPABLE, 0); err != nil {
-		return err
+		return fmt.Errorf("disable dumpability: %w", err)
 	}
 	if os.Getuid() != uid || os.Geteuid() != uid || os.Getgid() != gid || os.Getegid() != gid {
 		return errors.New("subscription identity mismatch")
