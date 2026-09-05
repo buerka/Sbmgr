@@ -2,9 +2,9 @@
 
 **在 Linux 终端中管理 sing-box 用户、流量配额、带宽限速和 Mihomo 订阅。**
 
-sbmgr 是用 Go 编写的自托管代理管理工具，提供中文终端管理面板（TUI/CUI）。它面向已有 sing-box 配置的 Linux 服务器，管理 VLESS + REALITY 入站下的用户、设备和节点授权，支持流量统计、到期停用、上传/下载限速，以及按设备生成 Mihomo YAML 和 HTTPS 订阅。日常操作可通过 SSH 进入终端完成，基础配置中的非托管身份会保留。
+sbmgr 是用 Go 编写的自托管代理管理工具，提供中文终端管理面板（TUI/CUI）。它面向已有 sing-box 配置的 Linux 服务器，管理的用户、设备和节点授权，支持流量统计、到期停用、上传/下载限速，以及按设备生成 Mihomo YAML 和 HTTPS 订阅。日常操作可通过 SSH 进入终端完成，基础配置中的非托管身份会保留。
 
-**English:** sbmgr is a self-hosted **sing-box manager** for Linux with a Chinese terminal UI, written in Go. It provides multi-user proxy management for VLESS/REALITY, per-device node access, traffic quotas, bandwidth limiting, expiration policies, and Mihomo YAML / HTTPS subscriptions. It works with an existing sing-box configuration and preserves unmanaged identities.
+**English:** sbmgr is a self-hosted **sing-box manager** for Linux with a Chinese terminal UI, written in Go. It provides multi-user proxy management, per-device node access, traffic quotas, bandwidth limiting, expiration policies, and Mihomo YAML / HTTPS subscriptions. It works with an existing sing-box configuration and preserves unmanaged identities.
 
 [适用场景](#适用场景) · [功能概览](#功能概览) · [构建](#构建) · [部署](#部署) · [用户指南](docs/USER_GUIDE.md) · [订阅说明](docs/SUBSCRIPTIONS.md) · [常见问题](#常见问题)
 
