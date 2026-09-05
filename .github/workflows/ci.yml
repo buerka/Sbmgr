@@ -56,6 +56,12 @@ jobs:
         run: |
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/sbmgr-privilege.test" ./cmd/sbmgr
           sudo env SBMGR_RUN_PRIVILEGE_TEST=1 "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^TestSubscriptionPrivilege' -test.v
+          # The production executable and its parents are root-owned. The
+          # sandbox intentionally has no CAP_DAC_OVERRIDE, so a runner-owned
+          # private directory is not a valid self-exec fixture for root.
+          privilege_dir="$(sudo mktemp -d /run/sbmgr-privilege-ci.XXXXXX)"
+          trap 'sudo rm -f -- "$privilege_dir/sbmgr.test"; sudo rmdir -- "$privilege_dir"' EXIT
+          sudo install -m 0700 "$RUNNER_TEMP/sbmgr-privilege.test" "$privilege_dir/sbmgr.test"
           sudo systemd-run --quiet --wait --pipe --collect \
             -p User=root -p Group=root -p NoNewPrivileges=true \
             -p PrivateTmp=true -p PrivateDevices=true -p ProtectSystem=strict \
@@ -68,7 +74,7 @@ jobs:
             -p 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
             -p 'SystemCallFilter=@system-service' -p SystemCallErrorNumber=EPERM \
             -p LimitCORE=0 -p Environment=SBMGR_RUN_PRIVILEGE_TEST=1 \
-            "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^TestSubscriptionPrivilege' -test.v
+            "$privilege_dir/sbmgr.test" -test.run '^TestSubscriptionPrivilege' -test.v
       - name: Cross-build Linux AMD64
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |
