@@ -1,21 +1,32 @@
-# sbmgr
+# sbmgr — sing-box 多用户管理器
 
-sbmgr 是面向 Linux 的 sing-box 多用户终端管理器。它在保留运维方基础配置的前提下，管理用户、设备、节点授权、流量策略、订阅交付和配置应用。
+**在 Linux 终端中管理 sing-box 用户、流量配额、带宽限速和 Mihomo 订阅。**
 
-项目采用单目录运行模型：程序、SQLite 状态、基础配置、导出、备份和日志均位于可配置的应用目录中。源码版本由 Git 管理，运行程序只负责业务状态和配置恢复。
+sbmgr 是用 Go 编写的自托管代理管理工具，提供中文终端管理面板（TUI/CUI）。它面向已有 sing-box 配置的 Linux 服务器，管理 VLESS + REALITY 入站下的用户、设备和节点授权，支持流量统计、到期停用、上传/下载限速，以及按设备生成 Mihomo YAML 和 HTTPS 订阅。日常操作可通过 SSH 进入终端完成，基础配置中的非托管身份会保留。
+
+**English:** sbmgr is a self-hosted **sing-box manager** for Linux with a Chinese terminal UI, written in Go. It provides multi-user proxy management for VLESS/REALITY, per-device node access, traffic quotas, bandwidth limiting, expiration policies, and Mihomo YAML / HTTPS subscriptions. It works with an existing sing-box configuration and preserves unmanaged identities.
+
+[适用场景](#适用场景) · [功能概览](#功能概览) · [构建](#构建) · [部署](#部署) · [用户指南](docs/USER_GUIDE.md) · [订阅说明](docs/SUBSCRIPTIONS.md) · [常见问题](#常见问题)
 
 许可证：[GNU GPLv3](LICENSE)（`GPL-3.0-only`）。允许商业使用；分发受许可证覆盖的修改版时须继续遵守 GPLv3 并提供对应源码。
+
+## 适用场景
+
+- **sing-box 多用户管理**：在一台 Linux 服务器上为不同用户和设备分配独立身份、节点权限与到期时间。
+- **代理流量统计与限速**：按用户设置流量配额，按设备下的节点分别限制上传、下载带宽，并查看用量和当前速率。
+- **Mihomo 订阅管理**：为每台设备提供独立订阅链接或二维码，客户端更新时获取当前已授权节点。
+- **已有配置的日常运维**：保留自己的基础配置，通过终端管理面板调整业务策略，校验后应用，并在失败时回滚。
 
 ## 功能概览
 
 - 用户与设备：新增、编辑、启停、删除、批量操作和模板复制。
 - 独立身份：每台设备的每个节点使用独立 UUID、`auth_user` 和 routing mark。
 - 节点授权：从基础配置中选择可用出口，并为节点设置独立上传、下载限速。
-- 流量管理：分别记录上传和下载，支持双向、仅上传或仅下载配额口径。
+- 流量统计与配额：分别记录上传和下载，支持双向、仅上传或仅下载配额口径。
 - 策略控制：月度账期、附加流量包、阶梯限速、到期停用和滑动窗口异常流量保护。
 - 来源控制：来源 IP 存档、动态单活、固定绑定、临时换绑和仅告警模式。
 - 访问审计：聚合目标域名或 IP、连接、频次和最近访问时间。
-- 配置交付：按设备导出 Mihomo YAML，或通过独立 HTTPS URL 和二维码提供订阅。
+- Mihomo 订阅与导出：按设备导出 YAML，或通过独立 HTTPS URL 和二维码提供订阅。
 - 安全应用：生成候选配置，校验 sing-box 与 nftables，失败时恢复上一状态。
 - 运维能力：SQLite 一致性备份、审计日志、Webhook 告警、出口健康检查和只读多机汇总。
 
@@ -101,6 +112,8 @@ CUI 分为三个区域：
 
 ## 运行数据
 
+项目采用单目录运行模型：程序、SQLite 状态、基础配置、导出、备份和日志均位于可配置的应用目录中。源码版本由 Git 管理，运行程序只负责业务状态和配置恢复。
+
 典型应用目录：
 
 ```text
@@ -140,8 +153,6 @@ sbmgr 不直接修改基础模板中的非托管身份。应用配置时，它�
 
 ## 许可证
 
-Copyright (C) 2026 buerka.
-
 除另有声明的第三方内容外，sbmgr 的项目自有代码及随附文档采用 **GNU General Public License, version 3 only**（SPDX：`GPL-3.0-only`），完整文本见 [LICENSE](LICENSE)。
 
 允许商业使用、修改和分发。对外分发受 GPLv3 覆盖的程序或修改版时，须保留版权与许可证声明、标明修改，并按 GPLv3 向接收者提供对应源码。仅内部使用的修改通常不要求公开；仅通过网络提供服务而不分发软件，不会单独触发 GPLv3 的源码提供义务。无需将修改提交回本仓库。
@@ -149,6 +160,20 @@ Copyright (C) 2026 buerka.
 本软件不提供任何担保，包括适销性或特定用途适用性的担保，具体以许可证条款为准。
 
 第三方依赖保留各自的版权、许可证和 NOTICE 要求；本项目的许可证声明不替代这些要求。sing-box 等独立安装的外部程序遵循其各自许可证。
+
+## 常见问题
+
+### 管理界面如何访问？
+
+在服务器本机或 SSH 终端中运行 `sbmgr`，即可进入中文 TUI/CUI 管理面板。管理界面不需要浏览器；独立的 HTTP/HTTPS 服务用于设备订阅与二维码交付。
+
+### 首次使用需要现成的 sing-box 配置吗？
+
+需要。先准备可用的 sing-box 基础配置，再按[部署步骤](#部署)初始化。当前受管入口使用 VLESS + REALITY，客户端导出格式为 Mihomo YAML；已有身份默认保留为非托管身份，显式导入后才由 sbmgr 管理。
+
+### 可以集中管理多台服务器吗？
+
+用户、设备、配置应用和限速在单台 Linux 服务器内管理。多机页面支持只读状态汇总，不执行跨服务器批量配置变更。
 
 ## 已知限制
 
