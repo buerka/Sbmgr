@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 3
+	sqliteSchemaVersion = 4
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -613,6 +613,37 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 3
+		case 3:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for _, col := range []struct{ table, name, definition string }{
+				{"mesh_members", "client_json", `TEXT NOT NULL DEFAULT 'null' CHECK(json_valid(client_json))`},
+				{"mesh_routes", "entry", `TEXT NOT NULL DEFAULT ''`},
+				{"mesh_routes", "exit_tag", `TEXT NOT NULL DEFAULT ''`},
+			} {
+				var count int
+				if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info(?) WHERE name=?", col.table, col.name).Scan(&count); err != nil {
+					return err
+				}
+				if count == 0 {
+					if _, err := tx.Exec("ALTER TABLE " + col.table + " ADD COLUMN " + col.name + " " + col.definition); err != nil {
+						return err
+					}
+				}
+			}
+			if _, err := tx.Exec(`UPDATE metadata SET value = '4' WHERE key = 'schema_version'`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`PRAGMA user_version = 4`); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 4
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
@@ -764,6 +795,8 @@ func hashBytes(raw []byte) []byte {
 }
 
 func stripSQLiteRuntime(state *State) {
+	state.MeshSyncSequence = 0
+	state.MeshLease = nil
 	state.Counters = nil
 	state.JournalCursor = ""
 	state.PendingSources = nil

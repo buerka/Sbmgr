@@ -32,7 +32,7 @@ daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 | 来源、访问、连接 | `ip_policy.go`、`access_policy.go`、`connection_tracking.go` |
 | 出站、端点、客户端入口 | `outbound_*.go`、`proxy_admin.go`、`client_endpoint.go` |
 | 订阅隔离与生命周期 | `subscription_{backend,http,ipc,worker_linux,supervisor}.go` |
-| 主从命令、存储、下发 | `mesh_{admin,state,sqlite,routes,coordinator,agent,runtime}.go` |
+| 主从命令、存储、下发、入口授权 | `mesh_{admin,state,sqlite,routes,coordinator,agent,runtime,access}.go` |
 | 拓扑校验与协议编译 | `internal/mesh/{model,transport,config}.go` |
 | 备份、审计、巡检、健康 | `backup.go`、`audit.go`、`fleet.go`、`health.go` |
 
@@ -40,7 +40,9 @@ daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 
 ## 多机与协议
 
-主机保存用户和拓扑，从机只接收自身执行计划。成员保存管理标识和 SSH 连接；线路保存路径与逐跳协议，末跳直接出站。控制通道为固定命令、有界 JSON RPC；拓扑模块不依赖 SQLite、CUI 或 SSH。
+主机保存用户和拓扑，从机只接收自身执行计划与本机入口的用户授权。成员保存管理标识、SSH 连接和公开客户端入口参数；线路保存入口、路径、逐跳协议及末跳出站。客户端直连获授权的入口，流量不经过额外的管理跳。控制通道为固定命令、有界 JSON RPC；拓扑模块不依赖 SQLite、CUI 或 SSH。
+
+入口授权使用有期限的租约；从机累计用量通过持久基线增量汇总到主机。停用、到期、配额和撤权由主机下发，从机也执行本地配额与租约检查。独立第三方 SOCKS5 封装服务在 sbmgr 之外运行，只以基础出站接入，见 [DataImpulse 封装](DATAIMPULSE_GATEWAY.md)。
 
 协调器持久记录恢复决定，逐机准备，再提交从机与主机，最后确认结束。节点事务可重试；未决事务先恢复，不能保证多机同时切换。用法见[主从管理](MESH.md)。
 

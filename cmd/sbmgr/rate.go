@@ -488,6 +488,7 @@ func renderNftablesWithCounters(s *State, liveCounters map[string]int64) (string
 	if _, err := ensureNodeMarks(s); err != nil {
 		return "", err
 	}
+	s = meshLocalView(s)
 	liveCounters = canonicalNftCounters(s, liveCounters)
 	if err := validateRateMarks(s); err != nil {
 		return "", err

@@ -13,9 +13,14 @@ import (
 
 func (a *app) meshCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: sbmgr admin mesh init|add|route|remove-route|remove|export|join|check|apply|recover|list")
+		return errors.New("用法: sbmgr admin mesh init|add|entry|route|remove-route|remove|export|join|check|apply|recover|sync|list")
 	}
 	switch args[0] {
+	case "sync":
+		if len(args) != 1 {
+			return errors.New("sync 不接受额外参数")
+		}
+		return a.meshSyncAccess()
 	case "rpc":
 		if len(args) != 1 {
 			return errors.New("rpc 不接受参数")
@@ -48,7 +53,7 @@ func (a *app) meshCmd(args []string) error {
 				fmt.Fprintf(a.out, "节点 %s\t管理连接 %s\n", m.ID, m.SSHHost)
 			}
 			for _, r := range s.Mesh.Routes {
-				fmt.Fprintf(a.out, "线路 %s\t%s → 就地落地\n", r.ID, strings.Join(r.Hops, " → "))
+				fmt.Fprintf(a.out, "线路 %s\t入口 %s → %s → %s\n", r.ID, s.Mesh.Entry(r), strings.Join(r.Hops, " → "), dash(r.Exit))
 			}
 			return nil
 		}
@@ -69,6 +74,7 @@ func (a *app) meshCmd(args []string) error {
 				return err
 			}
 			plan.Hops = nil // Enrollment conveys management identity only.
+			plan.Catalog = nil
 			raw, _ := json.MarshalIndent(plan, "", "  ")
 			defer clear(raw)
 			if err := writeMeshExport(*output, raw); err != nil {
@@ -133,6 +139,25 @@ func (a *app) meshCmd(args []string) error {
 			fs := a.newFlagSet("mesh " + args[0])
 			id := fs.String("id", "", "节点或线路标识")
 			switch args[0] {
+			case "entry":
+				file := fs.String("file", "", "仅包含入口公开参数的 JSON 文件")
+				if err := fs.Parse(args[1:]); err != nil {
+					return err
+				}
+				index := slices.IndexFunc(s.Mesh.Members, func(m mesh.Member) bool { return m.ID == *id })
+				if index < 0 || !filepath.IsAbs(*file) {
+					return errors.New("需要现有节点标识和入口配置绝对路径")
+				}
+				f, err := os.Open(*file)
+				if err != nil {
+					return errors.New("入口配置无法读取")
+				}
+				defer f.Close()
+				var client mesh.Client
+				if err := decodeMeshJSON(f, &client); err != nil {
+					return err
+				}
+				s.Mesh.Members[index].Client = &client
 			case "add":
 				host := fs.String("host", "", "SSH 管理地址")
 				port, user := fs.Int("port", 22, "SSH 端口"), fs.String("user", "root", "SSH 用户")
@@ -145,6 +170,8 @@ func (a *app) meshCmd(args []string) error {
 				}
 				s.Mesh.Members = append(s.Mesh.Members, mesh.Member{ID: *id, SSHHost: *host, SSHPort: *port, SSHUser: *user, SSHKeyPath: *key, AppDir: *home})
 			case "route":
+				entry := fs.String("entry", "", "客户端入口节点；留空使用主机")
+				exit := fs.String("exit", "", "末跳基础配置的出站 tag；留空直接出站")
 				hops := fs.String("hops", "", "节点标识，以逗号分隔；最后一跳就地落地")
 				protocols := fs.String("protocols", "", "逐跳协议或统一协议：socks、hysteria2、wireguard；新线路默认 hysteria2")
 				endpoints := fs.String("endpoints", "", "逐跳数据地址 host:port；留空使用节点 SSH 主机名和自动端口")
@@ -156,7 +183,7 @@ func (a *app) meshCmd(args []string) error {
 				for i := range path {
 					path[i] = strings.TrimSpace(path[i])
 				}
-				if err := setMeshRoute(s.Mesh, *id, path, *protocols, *endpoints, *rotate); err != nil {
+				if err := setMeshRouteOptions(s.Mesh, *id, path, *protocols, *endpoints, *rotate, *entry, *exit); err != nil {
 					return err
 				}
 			case "remove-route":
@@ -185,7 +212,7 @@ func (a *app) meshCmd(args []string) error {
 					return errors.New("请先应用当前拓扑以停用从机上的旧线路，再移除从机")
 				}
 				for _, r := range s.Mesh.Routes {
-					if slices.Contains(r.Hops, *id) {
+					if slices.Contains(r.Hops, *id) || s.Mesh.Entry(r) == *id {
 						return errors.New("节点仍被线路引用，请先修改线路")
 					}
 				}

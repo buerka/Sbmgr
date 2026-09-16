@@ -41,7 +41,28 @@ func (p Plan) Augment(cfg map[string]any) error {
 	for _, h := range p.Hops {
 		tag := RouteTag(h.ID)
 		if h.Outgoing == nil {
-			outbounds = append(outbounds, map[string]any{"type": "direct", "tag": tag})
+			if h.Exit == "" {
+				outbounds = append(outbounds, map[string]any{"type": "direct", "tag": tag})
+			} else {
+				found := false
+				for _, item := range outbounds {
+					original, _ := item.(map[string]any)
+					if original["tag"] != h.Exit {
+						continue
+					}
+					copied := map[string]any{}
+					for k, v := range original {
+						copied[k] = v
+					}
+					copied["tag"] = tag
+					outbounds = append(outbounds, copied)
+					found = true
+					break
+				}
+				if !found {
+					return errors.New("线路末跳缺少指定的本机落地出站")
+				}
+			}
 		} else if h.Outgoing.Type == "wireguard" {
 			endpoints = append(endpoints, h.Outgoing.wireGuard(tag, false))
 		} else {

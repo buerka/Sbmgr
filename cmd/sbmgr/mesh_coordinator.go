@@ -33,7 +33,7 @@ var meshExchange = func(a *app, member mesh.Member, r meshRequest, local bool) (
 	cmd := exec.CommandContext(ctx, "ssh", fleetSSHArgs(server, command)...)
 	cmd.WaitDelay = time.Second
 	cmd.Stdin = bytes.NewReader(raw)
-	output := newFleetLimitedBuffer(16 << 10)
+	output := newFleetLimitedBuffer(mesh.MaxMessage)
 	cmd.Stdout, cmd.Stderr = output, io.Discard
 	if cmd.Run() != nil || output.overflow {
 		return meshResponse{}, errors.New("SSH 通信失败或响应超限；检查专用密钥、主机指纹和受限命令")

@@ -82,6 +82,7 @@ const (
 	formMeshRoute
 	formMeshExport
 	formMeshRemove
+	formMeshEntry
 	formMeshRemoveRoute
 )
 
@@ -4492,8 +4493,8 @@ func (m tuiModel) formHelpLines(width int) []string {
 				"公网监听必须使用 TLS；也可只监听回环地址，再由同机 HTTPS 反向代理转发。",
 				"HTTP 由专用低权限进程提供；降权失败时订阅保持关闭，后台维护继续运行。保存后自动重启 sbmgr 生效，无需应用配置。",
 			}
-		case formMeshInit, formMeshJoin, formMeshAdd, formMeshRoute, formMeshExport, formMeshRemove, formMeshRemoveRoute:
-			paragraphs = []string{"主从接入只登记管理身份和 SSH 连接。线路支持 socks、hysteria2、wireguard；可填统一协议或逐跳以逗号分隔。留空保留原值，新线路默认 hysteria2。", "最后一跳就地落地，前面的从机负责中转；同一从机可以承担两种用途。数据地址独立填写，留空保留原值或使用 SSH 主机名和自动端口。SOCKS5 本身不加密。", "保存后需应用主从拓扑。失败回滚，通信中断时可恢复事务。HY2 证书有效期一年，可选择轮换线路凭据后应用。接入文件仅含管理身份。"}
+		case formMeshInit, formMeshJoin, formMeshAdd, formMeshRoute, formMeshExport, formMeshRemove, formMeshEntry, formMeshRemoveRoute:
+			paragraphs = []string{"客户端入口默认主机；也可选择已登记公开参数的从机。中转链只填入口之后的节点，本机落地时仅填入口自身。末跳出站留空直接出站，填写时引用末跳机器基础配置的出站 tag。", "线路协议支持 socks、hysteria2、wireguard；留空保留原值，新线路默认 hysteria2。SOCKS5 本身不加密。", "保存后需应用主从拓扑，再在设备中分配线路。入口用户权限由主机自动同步，失联超过 90 秒租约后停止该入口受管身份；配置失败保留待应用状态并重试。用量定期汇总，配额存在采样延迟。"}
 		case formAddUser:
 			paragraphs = []string{"配额计量决定配额、阶梯限速和订阅剩余流量采用双向合计、仅上传或仅下载；原始上下行始终分别保留。"}
 		case formEditUser:

@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-const stateVersion = 11
+const stateVersion = 12
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -60,6 +60,8 @@ type State struct {
 	Mesh              *mesh.Topology               `json:"mesh,omitempty"`
 	MeshAgent         MeshAgentState               `json:"mesh_agent,omitempty"`
 	MeshRollout       *MeshRollout                 `json:"mesh_rollout,omitempty"`
+	MeshLease         *MeshLease                   `json:"mesh_lease,omitempty"`
+	MeshSyncSequence  uint64                       `json:"mesh_sync_sequence,omitempty"`
 	Alerts            []Alert                      `json:"alerts,omitempty"`
 	ReservedAuthUsers []string                     `json:"reserved_auth_users,omitempty"`
 	Client            ClientSettings               `json:"client"`
@@ -775,8 +777,14 @@ func nodeTemplates(s *State) []NodeTemplate {
 		}
 	}
 	if plan := s.MeshAgent.Active; plan != nil && plan.Master {
-		for _, hop := range plan.Hops {
-			templates = append(templates, NodeTemplate{Name: "主从 · " + hop.ID, Outbound: mesh.RouteTag(hop.ID)})
+		if len(plan.Catalog) > 0 {
+			for _, r := range plan.Catalog {
+				templates = append(templates, NodeTemplate{Name: "主从 · " + r.ID, Outbound: mesh.RouteTag(r.ID)})
+			}
+		} else {
+			for _, hop := range plan.Hops {
+				templates = append(templates, NodeTemplate{Name: "主从 · " + hop.ID, Outbound: mesh.RouteTag(hop.ID)})
+			}
 		}
 	}
 	sort.SliceStable(templates, func(i, j int) bool {
@@ -1442,7 +1450,7 @@ func (a *app) nodeCmdLocked(args []string) error {
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.out, "已添加节点 %s/%s/%s，UUID: %s\n", u.Name, device.Name, *name, *uuid)
+		fmt.Fprintf(a.out, "已添加节点 %s/%s/%s，身份凭据已隐藏\n", u.Name, device.Name, *name)
 		return nil
 	case "list":
 		if len(args) != 2 {
@@ -1452,9 +1460,9 @@ func (a *app) nodeCmdLocked(args []string) error {
 		if u == nil {
 			return fmt.Errorf("用户 %q 不存在", args[1])
 		}
-		fmt.Fprintln(a.out, "DEVICE\tNAME\tAUTH_USER\tOUTBOUND\tUP_Mbps\tDOWN_Mbps\tUUID")
+		fmt.Fprintln(a.out, "DEVICE\tNAME\tAUTH_USER\tOUTBOUND\tUP_Mbps\tDOWN_Mbps")
 		for _, n := range u.Nodes {
-			fmt.Fprintf(a.out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", n.Device, n.Name, n.AuthUser, dash(n.Outbound), formatMbps(n.UploadMbps), formatMbps(n.DownloadMbps), n.UUID)
+			fmt.Fprintf(a.out, "%s\t%s\t%s\t%s\t%s\t%s\n", n.Device, n.Name, n.AuthUser, dash(n.Outbound), formatMbps(n.UploadMbps), formatMbps(n.DownloadMbps))
 		}
 		return nil
 	case "set":
@@ -1796,6 +1804,7 @@ func renderConfig(s *State) ([]byte, error) {
 	if _, err := ensureNodeMarks(s); err != nil {
 		return nil, err
 	}
+	s = meshLocalView(s)
 	raw, err := os.ReadFile(s.BaseConfig)
 	if err != nil {
 		return nil, fmt.Errorf("读取基础模板: %w", err)
@@ -2073,9 +2082,10 @@ func renderMihomoDevice(s *State, u User, deviceName string) ([]byte, error) {
 	b.WriteString("mixed-port: 7893\nallow-lan: false\nmode: rule\nlog-level: info\nipv6: false\n\nproxies:\n")
 	names := []string{}
 	for _, n := range nodes {
+		client := meshClientForNode(s, n)
 		name := strings.ReplaceAll(deviceNodeLabel(u.Name, device.Name, n.Name), "/", "-")
 		names = append(names, name)
-		fmt.Fprintf(&b, "  - name: %s\n    type: vless\n    server: %s\n    port: %d\n    uuid: %s\n    network: tcp\n    tls: true\n    udp: true\n    servername: %s\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: %s\n      short-id: %s\n    packet-encoding: xudp\n", yamlQuote(name), yamlQuote(s.Client.Server), s.Client.Port, yamlQuote(n.UUID), yamlQuote(s.Client.ServerName), yamlQuote(s.Client.PublicKey), yamlQuote(s.Client.ShortID))
+		fmt.Fprintf(&b, "  - name: %s\n    type: vless\n    server: %s\n    port: %d\n    uuid: %s\n    network: tcp\n    tls: true\n    udp: true\n    servername: %s\n    client-fingerprint: chrome\n    reality-opts:\n      public-key: %s\n      short-id: %s\n    packet-encoding: xudp\n", yamlQuote(name), yamlQuote(client.Server), client.Port, yamlQuote(n.UUID), yamlQuote(client.ServerName), yamlQuote(client.PublicKey), yamlQuote(client.ShortID))
 	}
 	b.WriteString("\nproxy-groups:\n  - name: \"节点选择\"\n    type: select\n    proxies:\n")
 	for _, n := range names {
@@ -2279,6 +2289,13 @@ func migrateState(s *State) error {
 			// Mesh is opt-in. Existing Fleet credentials stay read-only and are
 			// never silently promoted to deployment authority.
 			s.Version = 11
+		case 11:
+			for _, p := range []*mesh.Plan{s.MeshAgent.Active, s.MeshAgent.Pending, s.MeshAgent.Previous} {
+				if p != nil && p.Protocol == 1 {
+					p.Protocol = mesh.Protocol
+				}
+			}
+			s.Version = 12
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}

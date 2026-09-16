@@ -1,6 +1,21 @@
 # 主从管理与线路
 
-主机管理用户、设备、配额和订阅，通过 SSH 下发从机执行计划。线路指定有序节点及每跳协议：前面的从机中转，末跳直接落地；同一从机可供多条线路使用。路径仅含主机标识时在主机落地（示例为 `master`）。
+主机管理用户、设备、配额和订阅，通过 SSH 下发从机执行计划。每条线路可选择独立客户端入口、有序中转节点和末跳出站；从机入口直接处理流量，不经主机绕行。省略入口沿用主机，省略末跳出站直接落地。路径只含入口自身时在入口落地。
+
+从机入口需要先准备自己的 VLESS + REALITY 基础配置，再在主机的“配置客户端入口”菜单导入公开参数（`server`、`port`、`server_name`、`reality_public_key`、`short_id`）。私钥留在从机。应用拓扑后，设备分配线路会同时决定入口和落地；只有获授权的线路才进入该设备订阅。已有用户不自动获得新线路。
+
+```sh
+sbmgr admin mesh entry --id relay-a --file '<ENTRY_PUBLIC_JSON>'
+sbmgr admin mesh route --id relay-local --entry relay-a --hops relay-a
+sbmgr admin mesh route --id relay-external --entry relay-a --hops relay-a --exit external-socks
+sbmgr admin mesh route --id master-external --hops relay-a --exit external-socks
+```
+
+`--exit` 引用最后一台机器基础配置的出站 tag，未找到时拒绝应用；外部落地凭据只需配置在该机器。管理协议版本为 2，多机升级后再应用新拓扑。
+
+主机后台默认约每 5 秒汇总从机累计用量并续发授权；用量基线持久保存在结构化计数表，重试不会重复计费。从机保留独立计量，权限、停用和到期由主机同步；90 秒授权租约失效后，在下一次后台检查关闭受管入口身份，已有转发连接随配置重启断开。主从服务均须持续运行。链路中断、采样及重载存在延迟，跨机配额不是同时生效的全局硬截止；从机只获得当期剩余配额的一部分。动态来源学习和连接计数在各入口执行。
+
+可通过“同步入口授权”或 `sbmgr admin mesh sync` 手工立即同步。同步不改变用户既有节点授权。受管身份只能在其指定入口认证；节点之间的中转监听使用单独的传输凭据。
 
 ```text
 客户端 → 主机入口 ── SOCKS5 → 从机 A ── WG → 从机 B → 目标
@@ -46,7 +61,7 @@ export SBMGR_HOME=/srv/sbmgr
 restrict,command="/srv/sbmgr/deploy/mesh-agent-rpc.sh --home /srv/sbmgr" <PUBLIC_KEY>
 ```
 
-脚本权限 0700；程序、脚本、应用目录及父目录由 root 持有且不可被其他用户修改。提前核验主机指纹；客户端严格检查 known_hosts，不接受交互认证。固定入口忽略 `SSH_ORIGINAL_COMMAND`，只接受状态和 prepare/commit/rollback/finalize；消息 ≤2 MiB，校验协议版本、集合、身份和角色，不接收任意命令或完整配置。
+脚本权限 0700；程序、脚本、应用目录及父目录由 root 持有且不可被其他用户修改。提前核验主机指纹；客户端严格检查 known_hosts，不接受交互认证。固定入口忽略 `SSH_ORIGINAL_COMMAND`，只接受状态、prepare/commit/rollback/finalize 和 usage/access；消息 ≤2 MiB，校验协议版本、集合、身份和角色，不接收任意命令或完整配置。
 
 主机编排并应用：
 

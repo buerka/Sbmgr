@@ -102,7 +102,7 @@ func (a *app) daemonCmd(args []string) error {
 // the same state lock, so a sample cannot race an interactive edit or the
 // minute maintenance cycle.
 func (a *app) realtimeCycle() error {
-	return a.withStateLock(a.realtimeCycleLocked)
+	return errors.Join(a.meshLeaseCycle(), a.withStateLock(a.realtimeCycleLocked), a.meshSyncAccess())
 }
 
 func (a *app) realtimeCycleLocked() error {
@@ -284,7 +284,7 @@ func ipRestrictionSetSignature(s *State, now time.Time) (string, error) {
 
 func (a *app) daemonCycle() error {
 	cycleErr := a.withStateLock(a.daemonCycleLocked)
-	return errors.Join(cycleErr, a.networkMaintenance())
+	return errors.Join(cycleErr, a.networkMaintenance(), a.meshSyncAccess(), a.meshLeaseCycle())
 }
 
 func (a *app) daemonCycleLocked() error {

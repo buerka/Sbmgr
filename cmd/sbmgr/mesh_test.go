@@ -91,7 +91,7 @@ func TestMeshSQLiteStructuredRoundTripAndVersionTenMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Version != 11 || loaded.Mesh != nil || loaded.MeshAgent.Cluster != "" || loaded.Users[0].Upload != legacy.Users[0].Upload {
+	if loaded.Version != stateVersion || loaded.Mesh != nil || loaded.MeshAgent.Cluster != "" || loaded.Users[0].Upload != legacy.Users[0].Upload {
 		t.Fatal("old state changed identities, counters, or enabled mesh")
 	}
 }

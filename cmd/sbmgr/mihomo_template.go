@@ -84,7 +84,7 @@ func renderMihomoFromTemplate(s *State, u User, device Device, nodes []Node) ([]
 		if proxyTemplate == nil {
 			proxyTemplate = skeleton
 		}
-		proxy, err := buildMihomoProxy(proxyTemplate, exportNames[index], s.Client, node.UUID)
+		proxy, err := buildMihomoProxy(proxyTemplate, exportNames[index], meshClientForNode(s, node), node.UUID)
 		if err != nil {
 			return nil, fmt.Errorf("生成节点 %s: %w", node.Name, err)
 		}

@@ -10,21 +10,23 @@ import (
 )
 
 type meshRequest struct {
-	Protocol    int        `json:"protocol"`
-	Cluster     string     `json:"cluster"`
-	Member      string     `json:"member"`
-	Operation   string     `json:"operation"`
-	Transaction string     `json:"transaction,omitempty"`
-	Plan        *mesh.Plan `json:"plan,omitempty"`
+	Protocol    int         `json:"protocol"`
+	Cluster     string      `json:"cluster"`
+	Member      string      `json:"member"`
+	Operation   string      `json:"operation"`
+	Transaction string      `json:"transaction,omitempty"`
+	Plan        *mesh.Plan  `json:"plan,omitempty"`
+	Access      *meshAccess `json:"access,omitempty"`
 }
 
 type meshResponse struct {
-	Protocol    int    `json:"protocol"`
-	Member      string `json:"member"`
-	Revision    uint64 `json:"revision"`
-	Phase       string `json:"phase,omitempty"`
-	Transaction string `json:"transaction,omitempty"`
-	Error       string `json:"error,omitempty"`
+	Protocol    int         `json:"protocol"`
+	Member      string      `json:"member"`
+	Revision    uint64      `json:"revision"`
+	Phase       string      `json:"phase,omitempty"`
+	Transaction string      `json:"transaction,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	Usage       []meshUsage `json:"usage,omitempty"`
 }
 
 func decodeMeshJSON(reader io.Reader, target any) error {
@@ -72,6 +74,22 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 			response.Revision = j.Active.Revision
 		}
 		response.Phase, response.Transaction = j.Phase, j.Transaction
+		if r.Operation == "usage" || r.Operation == "access" {
+			if s.Mesh != nil || r.Plan != nil || r.Transaction != "" {
+				return errors.New("入口同步请求角色或参数无效")
+			}
+			if r.Operation == "usage" {
+				if r.Access != nil {
+					return errors.New("用量查询不接受授权")
+				}
+				response.Usage = meshUsageSnapshot(s)
+				return nil
+			}
+			return a.installMeshAccess(s, r.Access)
+		}
+		if r.Access != nil {
+			return errors.New("此操作不接受入口授权")
+		}
 		if r.Operation == "status" {
 			if r.Plan != nil || r.Transaction != "" {
 				return errors.New("状态请求含无效参数")

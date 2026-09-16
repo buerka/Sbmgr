@@ -28,6 +28,8 @@ func (m tuiModel) meshMenuEntries() []tuiMenuEntry {
 		{title: "恢复未完成事务", description: "按持久日志完成回滚或确认提交"},
 		{title: "删除线路", description: "仅允许删除未被用户引用的线路"},
 		{title: "移除从机", description: "移除管理登记；需先停用该机线路"},
+		{title: "配置客户端入口", description: "导入该机器的公开入口参数；需应用拓扑"},
+		{title: "同步入口授权", description: "汇总用量并下发权限；后台也会自动执行"},
 	}
 }
 
@@ -46,9 +48,13 @@ func (m tuiModel) renderMeshTopology() string {
 		for _, member := range t.Members {
 			content = append(content, "  "+member.ID+" · "+dash(member.SSHHost))
 		}
-		content = append(content, "", "  线路（客户端 → 主机入口 → 所列节点）")
+		content = append(content, "", "  线路（客户端 → 指定入口 → 所列节点）")
 		for _, route := range t.Routes {
-			content = append(content, "  "+route.ID+"："+strings.Join(route.Hops, " → ")+" → 就地落地")
+			exit := route.Exit
+			if exit == "" {
+				exit = "就地落地"
+			}
+			content = append(content, "  "+route.ID+"：入口 "+t.Entry(route)+" → "+strings.Join(route.Hops, " → ")+" → "+exit)
 			for i, tr := range route.Transports {
 				content = append(content, fmt.Sprintf("    → %s · %s · %s:%d", route.Hops[i], tr.Type, tr.Server, tr.Port))
 			}
@@ -138,6 +144,8 @@ func (m tuiModel) updateMesh(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				{label: "每跳协议", placeholder: "hysteria2、socks、wireguard；混用时以逗号分隔"},
 				{label: "每跳数据地址", placeholder: "host:port 逗号分隔；留空自动分配"},
 				{label: "轮换线路凭据", value: "否", options: []string{"否", "是"}},
+				{label: "客户端入口", value: m.state.Mesh.Master, placeholder: "主机或已配置入口的从机标识"},
+				{label: "末跳出站", placeholder: "留空直接出站；或末跳机器上的出站 tag"},
 			}}
 		case 4:
 			return m.startAction("正在测试主从通信", func(a *app) error { return a.meshCoordinate("check") })
@@ -158,6 +166,11 @@ func (m tuiModel) updateMesh(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.form = tuiForm{kind: formMeshRemove, title: "移除从机", fields: []tuiField{{label: "从机", value: first(ids), options: ids}}}
+		case 9:
+			allIDs := append([]string{m.state.Mesh.Master}, ids...)
+			m.form = tuiForm{kind: formMeshEntry, title: "配置客户端入口", fields: []tuiField{{label: "节点", value: first(allIDs), options: allIDs}, {label: "入口公开参数 JSON", placeholder: "绝对路径；只含地址、端口、SNI、公钥与 short-id"}}}
+		case 10:
+			return m.startAction("正在同步入口权限与用量", func(a *app) error { return a.meshSyncAccess() })
 		}
 		m.mode = tuiFormMode
 	}
@@ -176,11 +189,16 @@ func (m tuiModel) submitMeshForm() (tea.Model, tea.Cmd) {
 		args = []string{"add", "--id", v(0), "--host", v(1), "--port", v(2), "--user", v(3), "--key", v(4), "--home", v(5)}
 	case formMeshRoute:
 		args = []string{"route", "--id", v(0), "--hops", v(1), "--protocols", v(2), "--endpoints", v(3)}
+		if len(m.form.fields) > 6 {
+			args = append(args, "--entry", v(5), "--exit", v(6))
+		}
 		if v(4) == "是" {
 			args = append(args, "--rotate")
 		}
 	case formMeshExport:
 		args = []string{"export", "--node", v(0), "--output", v(1)}
+	case formMeshEntry:
+		args = []string{"entry", "--id", v(0), "--file", v(1)}
 	case formMeshRemove, formMeshRemoveRoute:
 		action := confirmMeshRemove
 		if m.form.kind == formMeshRemoveRoute {

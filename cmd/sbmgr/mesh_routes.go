@@ -10,6 +10,10 @@ import (
 )
 
 func setMeshRoute(t *mesh.Topology, id string, path []string, protocolList, endpointList string, rotate bool) error {
+	return setMeshRouteOptions(t, id, path, protocolList, endpointList, rotate, "", "")
+}
+
+func setMeshRouteOptions(t *mesh.Topology, id string, path []string, protocolList, endpointList string, rotate bool, entry, exit string) error {
 	if !mesh.ValidID(id) || len(path) < 1 || len(path) > mesh.MaxHops {
 		return errors.New("线路标识无效，或跳数不在 1–16 范围")
 	}
@@ -18,8 +22,11 @@ func setMeshRoute(t *mesh.Topology, id string, path []string, protocolList, endp
 	if index >= 0 {
 		old = t.Routes[index]
 	}
-	route := mesh.Route{ID: id, Hops: path}
-	if len(path) != 1 || path[0] != t.Master {
+	if entry == "" {
+		entry = t.Master
+	}
+	route := mesh.Route{ID: id, Hops: path, Entry: entry, Exit: exit}
+	if len(path) != 1 || path[0] != entry {
 		protocols, endpoints := []string{}, []string{}
 		if protocolList != "" {
 			protocols = strings.Split(protocolList, ",")
@@ -32,7 +39,7 @@ func setMeshRoute(t *mesh.Topology, id string, path []string, protocolList, endp
 		}
 		for i, memberID := range path {
 			memberIndex := slices.IndexFunc(t.Members, func(m mesh.Member) bool { return m.ID == memberID })
-			if memberIndex < 0 || memberID == t.Master {
+			if memberIndex < 0 || memberID == entry {
 				return errors.New("中转链包含不存在的从机")
 			}
 			previous := mesh.Transport{}
@@ -51,6 +58,9 @@ func setMeshRoute(t *mesh.Topology, id string, path []string, protocolList, endp
 			host, port := previous.Server, previous.Port
 			if host == "" {
 				host = t.Members[memberIndex].SSHHost
+				if host == "" && t.Members[memberIndex].Client != nil {
+					host = t.Members[memberIndex].Client.Server
+				}
 			}
 			if port == 0 {
 				used := map[int]bool{}

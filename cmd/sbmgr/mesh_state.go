@@ -38,6 +38,9 @@ func meshFleetServer(m mesh.Member) FleetServer {
 }
 
 func validateMeshState(s *State) error {
+	if err := validateMeshAccessState(s); err != nil {
+		return err
+	}
 	if s.Mesh != nil {
 		if err := s.Mesh.Validate(); err != nil {
 			return err
