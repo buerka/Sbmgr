@@ -548,7 +548,7 @@ func TestTUIRendersEmptyAndUserViews(t *testing.T) {
 		height: 30,
 	}
 	empty := m.render()
-	if !strings.Contains(empty, "尚未添加受管用户") || !strings.Contains(empty, "旧节点") {
+	if !strings.Contains(empty, "尚未添加受管用户") || strings.Contains(empty, "旧节点") {
 		t.Fatalf("empty TUI missing onboarding copy:\n%s", empty)
 	}
 	m.state.Users = []User{{Name: "alice", Enabled: true, Nodes: []Node{{Name: "default", UUID: "uuid"}}}}

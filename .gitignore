@@ -97,3 +97,5 @@ Thumbs.db
 /certbot-venv/
 /letsencrypt*/
 /logs/
+mesh-join*.json
+node-join.json

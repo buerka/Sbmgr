@@ -20,12 +20,12 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 2
+	sqliteSchemaVersion = 3
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
 
-var sqliteSchema = []string{
+var sqliteSchema = append([]string{
 	`CREATE TABLE IF NOT EXISTS metadata (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
@@ -250,7 +250,7 @@ var sqliteSchema = []string{
 		PRIMARY KEY(node_id, target)
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS node_destinations_count_idx ON node_destinations(node_id, count DESC)`,
-}
+}, sqliteMeshSchema...)
 
 func isSQLiteStatePath(path string) bool {
 	return !strings.EqualFold(filepath.Ext(strings.TrimSpace(path)), ".json")
@@ -592,6 +592,27 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 2
+		case 2:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for _, statement := range sqliteMeshSchema {
+				if _, err = tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			if _, err = tx.Exec(`UPDATE metadata SET value = '3' WHERE key = 'schema_version'`); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(`PRAGMA user_version = 3`); err != nil {
+				return err
+			}
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+			version = 3
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
@@ -861,11 +882,23 @@ func sqliteGlobalDocument(state *State) (string, error) {
 	} {
 		delete(document, field)
 	}
+	if state.Mesh != nil {
+		topology := *state.Mesh
+		topology.Members, topology.Routes = nil, nil
+		encoded, err := json.Marshal(topology)
+		if err != nil {
+			return "", err
+		}
+		document["mesh"] = encoded
+	}
 	raw, err = json.Marshal(document)
 	return string(raw), err
 }
 
 func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) error {
+	if err := writeSQLiteMesh(tx, state); err != nil {
+		return err
+	}
 	if err := prepareSQLiteKeepTables(tx); err != nil {
 		return err
 	}
@@ -1480,6 +1513,9 @@ func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
 	state := &State{}
 	if err := json.Unmarshal([]byte(document), state); err != nil {
 		return nil, fmt.Errorf("解析 SQLite 全局设置: %w", err)
+	}
+	if err := readSQLiteMesh(tx, state); err != nil {
+		return nil, err
 	}
 	var ipPending, burstPending, ratePending, statsPending int
 	if err := tx.QueryRow(`SELECT journal_cursor, ip_apply_pending, burst_apply_pending,

@@ -17,13 +17,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sbmgr/internal/mesh"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
 
-const stateVersion = 10
+const stateVersion = 11
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -56,6 +57,9 @@ type State struct {
 	Subscription      SubscriptionSettings         `json:"subscription,omitempty"`
 	Fleet             []FleetServer                `json:"fleet,omitempty"`
 	FleetStatus       map[string]FleetServerStatus `json:"fleet_status,omitempty"`
+	Mesh              *mesh.Topology               `json:"mesh,omitempty"`
+	MeshAgent         MeshAgentState               `json:"mesh_agent,omitempty"`
+	MeshRollout       *MeshRollout                 `json:"mesh_rollout,omitempty"`
 	Alerts            []Alert                      `json:"alerts,omitempty"`
 	ReservedAuthUsers []string                     `json:"reserved_auth_users,omitempty"`
 	Client            ClientSettings               `json:"client"`
@@ -414,6 +418,8 @@ func (a *app) adminCmd(args []string) error {
 		return a.policyCmd(args[1:])
 	case "fleet":
 		return a.fleetCmd(args[1:])
+	case "mesh":
+		return a.meshCmd(args[1:])
 	case "snapshot":
 		return a.snapshotCmd(args[1:])
 	case "proxy":
@@ -748,7 +754,7 @@ func nodeTemplates(s *State) []NodeTemplate {
 			seenTargets[template.Outbound] = true
 		}
 	}
-	for _, section := range []string{"outbounds"} {
+	for _, section := range []string{"outbounds", "endpoints"} {
 		items, _ := cfg[section].([]any)
 		for _, item := range items {
 			object, _ := item.(map[string]any)
@@ -760,9 +766,17 @@ func nodeTemplates(s *State) []NodeTemplate {
 			if typeName == "direct" || typeName == "block" || typeName == "dns" {
 				continue
 			}
+			if section == "endpoints" && !wireGuardUserAssignable(object) {
+				continue
+			}
 			seenNames[strings.ToLower(tag)] = true
 			seenTargets[tag] = true
 			templates = append(templates, NodeTemplate{Name: tag, Outbound: tag})
+		}
+	}
+	if plan := s.MeshAgent.Active; plan != nil && plan.Master {
+		for _, hop := range plan.Hops {
+			templates = append(templates, NodeTemplate{Name: "主从 · " + hop.ID, Outbound: mesh.RouteTag(hop.ID)})
 		}
 	}
 	sort.SliceStable(templates, func(i, j int) bool {
@@ -1805,6 +1819,11 @@ func renderConfig(s *State) ([]byte, error) {
 	if err := validateBaseIdentities(s, cfg); err != nil {
 		return nil, err
 	}
+	if plan := s.MeshAgent.Active; plan != nil {
+		if err := plan.Augment(cfg); err != nil {
+			return nil, err
+		}
+	}
 	route, _ := cfg["route"].(map[string]any)
 	if route == nil {
 		route = map[string]any{}
@@ -1945,7 +1964,7 @@ func applyState(s *State, noReload, restart bool, w io.Writer) error {
 	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
 		return fmt.Errorf("读取现有配置: %w", readErr)
 	}
-	if hadOldConfig {
+	if hadOldConfig && noReload {
 		if err := atomicWrite(backup, old, 0600); err != nil {
 			return fmt.Errorf("创建备份: %w", err)
 		}
@@ -1966,6 +1985,11 @@ func applyState(s *State, noReload, restart bool, w io.Writer) error {
 	rateSnapshot, err := captureNftRateSnapshot()
 	if err != nil {
 		return fmt.Errorf("备份现有限速规则: %w", err)
+	}
+	if hadOldConfig {
+		if err := atomicWrite(backup, old, 0600); err != nil {
+			return fmt.Errorf("创建备份: %w", err)
+		}
 	}
 	if err := applyRateLimits(s, w); err != nil {
 		rollbackErr := restoreNftRateSnapshot(s, rateSnapshot, w)
@@ -2251,6 +2275,10 @@ func migrateState(s *State) error {
 			boundConnectionTracking(s)
 			migrateSecurityPolicies(s, time.Now())
 			s.Version = 10
+		case 10:
+			// Mesh is opt-in. Existing Fleet credentials stay read-only and are
+			// never silently promoted to deployment authority.
+			s.Version = 11
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}
@@ -2275,6 +2303,9 @@ func validateState(s *State) error {
 		return err
 	}
 	if err := validateFleet(s); err != nil {
+		return err
+	}
+	if err := validateMeshState(s); err != nil {
 		return err
 	}
 	if err := validateRateMarks(s); err != nil {

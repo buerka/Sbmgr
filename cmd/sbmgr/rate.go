@@ -344,6 +344,20 @@ func addRateOutbounds(cfg map[string]any, s *State, active []User) (map[string]s
 	outbounds, _ := cfg["outbounds"].([]any)
 	index := make(map[string]map[string]any, len(outbounds))
 	usedTags := make(map[string]bool, len(outbounds))
+	endpoints := map[string]map[string]any{}
+	endpointItems, _ := cfg["endpoints"].([]any)
+	for _, item := range endpointItems {
+		object, _ := item.(map[string]any)
+		tag := stringValue(object["tag"])
+		if tag != "" {
+			endpoints[tag], usedTags[tag] = object, true
+		}
+	}
+	inboundItems, _ := cfg["inbounds"].([]any)
+	for _, item := range inboundItems {
+		object, _ := item.(map[string]any)
+		usedTags[stringValue(object["tag"])] = true
+	}
 	for _, item := range outbounds {
 		m, _ := item.(map[string]any)
 		tag := stringValue(m["tag"])
@@ -374,6 +388,14 @@ func addRateOutbounds(cfg map[string]any, s *State, active []User) (map[string]s
 			return "", fmt.Errorf("出站 %q 的 detour/outbounds 存在循环", originalTag)
 		}
 		original := index[originalTag]
+		if original == nil && endpoints[originalTag] != nil {
+			var err error
+			original, err = addWireGuardBridge(cfg, endpoints[originalTag], usedTags)
+			if err != nil {
+				return "", err
+			}
+			index[originalTag] = original
+		}
 		if original == nil {
 			return "", fmt.Errorf("找不到需要限速的出站 %q", originalTag)
 		}
@@ -517,9 +539,9 @@ func renderNftablesWithCounters(s *State, liveCounters map[string]int64) (string
 		label := item.label + " download"
 		bytes := initialNftCounter(s, item.mark, "download", label, liveCounters)
 		if item.download > 0 {
-			fmt.Fprintf(&b, "    ct mark 0x%08x limit rate over %d bytes/second burst %d bytes drop\n", item.mark, mbpsBytes(item.download), rateBurst(item.download, item.soft))
+			fmt.Fprintf(&b, "    ct direction reply ct mark 0x%08x limit rate over %d bytes/second burst %d bytes drop\n", item.mark, mbpsBytes(item.download), rateBurst(item.download, item.soft))
 		}
-		fmt.Fprintf(&b, "    ct mark 0x%08x %s comment %s\n", item.mark, nftCounterExpression(bytes), nftQuote(label))
+		fmt.Fprintf(&b, "    ct direction reply ct mark 0x%08x %s comment %s\n", item.mark, nftCounterExpression(bytes), nftQuote(label))
 	}
 	b.WriteString("  }\n")
 	b.WriteString("}\n")

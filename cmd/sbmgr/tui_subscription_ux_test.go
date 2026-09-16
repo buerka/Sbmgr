@@ -27,8 +27,13 @@ func TestSubscriptionOverviewNavigationQRCodeReturnAndRotation(t *testing.T) {
 	}
 	model, _ = m.updateSubscriptions(formSpecialKey(tea.KeyEnter))
 	m = model.(tuiModel)
+	if m.mode != tuiSubscriptionActions {
+		t.Fatal("enter must open subscription delivery menu")
+	}
+	model, _ = m.updateSubscriptionActions(tea.KeyPressMsg(tea.Key{Text: "z", Code: 'z'}))
+	m = model.(tuiModel)
 	if m.mode != tuiQRCode || m.qrReturnMode != tuiSubscriptions || m.qrUser != "alice" || m.qrDevice != "tablet" {
-		t.Fatalf("subscription QR context = %#v", m)
+		t.Fatal("unexpected subscription QR navigation")
 	}
 	model, _ = m.Update(formSpecialKey(tea.KeyEscape))
 	m = model.(tuiModel)
@@ -67,7 +72,7 @@ func TestSubscriptionOverviewFits64x18AndShowsOperationalFields(t *testing.T) {
 			t.Fatalf("subscription line %d width = %d, want <= %d: %q", index+1, width, m.width, line)
 		}
 	}
-	for _, want := range []string{"设备流量", "用户计费", "到期", "URL", "enter/z 二维码", "r/u 撤销旧链接"} {
+	for _, want := range []string{"设备流量", "用户计费", "到期", "URL", "enter 交付菜单", "c 复制链接", "w 保存链接", "r/u 撤销旧链接"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("subscription overview missing %q:\n%s", want, rendered)
 		}

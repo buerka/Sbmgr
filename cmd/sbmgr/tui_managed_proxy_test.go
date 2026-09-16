@@ -61,7 +61,7 @@ func TestManagedProxyMenuAndReviewFitMinimumTerminal(t *testing.T) {
 
 	rendered := m.renderProxyMenu()
 	assertTUIFits(t, rendered, 64, 18)
-	for _, want := range []string{"wg-exit", "端点仅管理底层网络接口", "常用字段", "完整 JSON", "从文件导入", "删除"} {
+	for _, want := range []string{"wg-exit", "用户态 WG 端点可分配", "常用字段", "完整 JSON", "从文件导入", "删除"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("proxy menu missing %q:\n%s", want, rendered)
 		}
@@ -258,8 +258,8 @@ func TestHealthPageListsNonServerOutboundsAndEndpointsAtMinimumSize(t *testing.T
 	if !strings.Contains(rendered, "wg-exit") || !strings.Contains(rendered, "wireguard") {
 		t.Fatalf("selected endpoint is not visible:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "不可直接分配用户节点") {
-		t.Fatalf("endpoint limitations are not visible:\n%s", rendered)
+	if !strings.Contains(rendered, "配置远端后可分配用户节点") {
+		t.Fatalf("WG endpoint capability is not visible:\n%s", rendered)
 	}
 }
 

@@ -4,6 +4,10 @@ import check_public_tree as check
 
 
 class PrivacyGateTests(unittest.TestCase):
+    def test_mesh_enrollment_and_crash_residue_are_private(self):
+        for name in ("mesh-join-relay.json", "node-join.json"):
+            self.assertIsNotNone(check.forbidden_path_reason(name))
+
     def test_example_suffix_does_not_exempt_credentials(self):
         for name in ("server.example.key", "client.example.pem", "state.example.db"):
             self.assertIsNotNone(check.forbidden_path_reason(name))

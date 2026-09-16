@@ -44,6 +44,9 @@ const (
 	tuiProxyReview
 	tuiFormMode
 	tuiConfirmMode
+	tuiMesh
+	tuiMeshTopology
+	tuiSubscriptionActions
 )
 
 type tuiFormKind int
@@ -73,6 +76,13 @@ const (
 	formOutboundEndpoint
 	formAddManagedProxy
 	formManagedProxyImport
+	formMeshInit
+	formMeshJoin
+	formMeshAdd
+	formMeshRoute
+	formMeshExport
+	formMeshRemove
+	formMeshRemoveRoute
 )
 
 type tuiConfirmAction int
@@ -95,6 +105,9 @@ const (
 	confirmOutboundEndpoint
 	confirmManagedProxyJSON
 	confirmDeleteManagedProxy
+	confirmMeshApply
+	confirmMeshRemove
+	confirmMeshRemoveRoute
 )
 
 type tuiField struct {
@@ -400,6 +413,21 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateHealth(key)
 	case tuiSubscriptions:
 		return m.updateSubscriptions(key)
+	case tuiSubscriptionActions:
+		return m.updateSubscriptionActions(key)
+	case tuiMesh:
+		return m.updateMesh(key)
+	case tuiMeshTopology:
+		if key.String() == "esc" || key.String() == "q" {
+			m.mode = tuiMesh
+		}
+		if key.String() == "up" {
+			m.detailOffset = max(0, m.detailOffset-1)
+		}
+		if key.String() == "down" {
+			m.detailOffset++
+		}
+		return m, nil
 	case tuiQRCode:
 		if key.String() == "q" || key.String() == "esc" || key.String() == "backspace" {
 			m.mode = m.qrReturnMode
@@ -612,6 +640,7 @@ func manageMenuEntries() []tuiMenuEntry {
 		{title: "Mihomo 导出母版", description: "设置每用户 YAML 的基础模板"},
 		{title: "立即同步数据", description: "同步流量、访问、IP 和到期状态"},
 		{title: "应用待处理配置", description: "校验并应用尚未生效的配置变更"},
+		{title: "主从管理", description: "接入从机、按协议编排中转与就地落地"},
 	}
 }
 
@@ -670,6 +699,8 @@ func (m tuiModel) updateManage(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.startAction("正在同步流量、访问与到期状态", func(a *app) error { return a.daemonCycle() })
 		case 8:
 			m.openConfirm(tuiConfirm{action: confirmApply, prompt: "校验并应用当前所有待处理配置？\n\n系统会先备份和校验；应用失败会自动恢复。"})
+		case 9:
+			m.menuCursor, m.mode = 0, tuiMesh
 		}
 	}
 	return m, nil
@@ -794,7 +825,22 @@ func (m tuiModel) updateSubscriptions(key tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.subscriptionCursor = 0
 	case "end", "G":
 		m.subscriptionCursor = max(0, len(entries)-1)
-	case "enter", "z":
+	case "enter":
+		if len(entries) == 0 {
+			m.status, m.statusError = "还没有用户设备", true
+			return m, nil
+		}
+		entry := entries[m.subscriptionCursor]
+		m.qrUser, m.qrDevice, m.qrReturnMode = entry.User.Name, entry.Device.Name, tuiSubscriptions
+		m.menuCursor, m.mode = 0, tuiSubscriptionActions
+	case "c", "w":
+		if len(entries) == 0 {
+			m.status, m.statusError = "还没有用户设备", true
+			return m, nil
+		}
+		entry := entries[m.subscriptionCursor]
+		return m.deliverSubscription(entry.User.Name, entry.Device.Name, key.String() == "w")
+	case "z":
 		if len(entries) == 0 {
 			m.status, m.statusError = "还没有可展示二维码的用户设备", true
 			return m, nil
@@ -1650,6 +1696,11 @@ func (m tuiModel) updateDevices(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		from := u.Devices[m.deviceCursor].Name
 		m.form = tuiForm{kind: formAddDevice, title: "添加设备 · " + u.Name, user: u.Name, fields: []tuiField{{label: "设备名称", placeholder: "例如 手机"}, {label: "复制节点自", value: from, options: deviceNames(*u)}}}
 		m.mode = tuiFormMode
+	case "enter":
+		m.qrUser, m.qrDevice, m.qrReturnMode = u.Name, current.Name, tuiDevices
+		m.menuCursor, m.mode = 0, tuiSubscriptionActions
+	case "c", "w":
+		return m.deliverSubscription(u.Name, current.Name, key.String() == "w")
 	case "space":
 		action := "禁用"
 		if !current.Enabled {
@@ -1761,7 +1812,9 @@ func (m tuiModel) updateForm(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "esc":
 		m.clearFormSecrets()
-		if len(m.form.users) > 0 {
+		if isMeshForm(m.form.kind) {
+			m.mode = tuiMesh
+		} else if len(m.form.users) > 0 {
 			m.mode = tuiBatch
 		} else if m.form.kind == formAddManagedProxy {
 			m.mode = tuiHealth
@@ -1990,7 +2043,7 @@ func confirmNeedsExplicitYes(action tuiConfirmAction) bool {
 		confirmToggle, confirmToggleDevice, confirmRotateDevice, confirmDeleteDevice,
 		confirmRotateSubscription, confirmRemoveFleet,
 		confirmBatch, confirmUnblock, confirmClientEndpoint, confirmOutboundEndpoint,
-		confirmManagedProxyJSON, confirmDeleteManagedProxy:
+		confirmManagedProxyJSON, confirmDeleteManagedProxy, confirmMeshApply, confirmMeshRemove, confirmMeshRemoveRoute:
 		return true
 	default:
 		return false
@@ -2032,6 +2085,16 @@ func (m tuiModel) updateConfirm(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.mode = action.returnMode
 		m.selected = action.returnSelected
 		switch action.action {
+		case confirmMeshApply:
+			m.mode = tuiMesh
+			return m.startAction("正在应用主从拓扑", func(a *app) error { return a.meshCoordinate("apply") })
+		case confirmMeshRemove, confirmMeshRemoveRoute:
+			m.mode = tuiMesh
+			op := "remove"
+			if action.action == confirmMeshRemoveRoute {
+				op = "remove-route"
+			}
+			return m.startAction("正在更新主从拓扑", func(a *app) error { return a.meshCmd([]string{op, "--id", action.server}) })
 		case confirmDelete:
 			m.mode, m.selected = tuiList, ""
 			return m.startAction("正在删除用户", func(a *app) error { return a.userCmd([]string{"delete", action.user}) })
@@ -2449,6 +2512,9 @@ func (m *tuiModel) openAccessPolicyForm(u User, device *Device) {
 }
 
 func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
+	if isMeshForm(m.form.kind) {
+		return m.submitMeshForm()
+	}
 	f := m.form
 	value := func(i int) string { return strings.TrimSpace(f.fields[i].value) }
 	rawValue := func(i int) string { return f.fields[i].value }
@@ -3294,6 +3360,12 @@ func (m tuiModel) render() string {
 		body = m.renderSubscriptions()
 	case tuiQRCode:
 		body = m.renderQRCode()
+	case tuiSubscriptionActions:
+		body = m.renderSubscriptionActions()
+	case tuiMesh:
+		body = m.renderMesh()
+	case tuiMeshTopology:
+		body = m.renderMeshTopology()
 	case tuiAudit:
 		body = m.renderAudit()
 	case tuiFleet:
@@ -3325,9 +3397,9 @@ func (m tuiModel) renderHeader(section string) string {
 	if m.width >= 92 {
 		user, network, operations := tuiDimStyle.Render("用户"), tuiDimStyle.Render("线路"), tuiDimStyle.Render("运维")
 		switch m.mode {
-		case tuiHealth, tuiProxyMenu, tuiProxyReview:
+		case tuiHealth, tuiProxyMenu, tuiProxyReview, tuiMesh, tuiMeshTopology:
 			network = tuiTitleStyle.Render("线路")
-		case tuiManage, tuiSubscriptions, tuiAudit, tuiFleet, tuiAlerts, tuiBackups:
+		case tuiManage, tuiSubscriptions, tuiSubscriptionActions, tuiAudit, tuiFleet, tuiAlerts, tuiBackups:
 			operations = tuiTitleStyle.Render("运维")
 		default:
 			user = tuiTitleStyle.Render("用户")
@@ -3335,6 +3407,9 @@ func (m tuiModel) renderHeader(section string) string {
 		left += "    " + user + tuiDimStyle.Render(" / ") + network + tuiDimStyle.Render(" / ") + operations
 	}
 	right := tuiDimStyle.Render(section)
+	if m.width < 64 {
+		left = tuiTitleStyle.Render("◆ sbmgr")
+	}
 	gap := max(1, m.width-lipgloss.Width(left)-lipgloss.Width(right)-2)
 	return " " + left + strings.Repeat(" ", gap) + right
 }
@@ -3371,10 +3446,10 @@ func (m tuiModel) renderList() string {
 		tuiTitleStyle.Render(strconv.Itoa(len(m.state.Users))), tuiAccentStyle().Render(strconv.Itoa(selectedCount)), tuiGoodStyle.Render(strconv.Itoa(enabled)),
 		tuiWarnStyle.Render(strconv.Itoa(limited)), tuiWarnStyle.Render(strconv.Itoa(ipLimited)), pending)
 	if m.width >= 100 {
-		summary = fmt.Sprintf("  用户 %s   已选 %s   启用 %s   限速 %s   IP规则 %s   处罚 %s/%s   停用 %s   告警 %s   旧节点 %s   配置 %s",
+		summary = fmt.Sprintf("  用户 %s   已选 %s   启用 %s   限速 %s   IP规则 %s   处罚 %s/%s   停用 %s   告警 %s   配置 %s",
 			tuiTitleStyle.Render(strconv.Itoa(len(m.state.Users))), tuiAccentStyle().Render(strconv.Itoa(selectedCount)), tuiGoodStyle.Render(strconv.Itoa(enabled)),
 			tuiWarnStyle.Render(strconv.Itoa(limited)), tuiWarnStyle.Render(strconv.Itoa(ipLimited)), tuiWarnStyle.Render("软"+strconv.Itoa(softBlocked)), tuiBadStyle.Render("硬"+strconv.Itoa(hardBlocked)),
-			tuiBadStyle.Render(strconv.Itoa(stopped)), tuiBadStyle.Render(strconv.Itoa(unreadAlertCount(m.state))), tuiDimStyle.Render(strconv.Itoa(len(m.state.ReservedAuthUsers))), pending)
+			tuiBadStyle.Render(strconv.Itoa(stopped)), tuiBadStyle.Render(strconv.Itoa(unreadAlertCount(m.state))), pending)
 	}
 
 	search := "  搜索：" + tuiDimStyle.Render("按 / 输入用户名")
@@ -3431,7 +3506,7 @@ func (m tuiModel) renderProxyMenu() string {
 	kind := m.proxyKind.displayName()
 	description := "常用修改使用引导表单；任意 sing-box 协议和字段使用完整 JSON。"
 	if m.proxyKind == ManagedProxyEndpoint {
-		description = "端点仅管理底层网络接口；当前不能直接分配给用户节点，也不提供独立限速。"
+		description = "已配置远端的用户态 WG 端点可分配给用户节点并独立限速；其他端点保留配置编辑。"
 	}
 	content := []string{
 		"",
@@ -3461,7 +3536,7 @@ func (m tuiModel) renderProxyReview() string {
 	}
 	description := "这里只显示安全摘要；JSON 字段值和凭据不会出现在 CUI、状态或审计日志中。"
 	if m.proxyKind == ManagedProxyEndpoint {
-		description = "安全摘要；端点仅管理底层接口，当前不能直接分配给用户节点或设置独立限速。"
+		description = "安全摘要；用户态 WG 可作为子机线路分配；保存后需应用配置。"
 	}
 	content := []string{
 		"",
@@ -3506,6 +3581,9 @@ func (m tuiModel) renderMenuPage(section, title, description string, entries []t
 			continue
 		}
 		content = append(content, row)
+	}
+	for i := range content {
+		content[i] = singleLine(content[i], max(24, m.width-2))
 	}
 	return m.renderDetailViewport(section, content, selectedStart, selectedEnd, footer)
 }
@@ -3749,7 +3827,7 @@ func (m tuiModel) renderDevices() string {
 		}
 		lines = append(lines, "")
 	}
-	lines = append(lines, m.renderStatus(), m.footer("↑↓ 选择设备", "a 添加", "space 启停", "r 轮换UUID", "u 撤销订阅", "z 二维码", "i 设备IP", "f 访问规则", "x 导出", "D 删除", "esc 返回"))
+	lines = append(lines, m.renderStatus(), m.footer("↑↓ 选择设备", "enter 订阅交付", "c 复制链接", "w 保存链接", "a 添加", "space 启停", "r 轮换UUID", "u 撤销订阅", "z 二维码", "i 设备IP", "f 访问规则", "x 导出", "D 删除", "esc 返回"))
 	return strings.Join(lines, "\n")
 }
 
@@ -3838,7 +3916,7 @@ func (m tuiModel) renderSubscriptions() string {
 	contentWidth := max(24, m.width-2)
 	content := []string{
 		"",
-		"  " + tuiTitleStyle.Render("每设备订阅 · 选择后查看二维码或撤销旧链接"),
+		"  " + tuiTitleStyle.Render("每设备订阅 · 复制链接、保存链接与二维码"),
 		"",
 		singleLine(fmt.Sprintf("  服务 %s   监听 %s", status, settings.Listen), contentWidth),
 		singleLine("  发布地址 "+subscriptionPublishedBase(settings), contentWidth),
@@ -3894,7 +3972,7 @@ func (m tuiModel) renderSubscriptions() string {
 	if len(entries) == 0 {
 		content = append(content, tuiDimStyle.Render("  暂无用户设备"))
 	}
-	footer := m.footer("↑↓ 选择", "Home/End 首尾", "enter/z 二维码", "r/u 撤销旧链接", "e HTTPS/服务设置", "esc 返回")
+	footer := m.footer("↑↓ 选择", "enter 交付菜单", "c 复制链接", "w 保存链接", "z 二维码", "r/u 撤销旧链接", "e HTTPS/服务设置", "esc 返回")
 	return m.renderDetailViewport("订阅交付", content, selectedStart, selectedEnd, footer)
 }
 
@@ -4204,7 +4282,7 @@ func (m tuiModel) renderHealth() string {
 		selectedEnd = len(content)
 	}
 
-	content = append(content, "", "  "+tuiAccentStyle().Render("出站与端点")+"  "+tuiDimStyle.Render(singleLine("完整 JSON 支持全部协议；端点仅管理底层接口，不能直接分配用户节点", max(20, m.width-16))))
+	content = append(content, "", "  "+tuiAccentStyle().Render("出站与端点")+"  "+tuiDimStyle.Render(singleLine("完整 JSON 支持全部协议；用户态 WG 可分配给用户节点", max(20, m.width-16))))
 	documents, documentErr := listManagedProxyDocumentsForTUI(m.state)
 	if documentErr != nil {
 		content = append(content, tuiBadStyle.Render("  读取 sing-box 对象失败："+singleLine(documentErr.Error(), max(24, m.width-22))))
@@ -4233,7 +4311,7 @@ func (m tuiModel) renderHealth() string {
 			users, nodes := managedProxyImpact(m.state, document.Tag)
 			meta := fmt.Sprintf("     %s · %s · 影响 %d 个用户 / %d 个节点", document.Kind.displayName(), statusText, users, nodes)
 			if document.Kind == ManagedProxyEndpoint {
-				meta = "     端点 · 底层接口 · 不可直接分配用户节点或设置独立限速"
+				meta = "     端点 · 用户态 WG 配置远端后可分配用户节点"
 			}
 			if details != "" {
 				meta += " · " + details
@@ -4414,6 +4492,8 @@ func (m tuiModel) formHelpLines(width int) []string {
 				"公网监听必须使用 TLS；也可只监听回环地址，再由同机 HTTPS 反向代理转发。",
 				"HTTP 由专用低权限进程提供；降权失败时订阅保持关闭，后台维护继续运行。保存后自动重启 sbmgr 生效，无需应用配置。",
 			}
+		case formMeshInit, formMeshJoin, formMeshAdd, formMeshRoute, formMeshExport, formMeshRemove, formMeshRemoveRoute:
+			paragraphs = []string{"主从接入只登记管理身份和 SSH 连接。线路支持 socks、hysteria2、wireguard；可填统一协议或逐跳以逗号分隔。留空保留原值，新线路默认 hysteria2。", "最后一跳就地落地，前面的从机负责中转；同一从机可以承担两种用途。数据地址独立填写，留空保留原值或使用 SSH 主机名和自动端口。SOCKS5 本身不加密。", "保存后需应用主从拓扑。失败回滚，通信中断时可恢复事务。HY2 证书有效期一年，可选择轮换线路凭据后应用。接入文件仅含管理身份。"}
 		case formAddUser:
 			paragraphs = []string{"配额计量决定配额、阶梯限速和订阅剩余流量采用双向合计、仅上传或仅下载；原始上下行始终分别保留。"}
 		case formEditUser:

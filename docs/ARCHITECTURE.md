@@ -1,71 +1,49 @@
-# 架构与边界
+# 架构与代码入口
 
-## 目标
+## 模型与数据流
 
-sbmgr 是部署在单台 Linux 中转机上的 sing-box 多用户 CUI 管理器。它管理用户、设备、UUID、节点授权、流量、配额、限速、订阅、访问/IP 策略以及安全应用配置；它不是包管理器，也不管理自身的软件版本。
-
-## 主要数据流
+用户持有配额和策略；设备持有订阅 token；设备节点持有身份、授权与 routing mark。共享入站认证后按 `auth_user` 路由，nftables/conntrack 按 mark 计量与限速。
 
 ```text
-CUI / 隐藏 admin 维护入口
-            │
-            ▼
- 跨进程锁 → SQLite 事务/迁移/校验 → 原子提交
-            │                         │
-            │                         ├─ 只读设备查询 → 匿名 IPC → 低权限 HTTP/TLS 进程
-            │                         └─ 审计与告警
-            ▼
- 生成候选 sing-box 配置与 nftables 规则
-            │
-       check + 快照
-            │
-            ▼
- sing-box 重载/重启 + nftables/conntrack
-            ▲
-            │
- daemon：计数器、journal、来源 IP、目标、健康与账期同步
+CUI / admin → 跨进程锁 → SQLite 迁移、校验、事务 → state.db
+                              ↓
+基础模板 + 管理状态 → 候选配置/规则 → 校验、备份 → 应用或回滚
+                              ↑
+daemon → 计数器与日志 → 用量、账期、策略、待应用状态
+
+设备订阅请求 → 低权限 HTTP → 有界只读 IPC → 单设备查询
 ```
 
-## 持久文件
+网络维护使用“锁内快照 → 锁外探测/投递 → 锁内条件合并”，避免覆盖并发编辑。访问统计只含目标域名/IP、次数与时间；连接数量由日志推断。
 
-- `state.db`：嵌入式 SQLite 业务数据库。用户、设备、节点、流量采样、用量历史、访问目标、来源 IP、连接、账期和告警分别存入结构化表并建立查询索引；小型策略对象使用受约束的 JSON 列。数据库及 sidecar 权限为 `0600`。
-- `state.json`：仅用于从旧版本一次性导入。迁移会在跨进程锁内完成，成功后保留原文件和备份作为人工回退材料，并用 `state.json.migrated` 防止 DB 丢失后静默回灌陈旧统计。
-- `config.base.json`：运维方提供的 sing-box 基础模板；受管用户和路由在生成阶段叠加。
-- `sing-box.json`：当前生成并应用的运行配置。
-- `backups/`：状态、基础模板、运行配置和限速快照；不保存程序版本。
-- `audit.jsonl`：人工管理操作的脱敏审计。
-- `exports/`：带时间戳的静态 Mihomo 配置；设备订阅则按请求实时生成。
+## 代码导航
 
-这些都是服务器运行数据，必须留在部署目录并排除出 Git。
+路径均相对仓库根目录；先按符号定位，再读相关测试。
 
-## 关键模块
+| 修改点 | 入口 |
+| --- | --- |
+| CLI、模型、迁移、配置事务 | `cmd/sbmgr/main.go`：`loadState`、`validateState`、`saveState`、`renderConfig`、`applyState` |
+| SQLite、跨进程锁 | `state_sqlite.go`、`state_lock*.go`：`withStateLock` |
+| 用户、设备、模板、批量 | `device.go`、`user_template.go`、`batch.go` |
+| CUI、交付菜单 | `tui.go`、`tui_mesh.go`、`tui_subscription_delivery.go` |
+| 后台统计与网络维护 | `daemon.go`、`stats.go`、`usage.go`、`network_maintenance.go` |
+| 限速、共享 WG 接入 | `rate.go`、`counter_keys.go`、`wireguard_bridge.go` |
+| 账期、配额、处罚 | `billing.go`、`quota.go`、`burst.go`、`policy_recovery.go` |
+| 来源、访问、连接 | `ip_policy.go`、`access_policy.go`、`connection_tracking.go` |
+| 出站、端点、客户端入口 | `outbound_*.go`、`proxy_admin.go`、`client_endpoint.go` |
+| 订阅隔离与生命周期 | `subscription_{backend,http,ipc,worker_linux,supervisor}.go` |
+| 主从命令、存储、下发 | `mesh_{admin,state,sqlite,routes,coordinator,agent,runtime}.go` |
+| 拓扑校验与协议编译 | `internal/mesh/{model,transport,config}.go` |
+| 备份、审计、巡检、健康 | `backup.go`、`audit.go`、`fleet.go`、`health.go` |
 
-- `cmd/sbmgr/main.go`、`state_sqlite.go`：状态模型、SQLite schema/迁移、命令入口、配置生成与应用事务。
-- `cmd/sbmgr/tui.go`：CUI 页面、菜单、表单和刷新。
-- `cmd/sbmgr/daemon.go`、`stats.go`、`usage.go`：后台维护、流量同步与实时数据。
-- `cmd/sbmgr/rate.go`：按 routing mark 的 nftables 限速与计数。
-- `cmd/sbmgr/subscription.go`、`subscription_backend.go`：订阅设置和仅针对单设备的只读查询。
-- `subscription_http.go`、`subscription_ipc.go`、`subscription_worker_linux.go`：低权限 HTTP/TLS、受限内部协议与 Linux 降权启动；`subscription_supervisor.go` 负责子进程故障恢复。
-- `cmd/sbmgr/ip_policy.go`、`access_policy.go`、`burst.go`：来源 IP、访问/并发和异常流量规则。
-- `cmd/sbmgr/outbound_*.go`、`proxy_admin.go`：中转入口、出站和 endpoint 的安全编辑。
-- `cmd/sbmgr/backup.go`：使用 SQLite 一致性快照的业务状态备份、完整性验证与恢复。
+除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。业务版本取 `main.go:stateVersion`，数据库版本取 `state_sqlite.go:sqliteSchemaVersion`；两者各自迁移，不按软件版本推断。
 
-## 版本职责
+## 多机与协议
 
-Git commit/tag 是软件源码版本的唯一事实来源。构建脚本将 `git describe` 结果写入 `sbmgr version`，仅供识别运行构建。程序不会扫描历史二进制、替换自身或提供软件回滚页面。
+主机保存用户和拓扑，从机只接收自身执行计划。成员保存管理标识和 SSH 连接；线路保存路径与逐跳协议，末跳直接出站。控制通道为固定命令、有界 JSON RPC；拓扑模块不依赖 SQLite、CUI 或 SSH。
 
-外部部署脚本负责安装边界：部署前持久备份业务状态和配置，在部署事务期间保存一个临时旧二进制，失败时恢复，成功后删除。要回退软件，应从 Git 检出目标 tag、重新构建，再运行外部部署流程。
+协调器持久记录恢复决定，逐机准备，再提交从机与主机，最后确认结束。节点事务可重试；未决事务先恢复，不能保证多机同时切换。用法见[主从管理](MESH.md)。
 
-## 安全与隐私边界
+WG 使用 sing-box 用户态 endpoint。共享 endpoint 前的回环认证桥接为用户提供独立 mark，避免复制 peer 身份；下载规则匹配 conntrack 回复方向，避免回环上传重复计数。
 
-- 共享 443 入站先由 sing-box 认证，再通过 `auth_user` 选择带独立 routing mark 的出口；内核不直接解析 UUID。
-- 访问统计仅保存目标域名/IP、聚合次数和时间，不解密 HTTPS 内容或 URL 路径。
-- 订阅 token 等同访问凭据；公网监听强制 TLS，并限制来源请求速率。
-- 完整代理 JSON 可能含凭据，只进入权限受限的临时文件，输出和审计必须脱敏。
-- systemd 单元限制权限；root 守护进程管理应用目录。独立 HTTP 进程使用专用非 root UID，无附加组、无 capabilities，不获得数据库或配置目录访问权限。
-
-低权限订阅入口先执行来源/并发预算与 token 格式校验，再通过匿名 socketpair 请求 root 端查询。root 端独立限制总预算和报文大小，只提供单设备只读结果；先用 SQLite 索引确认 token 存在，再读取当前状态生成响应。限流只使用实际连接来源，不信任转发头。exec 后的子进程不继承父进程业务堆、环境或状态文件描述符，接受公网连接前必须完成所有线程的降权。启动与升级要求见 [订阅服务](SUBSCRIPTIONS.md)。
-
-daemon 的网络维护采用“锁内快照 → 锁外探测/投递 → 锁内有条件合并”，避免慢 Webhook 或 Fleet 占据全局状态锁。日志解析只接受完整事件语法；活动连接与最近访问均有容量边界。
-
-状态版本 10 保存 IP 绑定活动时间与并发处罚到期时间；SQLite schema 2 增加订阅 token 查询索引。具体升级行为、限制及审计映射见 [安全审计修复记录](SECURITY-REMEDIATION-20260905.md)。
+持久文件、迁移与恢复见[运维指南](OPERATIONS.md)；订阅权限和 IPC 契约见[订阅服务](SUBSCRIPTIONS.md)；修改时遵守 [AGENTS.md](../AGENTS.md)。

@@ -123,6 +123,8 @@ def forbidden_path_reason(relative: str) -> str | None:
         return "runtime or credential filename"
     if basename.startswith("state.db-"):
         return "SQLite state sidecar"
+    if basename == "node-join.json" or (basename.startswith("mesh-join") and basename.endswith(".json")):
+        return "node enrollment material"
     if basename.startswith("credentials") and basename.endswith(".json"):
         return "credential bundle"
     if not example_file and len(lower_parts) == 1 and basename.endswith((".json", ".yaml", ".yml")):

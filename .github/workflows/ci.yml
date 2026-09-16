@@ -30,7 +30,7 @@ jobs:
           cache: true
       - name: Check formatting
         shell: bash
-        run: test -z "$(gofmt -l ./cmd)"
+        run: test -z "$(gofmt -l ./cmd ./internal)"
       - name: Vet
         run: go vet ./...
       - name: Check reachable Go vulnerabilities

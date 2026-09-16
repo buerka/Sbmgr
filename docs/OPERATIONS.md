@@ -1,83 +1,61 @@
 # 运维指南
 
-## 应用目录
+## 初始化
 
-sbmgr 从 `SBMGR_HOME`、显式参数或可执行文件位置解析应用目录。生产目录必须是安全的绝对路径，并满足部署脚本的所有权与写权限检查。
+应用目录由显式参数、`SBMGR_HOME` 或程序/脚本位置确定；生产目录、可执行文件及父目录须由 root 持有，且不可被其他用户写入。下列占位符由部署方填写。
 
-```text
-<SBMGR_HOME>/
-├── sbmgr
-├── state.db
-├── state.lock
-├── config.base.json
-├── sing-box.json
-├── mihomo.template.yaml
-├── audit.jsonl
-├── exports/
-├── backups/
-├── .drafts/
-└── logs/
+```sh
+export SBMGR_HOME=/absolute/path/to/sbmgr
+"$SBMGR_HOME/sbmgr" admin init \
+  --config '<SOURCE_CONFIG>' --base "$SBMGR_HOME/config.base.json" \
+  --inbound '<VLESS_INBOUND_TAG>' --server '<PUBLIC_HOST>' \
+  --public-key '<REALITY_PUBLIC_KEY>'
+"$SBMGR_HOME/deploy/install-systemd.sh" --home "$SBMGR_HOME" --component all
+systemctl enable --now sbmgr
 ```
 
-systemd unit 按平台要求安装到系统 unit 目录；其中只保存渲染后的服务定义，不保存业务状态或凭据。
+已有身份默认保持非托管，显式 `--import-users` 才导入。安装脚本生成实际路径的 systemd unit；unit 不保存业务数据。主从接入见 [MESH.md](MESH.md)，证书配置见[订阅服务](SUBSCRIPTIONS.md)。
 
-## 服务管理
+## 文件与恢复
 
-```bash
-systemctl status sbmgr
-journalctl -u sbmgr
-```
+| 应用目录内容 | 用途 |
+| --- | --- |
+| `state.db`、sidecar、`state.lock` | SQLite 业务状态、跨进程互斥，仅管理员读写 |
+| `config.base.json` / `sing-box.json` | 基础模板 / 生成的运行配置，必须是不同文件 |
+| `mihomo.template.yaml`、`exports/` | 客户端母版、静态交付文件 |
+| `audit.jsonl`、`logs/`、`.drafts/` | 脱敏操作审计、运行日志、私有编辑草稿 |
+| `backups/` | 状态、基础模板、运行配置和限速快照 |
 
-后台服务周期性同步计数器、速率、访问和来源 IP，并维护配额、账期、到期、处罚、健康检查与告警。服务异常由 systemd 重启策略处理。
+仅在数据库缺失且旧 `state.json` 未迁移时，锁内执行一次性导入；保留源文件和副本，成功写入 `state.json.migrated`。标记已存在时禁止因数据库丢失而回灌旧统计。
 
-## 配置应用
-
-应用流程按以下顺序执行：
-
-1. 生成候选 sing-box 配置和 nftables 规则。
-2. 使用本机 sing-box 校验完整候选。
-3. 校验 nftables 候选并保存现有快照。
-4. 原子替换运行配置并重载或重启服务。
-5. 验证失败时恢复先前配置和规则。
-
-修改出站地址、端口或凭据前会保存基础模板备份。健康检查仅说明目标网络端口可达，协议认证需要通过实际代理请求验证。
-
-## 备份与恢复
-
-状态备份使用 SQLite 一致性复制，并执行完整性与业务模型检查。恢复前会创建当前状态快照；恢复后的数据库、sing-box 配置和限速规则会作为一个恢复流程验证。
-
-备份范围包括业务状态、基础模板、运行配置和限速规则，不包括程序二进制。软件回退由 Git tag、重新构建和外部部署脚本完成。
-
-## 数据迁移
-
-当 `state.db` 不存在且应用目录中存在未迁移的旧 `state.json` 时，程序会在状态锁内执行一次性导入。成功后保留 JSON 源文件和迁移前副本，并写入迁移标记。迁移标记存在时，数据库缺失不会自动从旧 JSON 回灌。
-
-## 日志与审计
-
-- systemd journal：服务运行、同步和应用错误。
-- `audit.jsonl`：成功的人工管理操作，达到大小限制后轮换。
-- 数据库：聚合用量、访问、来源 IP、连接、账期和告警。
-
-审计内容使用动作与变更摘要，不保存完整代理对象或可用凭据。运行日志和审计文件属于部署数据，不进入源码仓库。
-
-## 远端状态
-
-远端管理节点通过非交互 SSH 获取只读快照。连接启用严格主机密钥校验、超时和输出边界，不执行远端用户或配置修改。密钥路径与 `known_hosts` 由部署环境提供。
+状态备份使用 SQLite 一致性快照，校验完整性与业务哈希；恢复先快照当前状态，保留损坏文件，再验证数据库、配置和限速规则。模板编辑前备份，配置应用遵循 [AGENTS.md](../AGENTS.md) 的事务顺序。
 
 ## 发布与部署
 
-发布流程：
+1. 按[开发验证](DEVELOPMENT.md)从干净、已确认的 Git tag 构建。下载产物先核验来源：`gh attestation verify <artifact> -R buerka/Sbmgr`，确认仓库、工作流和预期 tag；同源 checksum 只能证明内容一致。
+2. 将匹配版本的程序与部署脚本放到应用目录；候选程序名为 `.sbmgr-release.candidate`。更新 core unit 后部署：
 
-```bash
-gofmt -w ./cmd/sbmgr
-go vet ./...
-go test ./...
-python3 ./scripts/check_public_tree.py
-./deploy/build-linux.sh
+   ```sh
+   "$SBMGR_HOME/deploy/install-systemd.sh" --home "$SBMGR_HOME" --component core
+   "$SBMGR_HOME/deploy/deploy-release.sh" --home "$SBMGR_HOME" '<SHA256_OR_CHECKSUM_FILE>'
+   ```
+
+   非默认 sing-box 路径可给两个脚本加 `--sing-box-bin /absolute/path/to/sing-box`。
+3. 脚本停服加锁，备份到 `backups/state-config/`（保留 20 组），影子迁移/校验、核对 unit 路径后替换并启动；稳定性门禁与业务自检失败则恢复旧程序、状态、配置。成功删除临时旧程序，保留业务备份。
+4. 验证 `sbmgr version --verbose`、服务稳定性、订阅 HTTPS 和真实代理 TCP/UDP、出口、停用、配额及限速。远端验证须先获得目标与操作范围授权。
+
+新校验可能拒绝旧名称、token、封禁时间或配置路径别名，须先影子预检，不能手改 SQLite 绕过哈希。旧程序未必能读新 schema；软件回退须重建目标 tag，并使用部署前匹配的一致性状态快照。
+
+## 诊断与巡检
+
+`systemctl status sbmgr sing-box` 查看服务，`journalctl -u sbmgr` 查看维护/应用错误；成功人工操作见 `audit.jsonl`。出口健康检查只证明端口可达，验收仍需实际协议请求。
+
+Fleet 通过严格 known_hosts、限时限量的非交互 SSH 获取只读快照。使用专用巡检密钥，远端 `authorized_keys` 示例：
+
+```text
+restrict,command="/srv/sbmgr/deploy/fleet-readonly-snapshot.sh --home /srv/sbmgr" <PUBLIC_KEY>
 ```
 
-候选二进制应与 Git tag、commit 和 SHA256 对应。`deploy/deploy-release.sh` 在部署事务中临时保存旧二进制，失败时恢复，成功后移除临时文件；业务备份继续保留。
+脚本 0700，与 `path-lib.sh` 同目录；程序及目录权限同初始化要求。入口忽略客户端命令，仅运行 `admin snapshot`。主从下发使用各自的管理授权。
 
-## 部署资料
-
-真实配置、数据库、证书、密钥、订阅文件、访问日志和部署清单应存放在应用目录或独立的权限受限目录。公开仓库只保存源码、测试、文档、CI、模板和部署工具。
+Webhook 每轮最多 10 次、总预算 5 秒；重试可能重复，接收端按告警身份去重。所有运行资料留在受限部署目录。
