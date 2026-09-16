@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -59,6 +61,69 @@ func sqliteFixtureState(sampleCount int) *State {
 				"example.com": {Count: 3, LastSeen: now.Format(time.RFC3339)},
 			}}},
 		}},
+	}
+}
+
+func TestSQLiteVersion10HashMigrationAndTamperRejection(t *testing.T) {
+	for _, tamper := range []bool{false, true} {
+		t.Run(fmt.Sprint("tamper=", tamper), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.db")
+			state := sqliteFixtureState(2)
+			state.Version = 10
+			canonicalizeEmptySQLiteCollections(state)
+			raw, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Reproduce the old Go struct's serialization independently of
+			// sqliteStateHash; the old release had no mesh journal field.
+			raw = bytes.Replace(raw, []byte(`"mesh_agent":{},`), nil, 1)
+			legacyHash := hex.EncodeToString(hashBytes(raw))
+			db, _, err := openSQLiteState(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeSQLiteState(tx, state, legacyHash, legacyHash); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			for _, query := range []string{`DROP TABLE mesh_members`, `DROP TABLE mesh_routes`, `PRAGMA user_version=2`, `UPDATE metadata SET value='2' WHERE key='schema_version'`} {
+				if _, err := db.Exec(query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tamper {
+				if _, err := db.Exec(`UPDATE users SET upload_bytes=upload_bytes+1`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			db.Close()
+			loaded, err := loadState(path)
+			if tamper {
+				if err == nil || !strings.Contains(err.Error(), "业务哈希") {
+					t.Fatal("legacy integrity check was bypassed")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if loaded.Version != stateVersion || loaded.Users[0].Upload != 100 {
+				t.Fatal("migration changed business state")
+			}
+			if err := saveState(path, loaded); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadState(path); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

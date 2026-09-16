@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -709,7 +710,18 @@ func sqliteCanonicalStateJSON(state *State) ([]byte, error) {
 		return nil, err
 	}
 	canonicalizeEmptySQLiteCollections(&canonical)
-	return json.Marshal(canonical)
+	raw, err = json.Marshal(canonical)
+	if err != nil {
+		return nil, err
+	}
+	if canonical.Version <= 10 && canonical.MeshAgent == (MeshAgentState{}) {
+		// Version 10 predates the value-typed journal. encoding/json emits
+		// an empty struct despite omitempty, so adding the field otherwise
+		// changes the historical hash before migration can authenticate it.
+		// Preserve the exact old field order; never skip hash verification.
+		raw = bytes.Replace(raw, []byte(`"mesh_agent":{},`), nil, 1)
+	}
+	return raw, nil
 }
 
 func canonicalizeEmptySQLiteCollections(state *State) {
