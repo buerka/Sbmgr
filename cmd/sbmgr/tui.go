@@ -1522,9 +1522,10 @@ func (m tuiModel) updateDetail(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		n := u.Nodes[m.nodeCursor]
 		upMbps, downMbps, _ := effectiveNodeRate(*u, n)
-		m.form = tuiForm{kind: formEditNode, title: "节点限速 · " + n.Device + " / " + n.Name, user: u.Name, device: n.Device, node: n.Name, fields: []tuiField{
+		m.form = tuiForm{kind: formEditNode, title: "节点名称与限速 · " + n.Device + " / " + n.Name, user: u.Name, device: n.Device, node: n.Name, fields: []tuiField{
 			{label: "上传 Mbps", value: strconv.FormatFloat(upMbps, 'f', -1, 64), placeholder: "0 不限"},
 			{label: "下载 Mbps", value: strconv.FormatFloat(downMbps, 'f', -1, 64), placeholder: "0 不限"},
+			{label: "节点名称", value: n.Name, placeholder: "只改订阅显示名；保留身份与用量"},
 		}}
 		m.mode = tuiFormMode
 	case "x":
@@ -2884,8 +2885,11 @@ func (m tuiModel) submitForm() (tea.Model, tea.Cmd) {
 			downMbps = "0"
 		}
 		args := []string{"set", f.user, f.node, "--device", f.device, "--up-mbps", upMbps, "--down-mbps", downMbps}
+		if len(f.fields) > 2 {
+			args = append(args, "--name", value(2))
+		}
 		m.selected, m.mode = f.user, tuiDetail
-		return m.startAction("正在更新节点限速", func(a *app) error { return a.nodeCmd(args) })
+		return m.startAction("正在更新节点名称与限速", func(a *app) error { return a.nodeCmd(args) })
 	case formExport:
 		deviceName, path := f.device, value(0)
 		if deviceName == "" {
@@ -3753,7 +3757,7 @@ func (m tuiModel) renderDetail() string {
 	if len(u.Nodes) > 0 {
 		section = fmt.Sprintf("用户详情 · 节点 %d/%d", min(m.nodeCursor+1, len(u.Nodes)), len(u.Nodes))
 	}
-	footer := m.footer("↑↓ 切换节点", "PgUp/PgDn 审计/节点", "e 用户设置", "m 设备", "n 分配节点", "l 节点限速", "x 导出", "R 重置本月流量", "D 删除用户", "? 全部操作", "esc 返回")
+	footer := m.footer("↑↓ 切换节点", "PgUp/PgDn 审计/节点", "e 用户设置", "m 设备", "n 分配节点", "l 名称/限速", "x 导出", "R 重置本月流量", "D 删除用户", "? 全部操作", "esc 返回")
 	return m.renderDetailViewportAtOffset(section, content, selectedStart, selectedEnd, footer, m.detailOffset)
 }
 

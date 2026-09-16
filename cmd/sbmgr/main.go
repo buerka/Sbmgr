@@ -1468,6 +1468,7 @@ func (a *app) nodeCmdLocked(args []string) error {
 	case "set":
 		fs := a.newFlagSet("node set")
 		deviceName := fs.String("device", "", "所属设备；同名节点不唯一时必须指定")
+		name := fs.String("name", "", "新显示名称；省略保留身份、用量和名称")
 		upMbps := fs.Float64("up-mbps", 0, "该节点实时上传限速 Mbps；0 为不限")
 		downMbps := fs.Float64("down-mbps", 0, "该节点实时下载限速 Mbps；0 为不限")
 		if len(args) < 3 {
@@ -1490,7 +1491,16 @@ func (a *app) nodeCmdLocked(args []string) error {
 		if err != nil {
 			return err
 		}
-		n.UploadMbps, n.DownloadMbps = *upMbps, *downMbps
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "name":
+				n.Name = *name
+			case "up-mbps":
+				n.UploadMbps = *upMbps
+			case "down-mbps":
+				n.DownloadMbps = *downMbps
+			}
+		})
 		if nodeRateLimited(*n) && n.RateMark == 0 {
 			n.RateMark, err = allocateRateMark(s)
 			if err != nil {
@@ -1500,7 +1510,7 @@ func (a *app) nodeCmdLocked(args []string) error {
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.out, "已更新节点 %s/%s/%s 的限速（运行 apply 后生效）\n", u.Name, n.Device, n.Name)
+		fmt.Fprintf(a.out, "已更新节点 %s/%s/%s（名称在订阅中即时生效；限速需应用配置）\n", u.Name, n.Device, n.Name)
 		return nil
 	case "delete":
 		fs := a.newFlagSet("node delete")

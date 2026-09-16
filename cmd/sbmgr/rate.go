@@ -228,6 +228,7 @@ func validateRateMarks(s *State) error {
 // those transitions; changing Mbps alone keeps the stable mark and is immediate.
 func rateTopologyChanged(s *State) bool {
 	normalizeDeviceModel(s)
+	s = meshLocalView(s)
 	desired := map[uint32]bool{}
 	now := time.Now()
 	for _, u := range s.Users {

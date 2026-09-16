@@ -1106,6 +1106,15 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 			if !ok {
 				return fmt.Errorf("保存节点 %s/%s: 找不到设备 %q", user.Name, node.Name, node.Device)
 			}
+			// A display rename keeps the identity's stable row ID and all
+			// dependent statistics. Restrict this to the same owner/device;
+			// identity replacement still follows the existing upsert path.
+			if _, err := tx.Exec(`UPDATE nodes SET name=?, name_key=?
+				WHERE user_id=? AND device_id=? AND auth_user=? AND uuid=?
+				AND (name IS NOT ? OR name_key IS NOT ?)`,
+				node.Name, nodeNameKey, userID, deviceID, node.AuthUser, node.UUID, node.Name, nodeNameKey); err != nil {
+				return errors.New("保存节点显示名称失败")
+			}
 			if _, err := tx.Exec(`INSERT INTO keep_nodes(device_id, name_key) VALUES(?, ?)`, deviceID, nodeNameKey); err != nil {
 				return err
 			}

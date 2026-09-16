@@ -25,6 +25,24 @@ func TestMeshRouteFormExposesEntryAndTerminalExit(t *testing.T) {
 	}
 }
 
+func TestMeshRateTopologyUsesOnlyTheLocalEntry(t *testing.T) {
+	master, _, _ := independentEntryFixture(t)
+	raw, err := renderConfig(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(master.ConfigPath, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if rateTopologyChanged(master) {
+		t.Fatal("remote entry marks would force a repeated local restart")
+	}
+	master.Users[0].Enabled = false
+	if !rateTopologyChanged(master) {
+		t.Fatal("local revocation did not require a runtime update")
+	}
+}
+
 func independentEntryFixture(t *testing.T) (*State, *State, *app) {
 	t.Helper()
 	topology := meshFixture(t)
