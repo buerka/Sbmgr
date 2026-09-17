@@ -27,6 +27,7 @@ const actionIcons: Record<string, IconName> = {
   "user.add": "add",
   "device.add": "add",
   "node.add": "add",
+  "node.assign": "routes",
   "mesh.add": "add",
   "mesh.route": "routes",
   "proxy.add": "add",
@@ -398,24 +399,35 @@ export function UserTable({
               </TableCell>
             ))}
             <TableCell className="w-10">
-              <ActionMenu
-                label={`管理用户：${u.name}`}
-                compact
-                items={[
-                  { id: "user.set", context: { user: u.name } },
-                  { id: "user.ip", context: { user: u.name } },
-                  {
-                    id: "user.access",
-                    context: { user: u.name },
-                    divider: true,
-                  },
-                  {
-                    id: u.enabled ? "user.disable" : "user.enable",
-                    context: { user: u.name },
-                  },
-                  { id: "user.delete", context: { user: u.name } },
-                ]}
-              />
+              <div className="flex items-center gap-1">
+                <ActionButton
+                  id="node.assign"
+                  context={{ user: u.name }}
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`分配线路：${u.name}`}
+                >
+                  分配线路
+                </ActionButton>
+                <ActionMenu
+                  label={`管理用户：${u.name}`}
+                  compact
+                  items={[
+                    { id: "user.set", context: { user: u.name } },
+                    { id: "user.ip", context: { user: u.name } },
+                    {
+                      id: "user.access",
+                      context: { user: u.name },
+                      divider: true,
+                    },
+                    {
+                      id: u.enabled ? "user.disable" : "user.enable",
+                      context: { user: u.name },
+                    },
+                    { id: "user.delete", context: { user: u.name } },
+                  ]}
+                />
+              </div>
             </TableCell>
           </TableRow>
         ))}

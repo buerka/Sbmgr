@@ -27,7 +27,7 @@ daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 | SQLite、跨进程锁 | `state_sqlite.go`、`state_lock*.go`：`withStateLock` |
 | 用户、设备、模板、批量 | `device.go`、`user_template.go`、`batch.go` |
 | React / TypeScript / shadcn/ui 页面与状态 | `frontend/src/{pages,components}`、`api.ts`、`store.ts`、`theme.tsx`、`tokens.css` |
-| Web 认证、动作、静态资源与降权 | `web_{config,http,actions,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
+| Web 认证、动作、静态资源与降权 | `web_{config,http,account,actions,routes,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
 | 参数化自动化、单文件安装 | `automation.go`、`service.go`、`deploy/embed.go` |
 | 后台统计与网络维护 | `daemon.go`、`stats.go`、`usage.go`、`network_maintenance.go` |
 | 限速、共享 WG 接入 | `rate.go`、`counter_keys.go`、`wireguard_bridge.go` |

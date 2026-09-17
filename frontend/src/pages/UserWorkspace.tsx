@@ -95,7 +95,10 @@ export function UserDetail() {
           </div>
         </div>
         <div className="flex gap-2">
-          <ActionButton id="user.set" context={context} variant="default">
+          <ActionButton id="node.assign" context={context} variant="default">
+            分配线路
+          </ActionButton>
+          <ActionButton id="user.set" context={context}>
             编辑配额
           </ActionButton>
           <ActionMenu
@@ -185,12 +188,13 @@ export function UserDetail() {
                     </Badge>
                   </div>
                   <div className="flex gap-2">
-                    <ActionButton id="node.add" context={dc}>
-                      分配节点
+                    <ActionButton id="node.assign" context={dc}>
+                      分配线路
                     </ActionButton>
                     <ActionMenu
                       label="设备设置"
                       items={[
+                        "node.add",
                         "device.ip",
                         "device.access",
                         d.enabled ? "device.disable" : "device.enable",

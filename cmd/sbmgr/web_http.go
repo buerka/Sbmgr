@@ -206,6 +206,10 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		r.Logout = true
 		return r
 	}
+	if q.Path == "/api/account" && q.Method == "POST" {
+		defer b.mu.Unlock()
+		return b.changeWebAccount(q, now)
+	}
 	if strings.HasPrefix(q.Path, "/api/jobs/") && q.Method == "GET" {
 		j, ok := b.jobs[strings.TrimPrefix(q.Path, "/api/jobs/")]
 		b.mu.Unlock()
@@ -224,6 +228,8 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		return webJSON(200, state)
 	case q.Path == "/api/catalog" && q.Method == "GET":
 		return webJSON(200, webActions())
+	case strings.HasPrefix(q.Path, "/api/route-inventory/") && q.Method == "GET":
+		return b.a.webRouteInventory(strings.TrimPrefix(q.Path, "/api/route-inventory/"))
 	case q.Path == "/api/actions" && q.Method == "POST":
 		var input webActionInput
 		if err := webDecode(q.Body, &input); err != nil {

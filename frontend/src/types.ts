@@ -16,6 +16,7 @@ export interface Device {
   upload: number;
   download: number;
   deliverable: boolean;
+  assignment_version?: string;
   access?: AccessPolicy;
   ip_policy?: IPPolicy;
 }
@@ -125,6 +126,7 @@ export interface Snapshot {
   }[];
   routes: {
     id: string;
+    name?: string;
     entry: string;
     hops: string[];
     exit: string;
@@ -151,6 +153,10 @@ export interface Snapshot {
     template_path?: string;
     tls_configured?: boolean;
   };
+}
+export interface RouteInventory {
+  member: string;
+  exits: { tag: string; name: string; type: string }[];
 }
 export interface Field {
   key: string;

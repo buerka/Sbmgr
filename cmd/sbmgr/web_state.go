@@ -21,7 +21,7 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		nodes := []any{}
 		for _, d := range u.Devices {
 			up, down := deviceTraffic(u, d.Name)
-			devices = append(devices, map[string]any{"name": d.Name, "enabled": d.Enabled, "upload": up, "download": down, "ip_policy": d.IPPolicy, "access": d.Access, "deliverable": subscriptionDeviceAvailable(u, d, now) == nil})
+			devices = append(devices, map[string]any{"name": d.Name, "enabled": d.Enabled, "upload": up, "download": down, "ip_policy": d.IPPolicy, "access": d.Access, "assignment_version": webAssignmentVersion(&u, d.Name), "deliverable": subscriptionDeviceAvailable(u, d, now) == nil})
 		}
 		for _, n := range u.Nodes {
 			entry := "本机"
@@ -56,7 +56,7 @@ func (a *app) webSnapshot() (map[string]any, error) {
 			for _, transport := range r.Transports {
 				protocols = append(protocols, transport.Type)
 			}
-			routes = append(routes, map[string]any{"id": r.ID, "entry": s.Mesh.Entry(r), "hops": r.Hops, "exit": r.Exit, "protocols": protocols})
+			routes = append(routes, map[string]any{"id": r.ID, "name": webRouteName(s, r), "entry": s.Mesh.Entry(r), "hops": r.Hops, "exit": r.Exit, "protocols": protocols})
 		}
 	} else if s.MeshAgent.Cluster != "" {
 		role = "slave"

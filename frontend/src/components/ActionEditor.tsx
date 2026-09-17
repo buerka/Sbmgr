@@ -37,6 +37,7 @@ import { Alert } from "./ui/feedback";
 import { Icon } from "./Icons";
 import { Badge } from "./common";
 import { restoreActionTrigger } from "./actionFocus";
+import { RouteAssignment } from "./RouteAssignment";
 const hints: Record<string, string> = {
   quota: "单位 G / M / T，填写 0 表示不限流量。",
   "extra-quota": "仅增加本账期的额度；0 表示没有附加流量。",
@@ -112,6 +113,15 @@ export function ActionDialog() {
     dispatch = useAppDispatch();
   const action = catalog.find((a) => a.id === dialog?.id);
   if (!dialog || !action || !snapshot) return null;
+  if (dialog.id === "node.assign")
+    return (
+      <RouteAssignment
+        key={JSON.stringify(dialog)}
+        snapshot={snapshot}
+        context={dialog.context}
+        onClose={() => dispatch(closeAction())}
+      />
+    );
   return (
     <ActionForm
       key={JSON.stringify(dialog)}

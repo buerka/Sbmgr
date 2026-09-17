@@ -49,12 +49,14 @@ import { UserDetail } from "./pages/UserDetail";
 import { RoutesPage } from "./pages/Routes";
 import { Subscriptions } from "./pages/Subscriptions";
 import { Operations } from "./pages/Operations";
+import { Account } from "./pages/Account";
 const navigation: [string, string, IconName][] = [
   ["/overview", "运行总览", "home"],
   ["/users", "用户管理", "users"],
   ["/routes", "线路管理", "routes"],
   ["/subscriptions", "订阅交付", "link"],
   ["/ops", "系统运维", "settings"],
+  ["/account", "管理账号", "shield"],
 ];
 function Brand() {
   return (
@@ -112,6 +114,7 @@ function ThemeMenu() {
   );
 }
 function Login() {
+  const notice = useAppSelector((s) => s.admin.notice);
   const dispatch = useAppDispatch(),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -153,6 +156,7 @@ function Login() {
           </p>
         </div>
         <form onSubmit={submit} className="space-y-5">
+          {notice && <Alert kind={notice.severity}>{notice.message}</Alert>}
           <div className="space-y-2">
             <label htmlFor="username">管理员账号</label>
             <Input
@@ -433,6 +437,12 @@ export function App() {
           <DropdownMenuContent side="top" align="start" className="w-52">
             <DropdownMenuLabel>管理会话</DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link to="/account">
+                <Icon name="shield" />
+                修改用户名与密码
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void logout()}>
               <Icon name="logout" />
               退出登录
@@ -558,6 +568,7 @@ export function App() {
               <Route path="/routes" element={<RoutesPage />} />
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/ops" element={<Operations />} />
+              <Route path="/account" element={<Account />} />
               <Route path="*" element={<Navigate to="/overview" replace />} />
             </Routes>
           )}
