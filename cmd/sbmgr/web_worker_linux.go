@@ -16,11 +16,12 @@ import (
 )
 
 type webBootstrap struct {
-	UID    int
-	GID    int
-	Origin string
-	Cert   []byte
-	Key    []byte
+	UID      int
+	GID      int
+	Origin   string
+	BasePath string
+	Cert     []byte
+	Key      []byte
 }
 
 func launchWebProcess(ctx context.Context, c webConfig, lookup webLookup) (*subscriptionProcess, error) {
@@ -31,7 +32,7 @@ func launchWebProcess(ctx context.Context, c webConfig, lookup webLookup) (*subs
 	if err != nil {
 		return nil, errors.New("请先运行 sbmgr service install，创建 HTTP 服务账号")
 	}
-	boot := webBootstrap{UID: uid, GID: gid, Origin: c.Origin}
+	boot := webBootstrap{UID: uid, GID: gid, Origin: c.Origin, BasePath: c.BasePath}
 	if c.TLSCert != "" {
 		boot.Cert, err = readSubscriptionCredential(c.TLSCert)
 		if err != nil {
@@ -134,7 +135,7 @@ func runWebWorker() error {
 	_ = lf.Close()
 	defer listener.Close()
 	rpc := &webRPC{conn: conn}
-	server := newWebHTTPServer(listener.Addr().String(), boot.Origin, rpc.lookup)
+	server := newWebHTTPServer(listener.Addr().String(), boot.Origin, boot.BasePath, rpc.lookup)
 	if len(boot.Cert) != 0 || len(boot.Key) != 0 {
 		pair, err := tls.X509KeyPair(boot.Cert, boot.Key)
 		if err != nil {

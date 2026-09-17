@@ -304,7 +304,7 @@ func TestWebHTTPEmbeddedFilesHeadersLimitsAndCookie(t *testing.T) {
 		"assets/app-fixture.css":    {Data: []byte(`body{margin:0}`)},
 		"assets/font-fixture.woff2": {Data: []byte(`fixture-font`)},
 	}
-	server := newWebHTTPServerWithAssets("", b.config.Origin, b.lookup, assets)
+	server := newWebHTTPServerWithAssets("", b.config.Origin, b.config.BasePath, b.lookup, assets)
 	for _, path := range []string{"/", "/assets/app-fixture.js", "/assets/app-fixture.css", "/assets/font-fixture.woff2"} {
 		w := httptest.NewRecorder()
 		server.Handler.ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1:9090"+path, nil))
@@ -382,8 +382,11 @@ func TestWebConfigCLIAndEmbeddedInstaller(t *testing.T) {
 	if err := os.WriteFile(password, []byte(webTestPassword), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.webCmd([]string{"configure", "--password-file", password}); err != nil {
+	if err := a.webCmd([]string{"configure", "--password-file", password, "--base-path", "/cli-fixture/"}); err != nil {
 		t.Fatal(err)
+	}
+	if configured, err := readWebConfig(a.statePath); err != nil || configured.BasePath != "/cli-fixture" {
+		t.Fatal("CLI did not persist the normalized Web path")
 	}
 	if err := a.adminCmd([]string{"client", "set", "--server", "relay.example", "--port", "8443"}); err != nil {
 		t.Fatal(err)
@@ -465,7 +468,7 @@ func TestWebStructuredEntrySettingsAndLogout(t *testing.T) {
 func TestWebHTTPAssetNonceAndMissingBuild(t *testing.T) {
 	_, backend := webFixture(t)
 	assets := fstest.MapFS{"index.html": {Data: []byte(`<meta name="csp-nonce" content="__CSP_NONCE__">`)}}
-	server := newWebHTTPServerWithAssets("", backend.config.Origin, backend.lookup, assets)
+	server := newWebHTTPServerWithAssets("", backend.config.Origin, backend.config.BasePath, backend.lookup, assets)
 	previous := ""
 	for i := 0; i < 2; i++ {
 		recorder := httptest.NewRecorder()
@@ -481,7 +484,7 @@ func TestWebHTTPAssetNonceAndMissingBuild(t *testing.T) {
 		}
 		previous = nonce
 	}
-	server = newWebHTTPServerWithAssets("", backend.config.Origin, backend.lookup, nil)
+	server = newWebHTTPServerWithAssets("", backend.config.Origin, backend.config.BasePath, backend.lookup, nil)
 	recorder := httptest.NewRecorder()
 	server.Handler.ServeHTTP(recorder, httptest.NewRequest("GET", "http://127.0.0.1:9090/", nil))
 	if recorder.Code != http.StatusServiceUnavailable {

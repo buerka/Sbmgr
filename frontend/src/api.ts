@@ -9,7 +9,7 @@ import type {
 } from "./types";
 
 const http = axios.create({
-  baseURL: "/api",
+  baseURL: new URL("./api", window.location.href).pathname,
   withCredentials: true,
   timeout: 20000,
 });
