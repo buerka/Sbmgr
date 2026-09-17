@@ -1,14 +1,17 @@
 import { useState } from "react";
-import { Alert, Button, Stack, TableCell, TableRow } from "@mui/material";
 import { Link } from "react-router-dom";
 import {
   ActionButton,
+  ActionMenu,
   Badge,
   DataTable,
   Empty,
   PageHeader,
   Panel,
 } from "../components/common";
+import { Button } from "../components/ui/button";
+import { TableCell, TableRow } from "../components/ui/table";
+import { Icon } from "../components/Icons";
 import { api } from "../api";
 import { notify, useAppDispatch, useAppSelector } from "../store";
 import type { Context } from "../types";
@@ -38,24 +41,61 @@ export function Subscriptions() {
       setBusy("");
     }
   }
+
   return (
     <>
       <PageHeader
         title="订阅交付"
         description="每台设备独立授权，按需下载订阅。"
-        actions={
-          <>
-            <ActionButton id="client.set" />
-            <ActionButton id="template.set" />
-            <ActionButton id="subscription.set" />
-          </>
-        }
       />
-      <Alert severity="info" sx={{ mb: 3 }}>
-        订阅服务：{s.subscription.enabled ? "已启用" : "未启用"} · 模板：
-        {s.subscription.template ? "自定义 Mihomo 模板" : "简易配置"}
-        {s.subscription.base_url ? ` · ${s.subscription.base_url}` : ""}
-      </Alert>
+      <div className="subscription-summary">
+        <section className="setting-card">
+          <div className="flex justify-between items-center">
+            <h2>订阅服务</h2>
+            <ActionButton id="subscription.set" variant="ghost" size="sm">
+              编辑
+            </ActionButton>
+          </div>
+          <div className="mt-4">
+            <Badge kind={s.subscription.enabled ? "success" : "default"}>
+              {s.subscription.enabled ? "已启用" : "未启用"}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mt-3 break-all">
+            {s.subscription.base_url || "尚未配置公开地址"}
+          </p>
+        </section>
+        <section className="setting-card">
+          <div className="flex justify-between items-center">
+            <h2>客户端入口</h2>
+            <ActionButton id="client.set" variant="ghost" size="sm">
+              编辑
+            </ActionButton>
+          </div>
+          <p className="font-medium text-sm mt-4 break-all">
+            {s.client.server
+              ? `${s.client.server}:${s.client.port}`
+              : "尚未配置"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            本机直出节点的连接地址
+          </p>
+        </section>
+        <section className="setting-card">
+          <div className="flex justify-between items-center">
+            <h2>客户端模板</h2>
+            <ActionButton id="template.set" variant="ghost" size="sm">
+              编辑
+            </ActionButton>
+          </div>
+          <p className="font-medium text-sm mt-4">
+            {s.subscription.template ? "自定义 Mihomo 模板" : "简易配置"}
+          </p>
+          <p className="text-xs text-muted-foreground mt-2 break-all">
+            {s.subscription.template_path || "使用默认规则与分组"}
+          </p>
+        </section>
+      </div>
       <Panel
         title="设备订阅"
         description="停用、到期或超额的设备会被拒绝交付。"
@@ -65,47 +105,65 @@ export function Subscriptions() {
             {devices.map(({ u, d }) => (
               <TableRow key={`${u.name}/${d.name}`}>
                 <TableCell>
-                  <Button
-                    component={Link}
+                  <Link
+                    className="font-medium hover:underline underline-offset-4"
                     to={`/users/${encodeURIComponent(u.name)}`}
                   >
                     {u.name}
-                  </Button>
+                  </Link>
                 </TableCell>
                 <TableCell>{d.name}</TableCell>
                 <TableCell>
                   <Badge kind={d.deliverable ? "success" : "default"}>
-                    {d.deliverable ? "可交付" : "已停用"}
+                    {d.deliverable
+                      ? "可交付"
+                      : !d.enabled
+                        ? "设备已停用"
+                        : u.status !== "已启用"
+                          ? u.status
+                          : "暂不可交付"}
                   </Badge>
                 </TableCell>
                 <TableCell>
                   {u.nodes.filter((n) => n.device === d.name).length} 个
                 </TableCell>
                 <TableCell>
-                  <Stack direction="row" gap={1}>
+                  <div className="flex gap-2">
                     <Button
-                      variant="outlined"
-                      disabled={Boolean(busy)}
+                      variant="outline"
+                      size="sm"
+                      disabled={
+                        !!busy || !d.deliverable || !s.subscription.enabled
+                      }
                       onClick={() =>
                         void download({ user: u.name, device: d.name }, "link")
                       }
                     >
-                      下载订阅地址
+                      <Icon name="link" />
+                      订阅地址
                     </Button>
                     <Button
-                      variant="outlined"
-                      disabled={Boolean(busy)}
+                      variant="outline"
+                      size="sm"
+                      disabled={!!busy || !d.deliverable}
                       onClick={() =>
                         void download({ user: u.name, device: d.name }, "yaml")
                       }
                     >
-                      下载 YAML
+                      <Icon name="download" />
+                      YAML
                     </Button>
-                    <ActionButton
-                      id="device.rotate-link"
-                      context={{ user: u.name, device: d.name }}
+                    <ActionMenu
+                      compact
+                      label={`管理订阅：${u.name}/${d.name}`}
+                      items={[
+                        {
+                          id: "device.rotate-link",
+                          context: { user: u.name, device: d.name },
+                        },
+                      ]}
                     />
-                  </Stack>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

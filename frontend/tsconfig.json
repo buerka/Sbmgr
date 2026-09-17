@@ -22,7 +22,12 @@
       "vite/client",
       "vitest/globals",
       "@testing-library/jest-dom"
-    ]
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
   },
   "include": [
     "src",

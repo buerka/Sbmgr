@@ -1,37 +1,30 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import createCache from "@emotion/cache";
-import { CacheProvider } from "@emotion/react";
-import { CssBaseline, ThemeProvider } from "@mui/material";
 import { Provider } from "react-redux";
 import { HashRouter } from "react-router-dom";
-import "@fontsource/roboto/latin-400.css";
-import "@fontsource/roboto/latin-500.css";
-import "@fontsource/roboto/latin-700.css";
-import { theme } from "./theme";
+import { setNonce } from "get-nonce";
+import "@fontsource/inter/latin-400.css";
+import "@fontsource/inter/latin-500.css";
+import "@fontsource/inter/latin-600.css";
+import "@fontsource/inter/latin-700.css";
+import { ThemeProvider } from "./theme";
 import { store, bootstrap } from "./store";
 import { App } from "./App";
 import "./styles.css";
-
+// Radix's scroll lock creates a style element; use the server's existing CSP nonce.
 const nonce = document.querySelector<HTMLMetaElement>(
   'meta[name="csp-nonce"]',
 )?.content;
-const cache = createCache({
-  key: "sbmgr",
-  nonce: nonce === "__CSP_NONCE__" ? undefined : nonce,
-});
+if (nonce && nonce !== "__CSP_NONCE__") setNonce(nonce);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <CacheProvider value={cache}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <Provider store={store}>
-          <HashRouter>
-            <App />
-          </HashRouter>
-        </Provider>
-      </ThemeProvider>
-    </CacheProvider>
+    <ThemeProvider>
+      <Provider store={store}>
+        <HashRouter>
+          <App />
+        </HashRouter>
+      </Provider>
+    </ThemeProvider>
   </React.StrictMode>,
 );
 void bootstrap();

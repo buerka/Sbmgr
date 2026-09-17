@@ -48,7 +48,7 @@ export function fixtureSnapshot(): Snapshot {
     alerts: [],
     audit: [],
     client: { server: "relay.example", port: 443 },
-    subscription: { enabled: false, base_url: "", listen: "", template: "" },
+    subscription: { enabled: false, base_url: "", listen: "", template: false },
   };
 }
 export const quotaAction: Action = {

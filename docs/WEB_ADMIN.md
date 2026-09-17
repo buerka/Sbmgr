@@ -1,6 +1,6 @@
 # 内嵌 Web 管理
 
-`sbmgr` 包含页面、API、后台维护和部署脚本。前端采用 React 18、TypeScript、Material UI 6 / Emotion、Redux Toolkit 和 React Router，使用 Vite / SWC 构建。构建后的页面、脚本、样式和字体使用 Go `embed`，无运行时 Node.js、CDN 或单独的资源目录。生产运行仍需 Linux、sing-box、systemd、nftables 和 conntrack；这些是代理运行环境，不由管理程序下载或更新。
+`sbmgr` 包含页面、API、后台维护和部署脚本。前端采用 React 18、TypeScript、shadcn/ui / Radix UI / Tailwind CSS 4、Redux Toolkit 和 React Router，使用 Vite / SWC 构建。界面采用 Shadcn Admin 的布局、Inter 字体和明暗主题，保留上游 MIT 声明。构建后的页面、脚本、样式和字体使用 Go `embed`，无运行时 Node.js、CDN 或单独的资源目录。生产运行仍需 Linux、sing-box、systemd、nftables 和 conntrack；这些是代理运行环境，不由管理程序下载或更新。
 
 ## 首次启动
 
@@ -60,6 +60,14 @@ ssh -N -L 9090:127.0.0.1:9090 root@<SERVER>
 
 配置、身份、授权和限速继续通过原有锁、数据库事务、候选校验和失败恢复执行。页面保存后是否还需应用配置，会在表单和任务结果中说明。
 
+## 日常操作
+
+- 左侧导航管理用户、线路、订阅与运维；右上角可切换浅色、深色或跟随系统。`Ctrl/⌘ K` 搜索页面和用户。
+- 用户表格支持状态筛选、名称排序、列显隐和分页；点击用户名查看设备、策略与连接记录。
+- 编辑自动带入当前非敏感设置，修改后显示原值。只提交实际修改的字段，后台刷新不会覆盖正在编辑的值。
+- 保存期间等待后台任务完成；失败保留非敏感输入。未保存就退出会提示放弃修改。证书路径、密码和私钥不会从服务器读回表单。
+- Radix 弹层的滚动锁样式使用服务端已有的逐响应 CSP nonce，不放宽样式策略。主题仅保存在浏览器，不修改业务配置。
+
 ## 自动化
 
 原 `admin` 命令继续接受参数，没有 TUI、`ui`、`menu` 或 `simple-menu`：
@@ -83,12 +91,12 @@ sbmgr admin apply --restart
 
 ## 前端工程与构建
 
-技术选择参考 [Cloudreve 官方前端依赖](https://github.com/cloudreve/frontend/blob/master/package.json) 与 MUI 工作台布局。React 18 和 MUI 6 与参考项目一致；Vite 与 React Router 使用当前已修复版本，精确解析结果在 `frontend/package-lock.json`。没有引入文件管理器、编辑器或地图等与 sbmgr 无关的依赖。
+界面参考 [Shadcn Admin](https://github.com/satnaing/shadcn-admin)，采用 shadcn/ui、Radix UI、Tailwind CSS 4、Inter 与 Lucide；沿用 React 18、React Router 和 Redux Toolkit，以保留现有路由、认证与任务流程。精确依赖在 `frontend/package-lock.json`，上游许可见 `frontend/THIRD_PARTY_NOTICES.md`，构建时将许可文本一并内嵌。
 
 - `frontend/src/api.ts`：同源 API、CSRF、会话失效处理；原始异常与请求凭据不写日志。
 - `frontend/src/store.ts`：Redux Toolkit 管理认证、快照、后台任务和通知；禁用 Redux DevTools，不存储登录密码或代理 JSON。
-- `frontend/src/components`：MUI 菜单、动态表单与共享列表；`pages` 保存各管理页面。
+- `frontend/src/components`：shadcn/Radix 菜单、动态表单与共享列表；`pages` 保存各管理页面。
 - `cmd/sbmgr/web/dist/`：Vite 输出的临时构建目录，被 Git 忽略。先构建前端，再构建 Go；发布脚本自动执行两步。
-- 页面为 Emotion 创建每次响应独立的 CSP nonce，保留同源脚本、来源校验和后端认证边界。
+- 页面将每次响应独立的 CSP nonce 提供给 Radix 的动态滚动锁样式，保留同源脚本、来源校验和后端认证边界。
 
 运行 `npm --prefix frontend run dev` 可启用 Vite 本地开发预览，API 代理到本机回环测试后端；正式验收使用完整 Go 二进制。前端组件测试使用 Vitest + React Testing Library。仅在本机或隔离测试数据上调试，不把生产凭据写入开发配置。

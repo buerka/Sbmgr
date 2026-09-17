@@ -1,12 +1,4 @@
 import {
-  Box,
-  ButtonBase,
-  Stack,
-  TableCell,
-  TableRow,
-  Typography,
-} from "@mui/material";
-import {
   ActionButton,
   Badge,
   DataTable,
@@ -14,6 +6,7 @@ import {
   PageHeader,
   Panel,
 } from "../components/common";
+import { TableCell, TableRow } from "../components/ui/table";
 import { Icon, type IconName } from "../components/Icons";
 import { bytes, dateTime } from "../format";
 import { openAction, useAppDispatch, useAppSelector } from "../store";
@@ -30,31 +23,35 @@ export function Operations() {
   return (
     <>
       <PageHeader
-        title="运维与备份"
+        title="系统运维"
         description="检查服务状态，管理业务数据与恢复记录。"
-        actions={<ActionButton id="backup.create" variant="contained" />}
+        actions={<ActionButton id="backup.create" variant="default" />}
       />
-      <Box className="operation-grid">
+      <div className="operation-grid">
         {shortcuts.map(([id, icon, description]) => (
-          <ButtonBase
+          <button
             key={id}
             className="operation-tile"
-            disabled={job?.status === "running"}
+            disabled={
+              job?.status === "running" || !catalog.some((a) => a.id === id)
+            }
             onClick={() => dispatch(openAction({ id, context: {} }))}
           >
-            <Icon name={icon} color="primary" sx={{ fontSize: 25 }} />
-            <Box>
-              <Typography variant="body2">
+            <span className="surface-icon">
+              <Icon name={icon} size={22} />
+            </span>
+            <div>
+              <p className="font-medium text-sm">
                 {catalog.find((a) => a.id === id)?.title}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
                 {description}
-              </Typography>
-            </Box>
-            <Icon name="next" color="disabled" sx={{ ml: "auto" }} />
-          </ButtonBase>
+              </p>
+            </div>
+            <Icon name="next" className="ml-auto text-muted-foreground" />
+          </button>
         ))}
-      </Box>
+      </div>
       <Panel
         title="状态备份"
         description={`${s.backups.length} 份备份 · 恢复后需检查并应用配置。`}
@@ -64,12 +61,10 @@ export function Operations() {
             {s.backups.map((b) => (
               <TableRow key={b.name}>
                 <TableCell>
-                  <Stack direction="row" alignItems="center" gap={1.2}>
-                    <Icon name="backup" color="action" />
-                    <Typography variant="body2" className="mono">
-                      {b.name}
-                    </Typography>
-                  </Stack>
+                  <span className="inline-flex items-center gap-2">
+                    <Icon name="backup" className="text-muted-foreground" />
+                    {b.name}
+                  </span>
                 </TableCell>
                 <TableCell>{dateTime(b.modified)}</TableCell>
                 <TableCell>{bytes(b.size)}</TableCell>
@@ -77,7 +72,8 @@ export function Operations() {
                   <ActionButton
                     id="backup.restore"
                     context={{ name: b.name }}
-                    variant="text"
+                    variant="ghost"
+                    size="sm"
                   >
                     恢复
                   </ActionButton>
@@ -93,38 +89,32 @@ export function Operations() {
           />
         )}
       </Panel>
-      <Box className="two-columns">
+      <div className="two-columns">
         <Panel
           title="出站健康"
           description="端口探测结果；实际代理可用性需端到端验证。"
           actions={
-            <ActionButton id="health.set" variant="text">
+            <ActionButton id="health.set" variant="ghost" size="sm">
               检查设置
             </ActionButton>
           }
         >
           {health.length ? (
-            <Box px={2.5}>
+            <div className="px-6">
               {health.map((h) => (
-                <Stack
-                  className="row-item"
-                  key={h.tag}
-                  direction="row"
-                  justifyContent="space-between"
-                  gap={2}
-                >
-                  <Box>
-                    <Typography variant="body2">{h.tag}</Typography>
-                    <Typography variant="caption" color="text.secondary">
+                <div className="row-item" key={h.tag}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{h.tag}</p>
+                    <p className="text-xs text-muted-foreground mt-1 break-all">
                       {h.target}
-                    </Typography>
-                  </Box>
+                    </p>
+                  </div>
                   <Badge kind={h.healthy ? "success" : "warning"}>
                     {h.healthy ? "探测正常" : "探测异常"}
                   </Badge>
-                </Stack>
+                </div>
               ))}
-            </Box>
+            </div>
           ) : (
             <Empty
               title="暂无探测记录"
@@ -137,43 +127,37 @@ export function Operations() {
           title="监控服务器"
           description="查看远端状态，转发关系在线路页面管理。"
           actions={
-            <ActionButton id="fleet.add" variant="text">
+            <ActionButton id="fleet.add" variant="ghost" size="sm">
               添加服务器
             </ActionButton>
           }
         >
           {s.fleet?.length ? (
-            <Box px={2.5}>
+            <div className="px-6">
               {s.fleet.map((f) => (
-                <Stack
-                  className="row-item"
-                  key={f.name}
-                  direction="row"
-                  justifyContent="space-between"
-                  alignItems="center"
-                  gap={1}
-                >
-                  <Box>
-                    <Typography variant="body2">{f.name}</Typography>
-                    <Typography variant="caption" color="text.secondary">
+                <div className="row-item" key={f.name}>
+                  <div>
+                    <p className="text-sm font-medium">{f.name}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
                       {f.host} · {dateTime(f.checked)}
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" gap={1}>
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <Badge kind={f.online ? "success" : "default"}>
                       {f.online ? "在线" : "未知或离线"}
                     </Badge>
                     <ActionButton
                       id="fleet.remove"
                       context={{ name: f.name }}
-                      variant="text"
+                      variant="ghost"
+                      size="sm"
                     >
                       移除
                     </ActionButton>
-                  </Stack>
-                </Stack>
+                  </div>
+                </div>
               ))}
-            </Box>
+            </div>
           ) : (
             <Empty
               title="未添加监控服务器"
@@ -182,7 +166,7 @@ export function Operations() {
             />
           )}
         </Panel>
-      </Box>
+      </div>
       <Panel title="操作审计" description="最近 100 项已完成的管理操作。">
         {s.audit?.length ? (
           <DataTable headings={["时间", "操作者", "操作"]}>

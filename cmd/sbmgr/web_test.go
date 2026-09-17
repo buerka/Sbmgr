@@ -259,6 +259,43 @@ func TestWebInventoryAndErrorsHideCredentialsDeliveryRechecksState(t *testing.T)
 	}
 }
 
+func TestWebSettingsProjectionSupportsEditingWithoutPrivatePaths(t *testing.T) {
+	a, _ := webFixture(t)
+	s, err := loadState(a.statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Health = HealthSettings{Mode: "auto", IntervalMinutes: 17, TimeoutSeconds: 8, AlertAfterFailures: 4, Targets: map[string]string{"direct": "https://probe.example"}}
+	s.Client.MihomoTemplate = filepath.Join(filepath.Dir(a.statePath), "client-template.yaml")
+	s.Subscription.TLSCertFile = filepath.Join(filepath.Dir(a.statePath), "private-cert.pem")
+	s.Subscription.TLSKeyFile = filepath.Join(filepath.Dir(a.statePath), "private-key.pem")
+	if err := saveState(a.statePath, s); err != nil {
+		t.Fatal(err)
+	}
+	view, err := a.webSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	health := view["health_settings"].(HealthSettings)
+	if health.IntervalMinutes != 17 || health.Targets["direct"] != "https://probe.example" {
+		t.Fatal("saved health settings are missing")
+	}
+	sub := view["subscription"].(map[string]any)
+	if sub["template_path"] != s.Client.MihomoTemplate || sub["tls_configured"] != true {
+		t.Fatal("saved subscription settings are missing")
+	}
+	data, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{s.Subscription.TLSCertFile, s.Subscription.TLSKeyFile} {
+		encoded, _ := json.Marshal(private)
+		if bytes.Contains(data, encoded) {
+			t.Fatal("private TLS path leaked in inventory")
+		}
+	}
+}
+
 func TestWebHTTPEmbeddedFilesHeadersLimitsAndCookie(t *testing.T) {
 	_, b := webFixture(t)
 	assets := fstest.MapFS{

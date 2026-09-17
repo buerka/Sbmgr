@@ -52,7 +52,11 @@ func (a *app) webSnapshot() (map[string]any, error) {
 			members = append(members, map[string]any{"id": m.ID, "host": m.SSHHost, "master": m.ID == s.Mesh.Master, "client": m.Client})
 		}
 		for _, r := range s.Mesh.Routes {
-			routes = append(routes, map[string]any{"id": r.ID, "entry": s.Mesh.Entry(r), "hops": r.Hops, "exit": r.Exit})
+			protocols := make([]string, 0, len(r.Transports))
+			for _, transport := range r.Transports {
+				protocols = append(protocols, transport.Type)
+			}
+			routes = append(routes, map[string]any{"id": r.ID, "entry": s.Mesh.Entry(r), "hops": r.Hops, "exit": r.Exit, "protocols": protocols})
 		}
 	} else if s.MeshAgent.Cluster != "" {
 		role = "slave"
@@ -95,7 +99,7 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		status := s.FleetStatus[server.Name]
 		fleet = append(fleet, map[string]any{"name": server.Name, "host": server.Host, "online": status.Online, "checked": status.CheckedAt})
 	}
-	return map[string]any{"audit": auditView, "fleet": fleet, "client": map[string]any{"server": s.Client.Server, "port": s.Client.Port}, "version": appVersion, "time": now.Format(time.RFC3339), "users": users, "outbounds": outbounds, "proxies": proxies, "members": members, "routes": routes, "role": role, "revision": revision, "pending": configurationPending(s) || runtimeApplyPending(s), "mesh_pending": s.MeshRollout != nil || (s.Mesh != nil && (s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision)), "backups": backupList, "alerts": s.Alerts, "health": s.OutboundHealth, "subscription": map[string]any{"enabled": s.Subscription.Enabled, "base_url": s.Subscription.BaseURL, "listen": s.Subscription.Listen, "template": s.Client.MihomoTemplate != ""}}, nil
+	return map[string]any{"audit": auditView, "fleet": fleet, "client": map[string]any{"server": s.Client.Server, "port": s.Client.Port}, "version": appVersion, "time": now.Format(time.RFC3339), "users": users, "outbounds": outbounds, "proxies": proxies, "members": members, "routes": routes, "role": role, "revision": revision, "pending": configurationPending(s) || runtimeApplyPending(s), "mesh_pending": s.MeshRollout != nil || (s.Mesh != nil && (s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision)), "backups": backupList, "alerts": s.Alerts, "health": s.OutboundHealth, "health_settings": normalizedHealthSettings(s.Health), "subscription": map[string]any{"enabled": s.Subscription.Enabled, "base_url": s.Subscription.BaseURL, "listen": s.Subscription.Listen, "template": s.Client.MihomoTemplate != "", "template_path": s.Client.MihomoTemplate, "tls_configured": s.Subscription.TLSCertFile != "" && s.Subscription.TLSKeyFile != ""}}, nil
 }
 
 func (a *app) webDelivery(body []byte) webReply {
