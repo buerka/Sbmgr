@@ -447,34 +447,3 @@ func TestTemporaryIPOverrideExpiresAndRestoresBinding(t *testing.T) {
 		t.Fatalf("fixed binding not restored: %#v", got)
 	}
 }
-
-func TestIPPolicyCUIFormPersistsCustomRules(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	if err := saveState(statePath, &State{Version: stateVersion, Users: []User{{Name: "alice", Enabled: true}}}); err != nil {
-		t.Fatal(err)
-	}
-	a := &app{statePath: statePath, out: io.Discard, err: io.Discard}
-	m := tuiModel{a: a, state: &State{Users: []User{{Name: "alice", Enabled: true}}}}
-	m.openIPPolicyForm(m.state.Users[0])
-	m.form.fields[0].value = "开启"
-	m.form.fields[1].value = "强制限制"
-	m.form.fields[2].value = "手动指定"
-	m.form.fields[3].value = "2"
-	m.form.fields[4].value = "45"
-	m.form.fields[5].value = "203.0.113.10,198.51.100.20"
-	m.form.fields[6].value = "192.0.2.30"
-	m.form.fields[7].value = "60"
-	_, cmd := m.submitForm()
-	msg := cmd().(tuiActionMsg)
-	if msg.err != nil {
-		t.Fatal(msg.err)
-	}
-	s, err := loadState(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	policy := s.Users[0].IPPolicy
-	if !policy.Enabled || policy.Mode != "enforce" || policy.Binding != "manual" || policy.MaxIPs != 2 || policy.HandoverSeconds != 45 || len(policy.BoundIPs) != 2 || len(policy.TemporaryIPs) != 1 || !s.IPApplyPending {
-		t.Fatalf("unexpected policy: %#v", policy)
-	}
-}

@@ -1546,7 +1546,7 @@ func readSQLiteState(path string) (*State, error) {
 
 // readSQLiteStateFromOpenDB reconstructs one state from a single read
 // transaction. Keeping every table read in the same transaction is important:
-// the daemon may commit counters and history while the CUI or subscription
+// the daemon may commit counters and history while the Web API or subscription
 // server is reading.
 func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
 	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelSerializable})

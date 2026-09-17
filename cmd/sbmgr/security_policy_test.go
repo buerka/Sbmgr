@@ -178,26 +178,6 @@ func TestSecurityConnectionTrackingBoundAndMigration(t *testing.T) {
 	}
 }
 
-func TestSecurityDefaultViewsAndAuditHideCredentials(t *testing.T) {
-	s := sqliteFixtureState(0)
-	s.Subscription.Enabled = true
-	u := &s.Users[0]
-	m := tuiModel{state: s, selected: u.Name, width: 160, height: 45}
-	for _, view := range []string{m.renderDetail(), m.renderDevices(), m.renderSubscriptions()} {
-		for _, secret := range []string{u.Nodes[0].UUID, u.Nodes[0].AuthUser, u.Devices[0].SubscriptionToken} {
-			if strings.Contains(view, secret) {
-				t.Fatal("default view disclosed credentials")
-			}
-		}
-	}
-	value := "https://example.com/secret-webhook-token"
-	for _, args := range [][]string{{"set", "--webhook", value}, {"set", "--webhook=" + value}, {"set", "--future-secret", value}} {
-		if strings.Contains(strings.Join(sanitizeAuditArgs(args), " "), "secret-webhook-token") {
-			t.Fatal("audit leaked URL credential")
-		}
-	}
-}
-
 func BenchmarkSecurityRecentAccessHotTarget(b *testing.B) {
 	for _, size := range []int{1, 1000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {

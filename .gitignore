@@ -68,6 +68,7 @@ Thumbs.db
 /state.db-*
 /state.db.lock
 /state.lock
+web-admin.json
 /config.base.json
 /sing-box.json
 /mihomo.template.yaml
@@ -99,3 +100,9 @@ Thumbs.db
 /logs/
 mesh-join*.json
 node-join.json
+
+# Frontend build inputs are tracked; installed packages and bundles are not.
+/frontend/node_modules/
+/frontend/coverage/
+/frontend/*.tsbuildinfo
+/cmd/sbmgr/web/dist/

@@ -6,6 +6,14 @@ try {
     $unformatted = & gofmt -l ./cmd ./internal
     if ($LASTEXITCODE -ne 0) { throw 'gofmt failed' }
     if ($unformatted) { throw "Go files require formatting: $unformatted" }
+    & npm --prefix frontend ci
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency install failed' }
+    & npm --prefix frontend run format:check
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend formatting check failed' }
+    & npm --prefix frontend test
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend tests failed' }
+    & npm --prefix frontend run build
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
     & go vet ./...
     if ($LASTEXITCODE -ne 0) { throw 'go vet failed' }
     & go test ./...

@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func TestNodeRenamePreservesIdentityUsageAndRates(t *testing.T) {
@@ -39,19 +37,5 @@ func TestNodeRenamePreservesIdentityUsageAndRates(t *testing.T) {
 	loaded, err := loadState(path)
 	if err != nil || loaded.Users[0].Nodes[0].Name != "GHA via Relay" {
 		t.Fatal("failed rename changed persisted state")
-	}
-}
-
-func TestNodeEditFormExposesNameAndFitsNarrowTerminal(t *testing.T) {
-	state := sqliteFixtureState(0)
-	m := tuiModel{state: state, mode: tuiDetail, selected: "alice", width: 100, height: 36}
-	model, _ := m.updateDetail(tea.KeyPressMsg(tea.Key{Code: 'l', Text: "l"}))
-	got := model.(tuiModel)
-	if got.form.kind != formEditNode || len(got.form.fields) != 3 || got.form.fields[2].value != "Node A" {
-		t.Fatal("rename field not discoverable")
-	}
-	for _, size := range [][2]int{{100, 36}, {36, 16}} {
-		got.width, got.height = size[0], size[1]
-		assertTUIRenderBounds(t, got.View().Content, size[0], size[1])
 	}
 }

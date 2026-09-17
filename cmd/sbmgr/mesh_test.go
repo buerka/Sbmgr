@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,8 +10,6 @@ import (
 	"sbmgr/internal/mesh"
 	"strings"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func meshFixture(t *testing.T) *mesh.Topology {
@@ -247,74 +244,12 @@ func TestMeshProtocolBoundsRejectTrailingUnknownAndSecretDiagnostics(t *testing.
 	}
 }
 
-func TestMeshMenuAndSubscriptionDeliveryFitAndHideSecrets(t *testing.T) {
-	topology := meshFixture(t)
-	state := qrTUITestState()
-	state.Mesh = topology
-	state.MeshAgent = MeshAgentState{Cluster: topology.ID, Member: topology.Master}
-	for _, size := range [][2]int{{64, 18}, {42, 12}, {100, 24}} {
-		m := tuiModel{state: state, width: size[0], height: size[1], mode: tuiMesh}
-		for _, render := range []string{m.renderMesh(), m.renderMeshTopology(), m.renderSubscriptionActions(), m.renderSubscriptions()} {
-			assertTUIRenderBounds(t, render, m.width, m.height)
-			if strings.Contains(render, topology.Routes[0].Transports[1].ServerKey) || strings.Contains(render, state.Users[0].Devices[0].SubscriptionToken) {
-				t.Fatal("default TUI disclosed credentials")
-			}
-		}
-	}
-	m := tuiModel{state: state, width: 80, height: 24, mode: tuiSubscriptions}
-	model, cmd := m.updateSubscriptions(tea.KeyPressMsg(tea.Key{Text: "c", Code: 'c'}))
-	if cmd == nil || model.(tuiModel).statusError {
-		t.Fatal("copy shortcut unavailable outside QR view")
-	}
-	if got := fmtClipboardMessage(cmd()); got != subscriptionURL(state, state.Users[0].Devices[0]) {
-		t.Fatal("clipboard command did not carry complete URL")
-	}
-}
-
 func fmtClipboardMessage(v any) string {
 	value := reflect.ValueOf(v)
 	if value.Kind() == reflect.String {
 		return value.String()
 	}
 	return ""
-}
-
-func TestSubscriptionCopyReloadsTokenAndSaveDoesNotEchoIt(t *testing.T) {
-	a := meshFixtureApp(t, meshFixture(t), "master")
-	s, _ := loadState(a.statePath)
-	s.Users = qrTUITestState().Users
-	s.Subscription = SubscriptionSettings{Enabled: true, Listen: "127.0.0.1:18080"}
-	s.Users[0].Nodes[0].UUID = newUUID()
-	s.Users[0].Nodes[0].AuthUser = "alice-phone"
-	if err := saveState(a.statePath, s); err != nil {
-		t.Fatal(err)
-	}
-	m := tuiModel{a: a, state: s, mode: tuiSubscriptions}
-	fresh, _ := loadState(a.statePath)
-	fresh.Users[0].Devices[0].SubscriptionToken = newSubscriptionToken()
-	if err := saveState(a.statePath, fresh); err != nil {
-		t.Fatal(err)
-	}
-	_, cmd := m.deliverSubscription("alice", "phone", false)
-	if cmd == nil || fmtClipboardMessage(cmd()) != subscriptionURL(fresh, fresh.Users[0].Devices[0]) {
-		t.Fatal("copy used stale credentials")
-	}
-	_, cmd = m.deliverSubscription("alice", "phone", true)
-	message := cmd().(tuiActionMsg)
-	if message.err != nil {
-		t.Fatal(message.err)
-	}
-	if strings.Contains(message.output, fresh.Users[0].Devices[0].SubscriptionToken) {
-		t.Fatal("save output disclosed token")
-	}
-	files, _ := filepath.Glob(filepath.Join(filepath.Dir(a.statePath), "exports", "subscription-link-*.txt"))
-	if len(files) != 1 {
-		t.Fatal("link export missing")
-	}
-	raw, _ := os.ReadFile(files[0])
-	if !bytes.Equal(raw, []byte(subscriptionURL(fresh, fresh.Users[0].Devices[0])+"\n")) {
-		t.Fatal("link export incomplete")
-	}
 }
 
 func TestMeshEnrollmentBootstrapsEmptySlaveAndPinsIdentity(t *testing.T) {
@@ -379,7 +314,7 @@ func TestMeshRoutesBecomeNodeTemplatesOnlyAfterApplyAndKeepMarks(t *testing.T) {
 	if !ok || template.Outbound != mesh.RouteTag("chain") {
 		t.Fatal("applied route missing from user templates")
 	}
-	s.Users = qrTUITestState().Users
+	s.Users = sampleDeliveryState().Users
 	s.Users[0].Nodes[0].UUID = newUUID()
 	s.Users[0].Nodes[0].AuthUser = "alice-phone"
 	s.Users[0].Nodes[0].Outbound = template.Outbound

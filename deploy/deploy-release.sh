@@ -594,7 +594,7 @@ command -v pgrep >/dev/null 2>&1 || {
     exit 1
 }
 if pgrep -x sbmgr >/dev/null 2>&1; then
-    echo "检测到 systemd 之外仍有 sbmgr 进程；请退出其他 CUI 后重试部署" >&2
+    echo "检测到 systemd 之外仍有 sbmgr 进程；请停止其他前台服务或管理进程后重试部署" >&2
     exit 1
 fi
 acquire_state_locks

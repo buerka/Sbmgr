@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func TestCloneUserTemplateCopiesConfigurationWithFreshCredentials(t *testing.T) {
@@ -69,47 +67,6 @@ func TestCloneUserTemplateCopiesConfigurationWithFreshCredentials(t *testing.T) 
 	}
 	if current := findUser(after, "source"); current == nil || current.Nodes[0].UUID != sourceBefore.Nodes[0].UUID || current.Upload != sourceBefore.Upload {
 		t.Fatalf("source user changed: %#v", current)
-	}
-}
-
-func TestCloneUserFormCreatesFromSelectedTemplate(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	s := &State{Version: stateVersion, Users: []User{{Name: "source", Enabled: true, Devices: []Device{{Name: defaultDeviceName, Enabled: true}}, Nodes: []Node{{Name: "Node A", Device: defaultDeviceName, AuthUser: "source", UUID: "11111111-1111-4111-8111-111111111111"}}}}}
-	if err := saveState(statePath, s); err != nil {
-		t.Fatal(err)
-	}
-	s, _ = loadState(statePath)
-	a := &app{statePath: statePath, out: io.Discard, err: io.Discard}
-	m := tuiModel{a: a, state: s, width: 100, height: 24, mode: tuiList}
-	m.openCloneUserForm()
-	if m.mode != tuiFormMode || m.form.kind != formCloneUser {
-		t.Fatalf("clone form did not open: %#v", m.form)
-	}
-	m.form.fields[1].value = "copied"
-	model, cmd := m.submitForm()
-	if cmd == nil {
-		t.Fatal("clone form did not submit")
-	}
-	updated := model.(tuiModel)
-	if updated.mode != tuiDetail || updated.selected != "copied" {
-		t.Fatalf("clone form did not navigate to new user: mode=%v selected=%q", updated.mode, updated.selected)
-	}
-	message, ok := cmd().(tuiActionMsg)
-	if !ok || message.err != nil {
-		t.Fatalf("clone action failed: %#v", message)
-	}
-	loaded, _ := loadState(statePath)
-	if findUser(loaded, "copied") == nil {
-		t.Fatal("clone form did not create user")
-	}
-}
-
-func TestUserListTemplateShortcutOpensCloneForm(t *testing.T) {
-	m := tuiModel{state: &State{Users: []User{{Name: "source"}}}, width: 100, height: 24, mode: tuiList}
-	model, _ := m.updateList(tea.KeyPressMsg(tea.Key{Text: "N", Code: 'N'}))
-	updated := model.(tuiModel)
-	if updated.mode != tuiFormMode || updated.form.kind != formCloneUser {
-		t.Fatalf("template shortcut did not open clone form: %#v", updated.form)
 	}
 }
 

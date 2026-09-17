@@ -341,7 +341,7 @@ func updateOptionalOutboundString(object map[string]json.RawMessage, key string,
 }
 
 // outboundEndpointUsername returns only the non-secret account name needed by
-// the editor. The password is never loaded into the TUI model.
+// the editor. The password is never loaded into the management inventory.
 func outboundEndpointUsername(s *State, tag string) (string, error) {
 	if s == nil {
 		return "", errors.New("状态不能为空")

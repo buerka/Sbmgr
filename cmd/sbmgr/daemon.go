@@ -48,6 +48,9 @@ func (a *app) daemonCmd(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	a.startDaemonSubscription(ctx)
+	if err := a.startDaemonWeb(ctx); err != nil {
+		fmt.Fprintf(a.err, "Web 管理未启动，后台维护继续；修复配置后重启服务: %v\n", err)
+	}
 	fmt.Fprintf(a.out, "sbmgr %s 后台服务已启动，维护间隔 %s\n", appVersion, interval.String())
 	if err := runCycle(); err != nil {
 		fmt.Fprintf(a.err, "%s 后台维护失败: %v\n", time.Now().Format(time.RFC3339), err)

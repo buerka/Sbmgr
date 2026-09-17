@@ -247,7 +247,7 @@ chmod 0700 "$mock_bin/sing-box"
 
 cat >"$mock_bin/pgrep" <<'SH'
 #!/bin/sh
-# The transactional fixtures intentionally have no independently running CUI.
+# The transactional fixtures intentionally have no independently running foreground server.
 exit 1
 SH
 chmod 0700 "$mock_bin/pgrep"

@@ -5,13 +5,14 @@
 用户持有配额和策略；设备持有订阅 token；设备节点持有身份、授权与 routing mark。共享入站认证后按 `auth_user` 路由，nftables/conntrack 按 mark 计量与限速。
 
 ```text
-CUI / admin → 跨进程锁 → SQLite 迁移、校验、事务 → state.db
+Web API / admin → 跨进程锁 → SQLite 迁移、校验、事务 → state.db
                               ↓
 基础模板 + 管理状态 → 候选配置/规则 → 校验、备份 → 应用或回滚
                               ↑
 daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 
-设备订阅请求 → 低权限 HTTP → 有界只读 IPC → 单设备查询
+管理员浏览器 → 独立低权限 HTTP → 有界管理 IPC → 来源/登录/CSRF → 白名单业务操作
+设备订阅请求 → 低权限 HTTP → 独立有界只读 IPC → 单设备查询
 ```
 
 网络维护使用“锁内快照 → 锁外探测/投递 → 锁内条件合并”，避免覆盖并发编辑。访问统计只含目标域名/IP、次数与时间；连接数量由日志推断。
@@ -25,7 +26,9 @@ daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 | CLI、模型、迁移、配置事务 | `cmd/sbmgr/main.go`：`loadState`、`validateState`、`saveState`、`renderConfig`、`applyState` |
 | SQLite、跨进程锁 | `state_sqlite.go`、`state_lock*.go`：`withStateLock` |
 | 用户、设备、模板、批量 | `device.go`、`user_template.go`、`batch.go` |
-| CUI、交付菜单 | `tui.go`、`tui_mesh.go`、`tui_subscription_delivery.go` |
+| React / TypeScript / MUI 页面与状态 | `frontend/src/{pages,components}`、`api.ts`、`store.ts`、`theme.ts` |
+| Web 认证、动作、静态资源与降权 | `web_{config,http,actions,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
+| 参数化自动化、单文件安装 | `automation.go`、`service.go`、`deploy/embed.go` |
 | 后台统计与网络维护 | `daemon.go`、`stats.go`、`usage.go`、`network_maintenance.go` |
 | 限速、共享 WG 接入 | `rate.go`、`counter_keys.go`、`wireguard_bridge.go` |
 | 账期、配额、处罚 | `billing.go`、`quota.go`、`burst.go`、`policy_recovery.go` |
@@ -40,7 +43,7 @@ daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 
 ## 多机与协议
 
-主机保存用户和拓扑，从机只接收自身执行计划与本机入口的用户授权。成员保存管理标识、SSH 连接和公开客户端入口参数；线路保存入口、路径、逐跳协议及末跳出站。客户端直连获授权的入口，流量不经过额外的管理跳。控制通道为固定命令、有界 JSON RPC；拓扑模块不依赖 SQLite、CUI 或 SSH。
+主机保存用户和拓扑，从机只接收自身执行计划与本机入口的用户授权。成员保存管理标识、SSH 连接和公开客户端入口参数；线路保存入口、路径、逐跳协议及末跳出站。客户端直连获授权的入口，流量不经过额外的管理跳。控制通道为固定命令、有界 JSON RPC；拓扑模块不依赖 SQLite、Web 或 SSH。
 
 入口授权使用有期限的租约；从机累计用量通过持久基线增量汇总到主机。停用、到期、配额和撤权由主机下发，从机也执行本地配额与租约检查。独立第三方 SOCKS5 封装服务在 sbmgr 之外运行，只以基础出站接入，见 [DataImpulse 封装](DATAIMPULSE_GATEWAY.md)。
 

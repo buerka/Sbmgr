@@ -10,9 +10,12 @@ export SBMGR_HOME=/absolute/path/to/sbmgr
   --config '<SOURCE_CONFIG>' --base "$SBMGR_HOME/config.base.json" \
   --inbound '<VLESS_INBOUND_TAG>' --server '<PUBLIC_HOST>' \
   --public-key '<REALITY_PUBLIC_KEY>'
-"$SBMGR_HOME/deploy/install-systemd.sh" --home "$SBMGR_HOME" --component all
-systemctl enable --now sbmgr
+"$SBMGR_HOME/sbmgr" web configure --password-file /root/sbmgr-admin.secret
+"$SBMGR_HOME/sbmgr" service install
+"$SBMGR_HOME/sbmgr" service start
 ```
+
+密码文件由部署方预先以 0600 权限创建，至少 12 字节。Web 默认仅监听回环，可通过 `ssh -N -L 9090:127.0.0.1:9090 root@<SERVER>` 访问 `http://127.0.0.1:9090`；公网访问见 [Web 管理](WEB_ADMIN.md)。
 
 已有身份默认保持非托管，显式 `--import-users` 才导入。安装脚本生成实际路径的 systemd unit；unit 不保存业务数据。主从接入见 [MESH.md](MESH.md)，证书配置见[订阅服务](SUBSCRIPTIONS.md)。
 
@@ -21,6 +24,7 @@ systemctl enable --now sbmgr
 | 应用目录内容 | 用途 |
 | --- | --- |
 | `state.db`、sidecar、`state.lock` | SQLite 业务状态、跨进程互斥，仅管理员读写 |
+| `web-admin.json` | 本机 Web 监听、管理员密码摘要与 TLS 路径；0600，不复制到从机 |
 | `config.base.json` / `sing-box.json` | 基础模板 / 生成的运行配置，必须是不同文件 |
 | `mihomo.template.yaml`、`exports/` | 客户端母版、静态交付文件 |
 | `audit.jsonl`、`logs/`、`.drafts/` | 脱敏操作审计、运行日志、私有编辑草稿 |
@@ -33,7 +37,7 @@ systemctl enable --now sbmgr
 ## 发布与部署
 
 1. 按[开发验证](DEVELOPMENT.md)从干净、已确认的 Git tag 构建。下载产物先核验来源：`gh attestation verify <artifact> -R buerka/Sbmgr`，确认仓库、工作流和预期 tag；同源 checksum 只能证明内容一致。
-2. 将匹配版本的程序与部署脚本放到应用目录；候选程序名为 `.sbmgr-release.candidate`。更新 core unit 后部署：
+2. 将候选程序以 `.sbmgr-release.candidate` 放入应用目录，运行候选程序的 `service install --output-dir "$SBMGR_HOME/deploy"` 提取匹配版本的内嵌工具。它不安装 unit 或替换运行程序；确认来源后，更新 core unit 并执行外部部署事务：
 
    ```sh
    "$SBMGR_HOME/deploy/install-systemd.sh" --home "$SBMGR_HOME" --component core

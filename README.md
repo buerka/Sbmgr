@@ -1,20 +1,30 @@
 # sbmgr
 
-Linux 上的 sing-box 多用户管理器，使用 Go 编写，提供中文终端界面。管理用户、设备、节点授权、配额、限速、访问策略和 Mihomo 订阅，支持多机线路与中转。
+Linux 上的 sing-box 多用户管理器，使用 Go 编写，提供编译进单个二进制的中文 Web 管理面板。管理用户、设备、节点授权、配额、限速、访问策略和 Mihomo 订阅，支持多机线路与中转。
 
 ## 使用
 
 运行环境：Linux、systemd、sing-box、nftables、conntrack，以及网络和服务管理权限。受管客户端入口使用 VLESS + REALITY；首次初始化需准备可用的 sing-box 基础配置。已有身份默认保留，明确导入后才受管理。
 
-Go 版本以 [go.mod](go.mod) 为准；Windows 可开发和运行单元测试。开发构建：
+Go 版本以 [go.mod](go.mod) 为准；前端构建需要 Node.js 22.12+（CI 使用 24）。Windows 可开发和运行单元测试。开发构建：
 
 ```sh
+npm --prefix frontend ci
+npm --prefix frontend run build
 go test ./...
 go build -trimpath -o sbmgr ./cmd/sbmgr
 ./sbmgr version
 ```
 
-按[运维指南](docs/OPERATIONS.md)初始化并安装服务，在服务器或 SSH 终端运行 `sbmgr` 进入管理界面。用户与设备在“用户”页管理，出站在“线路”页管理，订阅、备份、配置应用和主从管理在“运维”页。
+按[运维指南](docs/OPERATIONS.md)初始化 sing-box 基础配置后：
+
+```sh
+./sbmgr web configure --password-file /root/sbmgr-admin.secret
+./sbmgr service install
+./sbmgr service start
+```
+
+默认监听 `127.0.0.1:9090`，通过 SSH 本地转发访问；公网 HTTPS 和反向代理配置见 [Web 管理](docs/WEB_ADMIN.md)。页面、API 与部署工具都在 `sbmgr` 内，运行时无需 Node.js、前端目录或 CDN。直接运行 `sbmgr` / `sbmgr serve` 启动前台服务；`admin` 参数命令用于自动化。原 TUI、交互菜单已移除。
 
 ## 文档入口
 

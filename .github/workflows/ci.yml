@@ -24,6 +24,17 @@ jobs:
         run: |
           python3 ./scripts/test_check_public_tree.py
           python3 ./scripts/check_public_tree.py
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build and test React frontend
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run format:check
+          npm --prefix frontend test
+          npm --prefix frontend run build
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.27.1'
@@ -52,10 +63,10 @@ jobs:
           exit 1
       - name: Validate deployment scripts
         run: sh ./deploy/test-deploy-scripts.sh
-      - name: Verify Linux subscription privilege isolation
+      - name: Verify Linux Web and subscription privilege isolation
         run: |
           CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/sbmgr-privilege.test" ./cmd/sbmgr
-          sudo env SBMGR_RUN_PRIVILEGE_TEST=1 "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^TestSubscriptionPrivilege' -test.v
+          sudo env SBMGR_RUN_PRIVILEGE_TEST=1 "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^Test(Subscription|Web)Privilege' -test.v
           # The production executable and its parents are root-owned. The
           # sandbox intentionally has no CAP_DAC_OVERRIDE, so a runner-owned
           # private directory is not a valid self-exec fixture for root.
@@ -75,7 +86,7 @@ jobs:
             -p 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
             -p 'SystemCallFilter=@system-service' -p SystemCallErrorNumber=EPERM \
             -p LimitCORE=0 -p Environment=SBMGR_RUN_PRIVILEGE_TEST=1 \
-            "$privilege_dir/sbmgr.test" -test.run '^TestSubscriptionPrivilege' -test.v
+            "$privilege_dir/sbmgr.test" -test.run '^Test(Subscription|Web)Privilege' -test.v
       - name: Cross-build Linux AMD64
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |

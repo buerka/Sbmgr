@@ -101,9 +101,9 @@ func (a *app) batchUsers(op batchOperation) error {
 			return err
 		}
 		if op.Kind == batchNodeRates {
-			fmt.Fprintf(a.out, "已批量更新 %d 个用户的 %d 个节点（按 p 应用配置后生效）\n", result.Users, result.Nodes)
+			fmt.Fprintf(a.out, "已批量更新 %d 个用户的 %d 个节点（运行 admin apply 应用配置后生效）\n", result.Users, result.Nodes)
 		} else {
-			fmt.Fprintf(a.out, "已批量更新 %d 个用户（按 p 应用配置后生效）\n", result.Users)
+			fmt.Fprintf(a.out, "已批量更新 %d 个用户（运行 admin apply 应用配置后生效）\n", result.Users)
 		}
 		return nil
 	})

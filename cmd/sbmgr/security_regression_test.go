@@ -55,7 +55,7 @@ func TestSecurityLogTargetsRejectTerminalControlsAndMalformedHosts(t *testing.T)
 		if _, ok := parseSourceLog(message); ok || connectionClosed(message) {
 			t.Fatal("access event was misclassified")
 		}
-		for _, rendered := range []string{cell(target, 80), singleLine(target, 80), safeTerminalView(target)} {
+		for _, rendered := range []string{safeTerminalText(target), safeTerminalView(target)} {
 			for _, r := range rendered {
 				if unsafeTextRune(r) {
 					t.Fatal("terminal control survived rendering")

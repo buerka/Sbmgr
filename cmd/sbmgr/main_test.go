@@ -240,43 +240,6 @@ func TestDefaultStatePathStaysBesideExecutableWithoutApplicationHome(t *testing.
 	}
 }
 
-func TestAddUserFormTreatsClearedOptionalNumbersAsUnlimited(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	if err := saveState(statePath, &State{Version: stateVersion}); err != nil {
-		t.Fatal(err)
-	}
-	a := &app{statePath: statePath, out: io.Discard, err: io.Discard}
-	m := tuiModel{a: a, state: &State{Version: stateVersion}}
-	m.openAddUserForm()
-	m.form.fields[0].value = "alice"
-	m.form.fields[1].value = ""
-	m.form.fields[5].value = ""
-	m.form.fields[6].value = ""
-
-	_, cmd := m.submitForm()
-	if cmd == nil {
-		t.Fatal("form did not submit")
-	}
-	msg, ok := cmd().(tuiActionMsg)
-	if !ok {
-		t.Fatal("unexpected TUI command response")
-	}
-	if msg.err != nil {
-		t.Fatal(msg.err)
-	}
-	s, err := loadState(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u := findUser(s, "alice")
-	if u == nil || u.QuotaBytes != 0 {
-		t.Fatalf("cleared optional values were not normalized: %#v", u)
-	}
-	if len(u.Nodes) != 1 || u.Nodes[0].Name != "默认线路" || u.Nodes[0].UploadMbps != 0 || u.Nodes[0].DownloadMbps != 0 {
-		t.Fatalf("default node was not restored: %#v", u.Nodes)
-	}
-}
-
 func TestCommandParseErrorsUseAppErrorWriter(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	if err := saveState(statePath, &State{Version: stateVersion}); err != nil {
@@ -292,7 +255,7 @@ func TestCommandParseErrorsUseAppErrorWriter(t *testing.T) {
 	}
 }
 
-func TestCUIBareQuotaUsesGiB(t *testing.T) {
+func TestWebBareQuotaUsesGiB(t *testing.T) {
 	if got := normalizeQuotaInput("200"); got != "200G" {
 		t.Fatalf("got %q", got)
 	}
@@ -538,28 +501,6 @@ func TestCLIWorkflow(t *testing.T) {
 	inboundUsers := renderedConfig["inbounds"].([]any)[0].(map[string]any)["users"].([]any)
 	if len(inboundUsers) != 3 { // One preserved credential plus Alice's two UUIDs.
 		t.Fatalf("managed render did not preserve legacy credential: %s", rendered)
-	}
-}
-
-func TestTUIRendersEmptyAndUserViews(t *testing.T) {
-	m := tuiModel{
-		state:  &State{ReservedAuthUsers: []string{"Node A", "Relay A via Node A", "Relay B via Node A"}},
-		width:  110,
-		height: 30,
-	}
-	empty := m.render()
-	if !strings.Contains(empty, "尚未添加受管用户") || strings.Contains(empty, "旧节点") {
-		t.Fatalf("empty TUI missing onboarding copy:\n%s", empty)
-	}
-	m.state.Users = []User{{Name: "alice", Enabled: true, Nodes: []Node{{Name: "default", UUID: "uuid"}}}}
-	list := m.render()
-	if !strings.Contains(list, "alice") || !strings.Contains(list, "enter 详情") {
-		t.Fatalf("user list TUI missing content:\n%s", list)
-	}
-	m.selected, m.mode = "alice", tuiDetail
-	detail := m.render()
-	if !strings.Contains(detail, "UUID") || !strings.Contains(detail, "x 导出") {
-		t.Fatalf("detail TUI missing actions:\n%s", detail)
 	}
 }
 

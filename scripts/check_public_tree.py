@@ -25,6 +25,7 @@ FORBIDDEN_BASENAMES = {
     "mihomo.template.yaml",
     "sing-box.json",
     "state.db",
+    "web-admin.json",
     "state.json",
     "state.json.lock",
     "state.json.migrated",

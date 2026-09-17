@@ -12,7 +12,7 @@ import (
 const maxSingBoxCheckDiagnosticBytes = 64 << 10
 
 // cappedDiagnosticBuffer keeps a broken or malicious checker from flooding the
-// CUI while still draining its stdout/stderr so the child process can exit.
+// management UI while still draining its stdout/stderr so the child process can exit.
 type cappedDiagnosticBuffer struct {
 	buffer    bytes.Buffer
 	truncated bool

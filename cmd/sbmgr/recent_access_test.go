@@ -2,11 +2,9 @@ package main
 
 import (
 	"fmt"
-	"strings"
+
 	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func TestRecentAccessArchiveAggregatesFiltersAndPrunes(t *testing.T) {
@@ -55,38 +53,5 @@ func TestVersionSevenSeedsRecentAccessFromNodeStats(t *testing.T) {
 	}
 	if s.Version != stateVersion || len(s.Users[0].RecentAccesses) != 1 || s.Users[0].RecentAccesses[0].Target != "example.com" || s.Users[0].RecentAccesses[0].Count != 7 {
 		t.Fatalf("recent access migration failed: %#v", s.Users[0].RecentAccesses)
-	}
-}
-
-func TestRecentAccessPageSupportsSearchAndSmallTerminal(t *testing.T) {
-	now := time.Now()
-	accesses := []RecentAccess{
-		{Target: "service.example", Device: "phone", Node: "Node A", FirstSeen: now.Format(time.RFC3339), LastSeen: now.Format(time.RFC3339), Count: 3},
-		{Target: "example.com", Device: "pc", Node: "Relay A", FirstSeen: now.Add(-time.Minute).Format(time.RFC3339), LastSeen: now.Add(-time.Minute).Format(time.RFC3339), Count: 1},
-	}
-	for index := 0; index < 12; index++ {
-		seen := now.Add(-time.Duration(index+2) * time.Minute).Format(time.RFC3339)
-		accesses = append(accesses, RecentAccess{Target: fmt.Sprintf("extra-%02d.example", index), Device: "phone", Node: "Node A", FirstSeen: seen, LastSeen: seen, Count: 1})
-	}
-	m := tuiModel{
-		state: &State{Users: []User{{Name: "alice", RecentAccesses: accesses}}},
-		width: 64, height: 18, mode: tuiAccessHistory, selected: "alice", status: "就绪",
-	}
-	page := m.render()
-	if !strings.Contains(page, "service.example") || !strings.Contains(page, "/ 搜索筛选") {
-		t.Fatalf("recent access page missing content:\n%s", page)
-	}
-	if lines := strings.Count(page, "\n") + 1; lines > m.height {
-		t.Fatalf("recent access page exceeded terminal height: %d > %d\n%s", lines, m.height, page)
-	}
-	model, _ := m.updateAccessHistory(tea.KeyPressMsg(tea.Key{Text: "/", Code: '/'}))
-	m = model.(tuiModel)
-	if !m.accessSearching {
-		t.Fatal("search mode did not start")
-	}
-	model, _ = m.updateAccessSearch(tea.KeyPressMsg(tea.Key{Text: "service", Code: 's'}))
-	m = model.(tuiModel)
-	if m.accessFilter != "service" || len(recentAccessesForUser(findUser(m.state, "alice"), m.accessFilter)) != 1 {
-		t.Fatalf("search filter failed: %q", m.accessFilter)
 	}
 }

@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"io"
+
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,36 +152,6 @@ func TestSoftBlockedUserStaysConnectedAndUsesPunishmentRate(t *testing.T) {
 	}
 	if _, err := renderMihomo(s, u); err != nil {
 		t.Fatalf("soft-blocked user should retain export access: %v", err)
-	}
-}
-
-func TestBurstProtectionCUIFormPersistsPolicy(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "state.json")
-	if err := saveState(statePath, &State{Version: stateVersion, Users: []User{{Name: "alice", Enabled: true}}}); err != nil {
-		t.Fatal(err)
-	}
-	a := &app{statePath: statePath, out: io.Discard, err: io.Discard}
-	m := tuiModel{a: a, state: &State{Users: []User{{Name: "alice", Enabled: true}}}}
-	m.openBurstForm(m.state.Users[0])
-	m.form.fields[0].value = "开启"
-	m.form.fields[1].value = "软封禁（极低速）"
-	m.form.fields[2].value = "30"
-	m.form.fields[3].value = "2G"
-	m.form.fields[4].value = "60"
-	m.form.fields[5].value = "16"
-	m.form.fields[6].value = "2"
-	_, cmd := m.submitForm()
-	msg := cmd().(tuiActionMsg)
-	if msg.err != nil {
-		t.Fatal(msg.err)
-	}
-	s, err := loadState(statePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	policy := s.Users[0].Burst
-	if !policy.Enabled || policy.Action != burstActionSoft || policy.WindowMinutes != 30 || policy.LimitBytes != 2<<30 || policy.BlockMinutes != 60 || policy.SoftUploadKbps != 16 || policy.SoftDownloadKbps != 2 {
-		t.Fatalf("unexpected policy: %#v", policy)
 	}
 }
 

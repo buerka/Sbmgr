@@ -1,7 +1,6 @@
 package main
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"encoding/json"
 	"os"
 	"reflect"
@@ -10,20 +9,6 @@ import (
 	"testing"
 	"time"
 )
-
-func TestMeshRouteFormExposesEntryAndTerminalExit(t *testing.T) {
-	master, _, _ := independentEntryFixture(t)
-	m := tuiModel{state: master, mode: tuiMesh, menuCursor: 3, width: 100, height: 36}
-	model, _ := m.updateMesh(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	got := model.(tuiModel)
-	if got.form.kind != formMeshRoute || len(got.form.fields) != 7 || got.form.fields[5].label != "客户端入口" || got.form.fields[6].label != "末跳出站" {
-		t.Fatal("route editor does not expose entry/exit selection")
-	}
-	for _, size := range [][2]int{{100, 36}, {36, 16}} {
-		got.width, got.height = size[0], size[1]
-		assertTUIRenderBounds(t, got.View().Content, size[0], size[1])
-	}
-}
 
 func TestMeshRateTopologyUsesOnlyTheLocalEntry(t *testing.T) {
 	master, _, _ := independentEntryFixture(t)

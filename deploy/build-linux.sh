@@ -27,6 +27,9 @@ output_dir="$repo_root/.dist"
 output="$output_dir/sbmgr-$version-linux-amd64"
 checksum_file="$output.sha256"
 
+npm --prefix frontend ci
+npm --prefix frontend run build
+
 mkdir -p "$output_dir"
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -trimpath \

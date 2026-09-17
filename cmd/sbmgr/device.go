@@ -323,7 +323,7 @@ func (a *app) deviceCmdLocked(args []string) error {
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.out, "设备 %s/%s 已%s（按 p 应用配置后生效）\n", u.Name, device.Name, map[bool]string{true: "启用", false: "禁用"}[device.Enabled])
+		fmt.Fprintf(a.out, "设备 %s/%s 已%s（运行 admin apply 应用配置后生效）\n", u.Name, device.Name, map[bool]string{true: "启用", false: "禁用"}[device.Enabled])
 		return nil
 	case "rotate":
 		if len(args) != 3 {
@@ -388,7 +388,7 @@ func (a *app) deviceCmdLocked(args []string) error {
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.out, "已删除设备 %s/%s 及其全部 UUID（按 p 应用配置后生效）\n", u.Name, name)
+		fmt.Fprintf(a.out, "已删除设备 %s/%s 及其全部 UUID（运行 admin apply 应用配置后生效）\n", u.Name, name)
 		return nil
 	default:
 		return fmt.Errorf("未知 device 子命令 %q", args[0])

@@ -92,13 +92,3 @@ func TestSubscriptionRPCCancellationClosesChannel(t *testing.T) {
 		t.Fatal("cancelled exchange was reusable")
 	}
 }
-
-func TestSubscriptionFormExplainsPrivilegeIsolation(t *testing.T) {
-	m := tuiModel{form: tuiForm{kind: formSubscriptionSettings}}
-	help := strings.Join(m.formHelpLines(100), "")
-	for _, want := range []string{"低权限", "后台维护", "应用配置"} {
-		if !strings.Contains(help, want) {
-			t.Fatalf("missing subscription guidance: %s", want)
-		}
-	}
-}

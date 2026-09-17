@@ -1,0 +1,45 @@
+{
+  "name": "sbmgr-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "format": "prettier --write src vite.config.ts",
+    "format:check": "prettier --check src vite.config.ts"
+  },
+  "dependencies": {
+    "@emotion/cache": "^11.14.0",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@fontsource/roboto": "^5.2.9",
+    "@mui/icons-material": "6.5.0",
+    "@mui/material": "6.5.0",
+    "@reduxjs/toolkit": "^2.9.0",
+    "axios": "^1.12.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-redux": "^9.2.0",
+    "react-router-dom": "7.18.4"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.26",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react-swc": "4.3.3",
+    "jsdom": "^27.0.1",
+    "prettier": "3.9.7",
+    "typescript": "^5.9.3",
+    "vite": "8.3.0",
+    "vitest": "^4.1.0"
+  }
+}

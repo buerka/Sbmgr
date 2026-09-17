@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"math"
-	"strings"
 	"testing"
 	"time"
 )
@@ -155,8 +154,5 @@ func TestConnectionClosedLogDetection(t *testing.T) {
 	}
 	if connectionClosed(`INFO [1781284324 1ms] inbound/vless[vless-in]: inbound connection to example.com:443`) {
 		t.Fatal("active connection was mistaken for a close")
-	}
-	if !strings.Contains(usageSparkline(User{UsageHistory: []UsagePoint{{UploadMbps: 1}}}, 8), "峰值") {
-		t.Fatal("history sparkline was not rendered")
 	}
 }

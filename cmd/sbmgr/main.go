@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/ecdh"
 	"crypto/rand"
@@ -29,7 +28,7 @@ const stateVersion = 12
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
 var (
-	appVersion = "0.23.2-dev"
+	appVersion = "dev"
 	gitCommit  = "unknown"
 )
 
@@ -291,6 +290,7 @@ type NodeTemplate struct {
 }
 
 type app struct {
+	actor              string
 	statePath          string
 	out                io.Writer
 	err                io.Writer
@@ -306,6 +306,12 @@ func (a *app) newFlagSet(name string) *flag.FlagSet {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == webWorkerArg {
+		if runWebWorker() != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == subscriptionWorkerArg {
 		if runSubscriptionWorker() != nil {
 			os.Exit(1)
@@ -323,23 +329,25 @@ func (a *app) run(args []string) error {
 	global := flag.NewFlagSet("sbmgr", flag.ContinueOnError)
 	global.SetOutput(a.err)
 	global.StringVar(&a.statePath, "state", defaultStatePath(), "状态数据库路径（.db；旧 .json 仅兼容迁移）")
+	home := global.String("home", "", "数据目录；默认为程序目录或 SBMGR_HOME")
 	global.Usage = func() { usage(a.out) }
 	if err := global.Parse(args); err != nil {
 		return err
 	}
 	args = global.Args()
+	if *home != "" {
+		a.statePath = filepath.Join(absOrOriginal(*home), "state.db")
+	}
 	if len(args) == 0 {
-		if _, err := a.loadCanonicalState(); err != nil {
-			return err
-		}
-		return a.menu()
+		return a.serveCmd(nil)
 	}
 	switch args[0] {
-	case "ui", "menu":
-		if _, err := a.loadCanonicalState(); err != nil {
-			return err
-		}
-		return a.menu()
+	case "serve":
+		return a.serveCmd(args[1:])
+	case "web":
+		return a.webCmd(args[1:])
+	case "service":
+		return a.serviceCmd(args[1:])
 	case "daemon":
 		return a.daemonCmd(args[1:])
 	case "admin":
@@ -366,7 +374,15 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, `sbmgr - sing-box 多用户管理器
 
 用法:
-	  sbmgr             打开管理界面（日常只需这个）
+	  sbmgr [--home DIR] serve  启动内嵌 Web 与后台维护（默认命令）
+	  sbmgr web configure --password-file FILE [--listen HOST:PORT] [--origin URL]
+	  sbmgr web status         查看 Web 地址
+	  sbmgr service install    安装 systemd 服务及内嵌部署工具
+	  sbmgr service start|stop|restart|status
+	  sbmgr admin OPERATION    参数化管理，供自动化与恢复使用
+	    init / user / device / node / policy / proxy / mesh / subscription
+	    template / traffic / rate / sync / check / apply / backup / health / fleet
+	    batch / client / audit
 	  sbmgr version     显示版本
 	  sbmgr version --verbose  显示版本与 Git commit
 	  sbmgr help        显示本帮助
@@ -378,9 +394,15 @@ func usage(w io.Writer) {
 // the normal user experience into a wall of command-line switches.
 func (a *app) adminCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("缺少维护操作；这些命令仅用于安装、恢复和调试")
+		return errors.New("缺少管理操作；使用 sbmgr help 查看命令分组")
 	}
 	switch args[0] {
+	case "batch":
+		return a.batchCmd(args[1:])
+	case "client":
+		return a.clientCmd(args[1:])
+	case "audit":
+		return a.auditCmd(args[1:])
 	case "init":
 		return a.withStateLock(func() error { return a.initCmd(args[1:]) })
 	case "user":
@@ -426,8 +448,6 @@ func (a *app) adminCmd(args []string) error {
 		return a.snapshotCmd(args[1:])
 	case "proxy":
 		return a.proxyAdminCmd(args[1:])
-	case "simple-menu":
-		return a.simpleMenu()
 	default:
 		return fmt.Errorf("未知维护操作 %q", args[0])
 	}
@@ -1250,7 +1270,7 @@ func (a *app) userCmdLocked(args []string) error {
 		} else if ipOnly {
 			fmt.Fprintf(a.out, "已更新用户 %s 的来源 IP 规则，后台下个维护周期自动应用\n", u.Name)
 		} else {
-			fmt.Fprintf(a.out, "已更新用户 %s（按 p 应用配置后生效）\n", u.Name)
+			fmt.Fprintf(a.out, "已更新用户 %s（运行 admin apply 应用配置后生效）\n", u.Name)
 		}
 		return nil
 	case "list":
@@ -1355,7 +1375,7 @@ func (a *app) userCmdLocked(args []string) error {
 			s.BurstApplyPending = false
 			return saveState(a.statePath, s)
 		}
-		fmt.Fprintln(a.out, "按 p 应用配置后恢复连接")
+		fmt.Fprintln(a.out, "运行 admin apply 应用配置后恢复连接")
 		return nil
 	case "delete":
 		if len(args) != 2 {
@@ -2105,79 +2125,6 @@ func renderMihomoDevice(s *State, u User, deviceName string) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-func (a *app) simpleMenu() error {
-	in := bufio.NewScanner(os.Stdin)
-	for {
-		fmt.Fprintln(a.out, "\n1) 用户列表  2) 添加用户  3) 启用/禁用  4) 添加节点  5) 应用配置  6) 导出用户  7) 设置实时限速  0) 退出")
-		fmt.Fprint(a.out, "> ")
-		if !in.Scan() {
-			return in.Err()
-		}
-		switch strings.TrimSpace(in.Text()) {
-		case "0":
-			return nil
-		case "1":
-			if err := a.userCmd([]string{"list"}); err != nil {
-				fmt.Fprintln(a.err, err)
-			}
-		case "2":
-			name := prompt(in, a.out, "用户名")
-			quota := prompt(in, a.out, "配额(如100G，0不限)")
-			expire := prompt(in, a.out, "到期日(留空不限)")
-			argv := []string{"add", name, "--quota", quota}
-			if expire != "" {
-				argv = append(argv, "--expire", expire)
-			}
-			if err := a.userCmd(argv); err != nil {
-				fmt.Fprintln(a.err, err)
-			}
-		case "3":
-			name := prompt(in, a.out, "用户名")
-			op := prompt(in, a.out, "enable/disable")
-			if err := a.userCmd([]string{op, name}); err != nil {
-				fmt.Fprintln(a.err, err)
-			}
-		case "4":
-			user := prompt(in, a.out, "用户名")
-			name := prompt(in, a.out, "节点名")
-			out := prompt(in, a.out, "出口tag(留空走默认)")
-			argv := []string{"add", user, "--name", name}
-			if out != "" {
-				argv = append(argv, "--outbound", out)
-			}
-			if err := a.nodeCmd(argv); err != nil {
-				fmt.Fprintln(a.err, err)
-			}
-		case "5":
-			if err := a.applyCmd(nil); err != nil {
-				fmt.Fprintln(a.err, err)
-			}
-		case "6":
-			user := prompt(in, a.out, "用户名")
-			path := prompt(in, a.out, "输出路径")
-			if err := a.exportCmd([]string{user, "--output", path}); err != nil {
-				fmt.Fprintln(a.err, err)
-			}
-		case "7":
-			user := prompt(in, a.out, "用户名")
-			up := prompt(in, a.out, "上传 Mbps (0 不限)")
-			down := prompt(in, a.out, "下载 Mbps (0 不限)")
-			if err := a.userCmd([]string{"set", user, "--up-mbps", up, "--down-mbps", down}); err != nil {
-				fmt.Fprintln(a.err, err)
-			}
-		default:
-			fmt.Fprintln(a.err, "无效选择")
-		}
-	}
-}
-
-func prompt(s *bufio.Scanner, w io.Writer, label string) string {
-	fmt.Fprintf(w, "%s: ", label)
-	if s.Scan() {
-		return strings.TrimSpace(s.Text())
-	}
-	return ""
-}
 func loadState(path string) (*State, error) {
 	s, _, err := loadStateWithCanonicalChange(path)
 	return s, err
@@ -2226,7 +2173,7 @@ func loadJSONStateWithCanonicalChange(path string) (*State, bool, error) {
 }
 
 // loadCanonicalState is the explicit write boundary for state migration. It is
-// used before independently-reading surfaces (TUI and subscription HTTP) start,
+// used before independently-reading surfaces (Web and subscription HTTP) start,
 // preventing a legacy missing token from being regenerated on every load.
 func (a *app) loadCanonicalState() (*State, error) {
 	var state *State

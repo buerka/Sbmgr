@@ -27,7 +27,7 @@ RestrictNamespaces=true
 RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
-# SETUID/SETGID are used only by the exec'ed subscription bootstrap before
+# SETUID/SETGID are used only by the exec'ed Web/subscription bootstrap before
 # accepting HTTP; the worker clears all permitted/effective/inheritable caps.
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_KILL CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
 # systemd may drop CAP_SETUID while applying User= and seccomp unless it is

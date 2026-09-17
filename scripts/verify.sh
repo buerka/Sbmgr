@@ -6,6 +6,10 @@ cd "$repo_dir"
     echo 'Run gofmt -w cmd/sbmgr internal/mesh first.' >&2
     exit 1
 }
+npm --prefix frontend ci
+npm --prefix frontend run format:check
+npm --prefix frontend test
+npm --prefix frontend run build
 go vet ./...
 go test ./...
 python3 scripts/test_check_public_tree.py

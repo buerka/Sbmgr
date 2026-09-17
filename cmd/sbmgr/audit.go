@@ -33,7 +33,11 @@ func (a *app) withAuditedStateLock(action string, args []string, fn func() error
 		if auditReadOnlyAction(action) {
 			return nil
 		}
-		if err := appendAuditRecord(a.statePath, AuditRecord{At: time.Now().Format(time.RFC3339Nano), Actor: auditActor(), Action: action, Args: sanitizeAuditArgs(args), PID: os.Getpid()}); err != nil {
+		actor := a.actor
+		if actor == "" {
+			actor = auditActor()
+		}
+		if err := appendAuditRecord(a.statePath, AuditRecord{At: time.Now().Format(time.RFC3339Nano), Actor: actor, Action: action, Args: sanitizeAuditArgs(args), PID: os.Getpid()}); err != nil {
 			// The mutation has already been durably saved. Returning the audit
 			// error as the command result would invite a retry and duplicate the
 			// operation, so surface it explicitly as a partial-success warning.

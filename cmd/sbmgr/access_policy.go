@@ -289,6 +289,6 @@ func (a *app) policyCmdLocked(args []string) error {
 	if err := saveState(a.statePath, s); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "已更新 %s 的访问与并发策略（按 p 应用域名/端口规则）\n", scope)
+	fmt.Fprintf(a.out, "已更新 %s 的访问与并发策略（运行 admin apply 应用域名/端口规则）\n", scope)
 	return nil
 }
