@@ -28,6 +28,45 @@ func TestMeshRateTopologyUsesOnlyTheLocalEntry(t *testing.T) {
 	}
 }
 
+func TestBurstPendingUsesLocalEntryEligibility(t *testing.T) {
+	for _, scenario := range []string{"remote entry", "expired lease", "lease quota"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, _, _ := independentEntryFixture(t)
+			s.Users[0].Burst = BurstPolicy{Enabled: true, Action: burstActionHard}
+			if scenario == "expired lease" {
+				s.MeshLease = &MeshLease{Until: time.Now().Add(-time.Hour).Format(time.RFC3339Nano)}
+			}
+			if scenario == "lease quota" {
+				s.MeshLease = &MeshLease{Until: time.Now().Add(time.Hour).Format(time.RFC3339Nano), Quota: map[string]int64{"alice": 1}}
+				s.Users[0].Upload = 1
+			}
+			raw, err := renderConfig(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(s.ConfigPath, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			for range 3 {
+				if burstConfigurationPending(s) {
+					t.Fatal("rendered local configuration would trigger repeated reloads")
+				}
+			}
+			if !s.Users[0].Enabled || len(s.Users[0].Nodes) != 2 {
+				t.Fatal("eligibility check modified global account state")
+			}
+			if scenario == "remote entry" {
+				s.Users[0].BlockedUntil = time.Now().Add(time.Hour).Format(time.RFC3339Nano)
+			} else {
+				s.MeshLease = nil
+			}
+			if !burstConfigurationPending(s) {
+				t.Fatal("local eligibility transition was not detected")
+			}
+		})
+	}
+}
+
 func independentEntryFixture(t *testing.T) (*State, *State, *app) {
 	t.Helper()
 	topology := meshFixture(t)

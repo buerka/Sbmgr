@@ -240,8 +240,13 @@ func burstConfigurationPending(s *State) bool {
 			}
 		}
 	}
+	// renderConfig applies the mesh execution view before writing the inbound.
+	// Compare against that same view; checking the master's complete account
+	// list makes every remote-entry identity look permanently missing on this
+	// host and causes a reload on every maintenance cycle.
+	local := meshLocalView(s)
 	now := time.Now()
-	for _, user := range s.Users {
+	for _, user := range local.Users {
 		if !user.Burst.Enabled {
 			continue
 		}
