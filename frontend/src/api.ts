@@ -6,10 +6,11 @@ import type {
   Job,
   Session,
   Snapshot,
+  RouteInventory,
 } from "./types";
 
 const http = axios.create({
-  baseURL: "/api",
+  baseURL: new URL("./api", window.location.href).pathname,
   withCredentials: true,
   timeout: 20000,
 });
@@ -59,6 +60,14 @@ export const api = {
   login: (username: string, password: string) =>
     request<Session>("/login", { username, password }),
   logout: () => request("/logout", {}),
+  account: (username: string, current_password: string, new_password: string) =>
+    request<{ message: string }>("/account", {
+      username,
+      current_password,
+      new_password,
+    }),
+  routeInventory: (member: string) =>
+    request<RouteInventory>(`/route-inventory/${encodeURIComponent(member)}`),
   snapshot: () => request<Snapshot>("/state"),
   catalog: () => request<Action[]>("/catalog"),
   action: (input: ActionInput) => request<Job>("/actions", input),

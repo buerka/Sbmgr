@@ -16,7 +16,35 @@ export interface Device {
   upload: number;
   download: number;
   deliverable: boolean;
+  assignment_version?: string;
   access?: AccessPolicy;
+  ip_policy?: IPPolicy;
+}
+export interface IPPolicy {
+  enabled?: boolean;
+  mode?: string;
+  binding?: string;
+  max_ips?: number;
+  handover_seconds?: number;
+  bound_ips?: string[];
+  temporary_ips?: string[];
+  temporary_until?: string;
+}
+export interface BurstPolicy {
+  enabled?: boolean;
+  window_minutes?: number;
+  limit_bytes?: number;
+  block_minutes?: number;
+  action?: string;
+  soft_upload_kbps?: number;
+  soft_download_kbps?: number;
+}
+export interface ThrottlePolicy {
+  enabled?: boolean;
+  tier1_usage_percent?: number;
+  tier1_speed_percent?: number;
+  tier2_usage_percent?: number;
+  tier2_speed_percent?: number;
 }
 export interface Node {
   name: string;
@@ -48,7 +76,15 @@ export interface User {
   devices: Device[];
   nodes: Node[];
   access?: AccessPolicy;
-  billing?: { enabled: boolean; day: number };
+  billing?: {
+    enabled?: boolean;
+    cycle_day?: number;
+    time_zone?: string;
+    next_reset?: string;
+  };
+  ip_policy?: IPPolicy;
+  burst?: BurstPolicy;
+  throttle?: ThrottlePolicy;
   connections: {
     device: string;
     node: string;
@@ -88,9 +124,23 @@ export interface Snapshot {
     master: boolean;
     client?: ClientEntry;
   }[];
-  routes: { id: string; entry: string; hops: string[]; exit: string }[];
+  routes: {
+    id: string;
+    name?: string;
+    entry: string;
+    hops: string[];
+    exit: string;
+    protocols?: string[];
+  }[];
   backups: { name: string; size: number; modified: string }[];
   health: Record<string, { tag: string; target: string; healthy: boolean }>;
+  health_settings?: {
+    mode: string;
+    interval_minutes: number;
+    timeout_seconds: number;
+    alert_after_failures: number;
+    targets?: Record<string, string>;
+  };
   fleet: { name: string; host: string; online: boolean; checked: string }[];
   alerts: { user: string; kind: string; message: string }[];
   audit: { at: string; actor: string; action: string }[];
@@ -99,8 +149,14 @@ export interface Snapshot {
     enabled: boolean;
     base_url: string;
     listen: string;
-    template: string;
+    template: boolean;
+    template_path?: string;
+    tls_configured?: boolean;
   };
+}
+export interface RouteInventory {
+  member: string;
+  exits: { tag: string; name: string; type: string }[];
 }
 export interface Field {
   key: string;

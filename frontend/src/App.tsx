@@ -1,28 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
-  Alert,
-  Box,
-  Breadcrumbs,
-  Button,
-  CircularProgress,
-  Divider,
-  Drawer,
-  IconButton,
-  LinearProgress,
-  List,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Paper,
-  Snackbar,
-  Stack,
-  TextField,
-  Tooltip,
-  Typography,
-  useMediaQuery,
-  useTheme,
-} from "@mui/material";
-import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { api } from "./api";
 import {
   clearNotice,
@@ -38,38 +22,99 @@ import {
 import { ActionDialog } from "./components/ActionDialog";
 import { ActionButton, Badge } from "./components/common";
 import { Icon, type IconName } from "./components/Icons";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { Alert } from "./components/ui/feedback";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "./components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "./components/ui/dropdown-menu";
+import { useTheme } from "./theme";
+import { cn } from "./lib/utils";
 import { Overview } from "./pages/Overview";
 import { Users } from "./pages/Users";
 import { UserDetail } from "./pages/UserDetail";
 import { RoutesPage } from "./pages/Routes";
 import { Subscriptions } from "./pages/Subscriptions";
 import { Operations } from "./pages/Operations";
-
+import { Account } from "./pages/Account";
 const navigation: [string, string, IconName][] = [
-  ["/overview", "总览", "home"],
-  ["/users", "用户与设备", "users"],
-  ["/routes", "线路与服务器", "routes"],
+  ["/overview", "运行总览", "home"],
+  ["/users", "用户管理", "users"],
+  ["/routes", "线路管理", "routes"],
   ["/subscriptions", "订阅交付", "link"],
-  ["/ops", "运维与备份", "settings"],
+  ["/ops", "系统运维", "settings"],
+  ["/account", "管理账号", "shield"],
 ];
 function Brand() {
   return (
-    <Stack
-      component={Link}
-      to="/overview"
-      direction="row"
-      gap={1.3}
-      alignItems="center"
-      className="brand"
-    >
-      <Box className="brand-icon">
-        <Icon name="server" sx={{ fontSize: 24 }} />
-      </Box>
-      <Typography component="span">sbmgr</Typography>
-    </Stack>
+    <Link to="/overview" className="brand">
+      <span className="brand-icon">
+        <Icon name="routes" size={19} />
+      </span>
+      <span>
+        <strong>sbmgr</strong>
+        <small>网络管理控制台</small>
+      </span>
+      <Icon name="expand" className="ml-auto text-muted-foreground" />
+    </Link>
+  );
+}
+function ThemeMenu() {
+  const { theme, setTheme } = useTheme();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label="切换主题"
+          title="切换主题"
+        >
+          <Icon
+            name={
+              theme === "light" ? "sun" : theme === "dark" ? "moon" : "monitor"
+            }
+          />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>外观</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={theme}
+          onValueChange={(value) => setTheme(value as typeof theme)}
+        >
+          {(
+            [
+              ["light", "浅色", "sun"],
+              ["dark", "深色", "moon"],
+              ["system", "跟随系统", "monitor"],
+            ] as const
+          ).map(([value, label, icon]) => (
+            <DropdownMenuRadioItem value={value} key={value}>
+              <Icon name={icon} />
+              {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 function Login() {
+  const notice = useAppSelector((s) => s.admin.notice);
   const dispatch = useAppDispatch(),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -87,8 +132,8 @@ function Login() {
       form.reset();
       dispatch(signedIn(session));
       await Promise.all([dispatch(loadCatalog()), dispatch(refreshSnapshot())]);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "登录失败");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "登录失败");
     } finally {
       const input = form.elements.namedItem(
         "password",
@@ -98,71 +143,177 @@ function Login() {
     }
   }
   return (
-    <Box className="login-shell">
-      <Paper variant="outlined" className="login-panel">
+    <main className="login-shell">
+      <div className="absolute right-6 top-6">
+        <ThemeMenu />
+      </div>
+      <div className="login-panel">
         <Brand />
-        <Typography variant="h1" sx={{ fontSize: 21, mt: 3, mb: 1 }}>
-          登录管理控制台
-        </Typography>
-        <Typography variant="body2" color="text.secondary" mb={3}>
-          管理你的用户、设备与线路。
-        </Typography>
-        <Box component="form" onSubmit={submit}>
-          <Stack gap={2.5}>
-            <TextField
+        <div className="mt-8 mb-6">
+          <h1>登录控制台</h1>
+          <p className="text-muted-foreground text-sm mt-2">
+            管理你的用户、设备与线路。
+          </p>
+        </div>
+        <form onSubmit={submit} className="space-y-5">
+          {notice && <Alert kind={notice.severity}>{notice.message}</Alert>}
+          <div className="space-y-2">
+            <label htmlFor="username">管理员账号</label>
+            <Input
+              id="username"
               name="username"
-              label="管理员账号"
               autoComplete="username"
               required
               autoFocus
-              inputProps={{ maxLength: 64 }}
+              maxLength={64}
               disabled={busy}
             />
-            <TextField
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="password">密码</label>
+            <Input
+              id="password"
               name="password"
-              label="密码"
               type="password"
               autoComplete="current-password"
               required
-              inputProps={{ maxLength: 1024 }}
+              maxLength={1024}
               disabled={busy}
             />
-            {error && <Alert severity="error">{error}</Alert>}
-            <Button variant="contained" type="submit" disabled={busy}>
-              {busy ? "正在登录…" : "登录"}
-            </Button>
-          </Stack>
-        </Box>
-        <Divider sx={{ my: 3 }} />
-        <Typography variant="caption" color="text.secondary">
+          </div>
+          {error && <Alert kind="error">{error}</Alert>}
+          <Button className="w-full" type="submit" disabled={busy}>
+            {busy ? "正在登录…" : "登录"}
+          </Button>
+        </form>
+        <p className="text-xs text-muted-foreground mt-6 leading-relaxed">
           使用部署时设置的管理员账号。忘记密码时，请在服务器通过{" "}
           <code>sbmgr web configure</code> 重新设置。
-        </Typography>
-      </Paper>
-      <Typography variant="caption" color="text.secondary" mt={2.5}>
-        sbmgr 管理控制台
-      </Typography>
-    </Box>
+        </p>
+      </div>
+    </main>
+  );
+}
+function NavigationSearch({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const users = useAppSelector((s) => s.admin.snapshot?.users) || [],
+    navigate = useNavigate();
+  const entries = [
+    ...navigation.map(([path, label, icon]) => ({
+      path,
+      label,
+      icon,
+      group: "页面",
+    })),
+    ...users.map((u) => ({
+      path: `/users/${encodeURIComponent(u.name)}`,
+      label: u.name,
+      icon: "users" as IconName,
+      group: "用户",
+    })),
+  ]
+    .filter((e) => e.label.toLowerCase().includes(query.toLowerCase()))
+    .slice(0, 12);
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v);
+        if (!v) setQuery("");
+      }}
+    >
+      <DialogContent
+        className="p-0 gap-0 overflow-hidden"
+        showCloseButton={false}
+      >
+        <DialogTitle className="sr-only">搜索页面与用户</DialogTitle>
+        <DialogDescription className="sr-only">
+          输入名称快速跳转，按 Tab 选择结果，回车打开。
+        </DialogDescription>
+        <div className="flex items-center gap-3 px-4 border-b h-14">
+          <Icon name="search" className="text-muted-foreground" />
+          <input
+            autoFocus
+            aria-label="搜索页面与用户"
+            placeholder="搜索页面、用户…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="flex-1 bg-transparent outline-none min-w-0 text-sm"
+          />
+          <kbd>Esc</kbd>
+        </div>
+        <div className="max-h-80 overflow-y-auto p-2">
+          {entries.map((e) => (
+            <button
+              key={e.path}
+              aria-label={`打开${e.group}：${e.label}`}
+              className="command-result"
+              onClick={() => {
+                navigate(e.path);
+                onOpenChange(false);
+                setQuery("");
+              }}
+            >
+              <Icon name={e.icon} />
+              <span>{e.label}</span>
+              <small>{e.group}</small>
+            </button>
+          ))}
+          {!entries.length && (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              没有找到匹配的页面或用户
+            </p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 export function App() {
-  const { status, snapshot, catalog, loading, error, dialog, job, notice } =
-      useAppSelector((s) => s.admin),
-    dispatch = useAppDispatch();
-  const location = useLocation(),
-    theme = useTheme(),
-    mobile = useMediaQuery(theme.breakpoints.down("md"));
-  const [drawer, setDrawer] = useState(false);
+  const {
+      status,
+      snapshot,
+      catalog,
+      loading,
+      error,
+      dialog,
+      job,
+      notice,
+      session,
+    } = useAppSelector((s) => s.admin),
+    dispatch = useAppDispatch(),
+    location = useLocation();
+  const [collapsed, setCollapsed] = useState(false),
+    [mobileOpen, setMobileOpen] = useState(false),
+    [searchOpen, setSearchOpen] = useState(false);
   const current = navigation.find(([path]) =>
     location.pathname.startsWith(path),
   );
-  const title = location.pathname.startsWith("/users/")
-    ? "用户详情"
-    : current?.[1] || "总览";
   useEffect(() => {
-    setDrawer(false);
+    setMobileOpen(false);
     window.scrollTo(0, 0);
   }, [location.pathname]);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => dispatch(clearNotice()), 6500);
+    return () => clearTimeout(timer);
+  }, [notice, dispatch]);
   useEffect(() => {
     if (status !== "authenticated") return;
     const timer = setInterval(() => {
@@ -183,12 +334,13 @@ export function App() {
         if (cancelled) return;
         dispatch(jobReceived(result));
         if (result.status !== "running") {
-          dispatch(
-            notify({
-              message: result.message,
-              severity: result.status === "failed" ? "error" : "success",
-            }),
-          );
+          if (result.status !== "failed" || !dialog)
+            dispatch(
+              notify({
+                message: result.message,
+                severity: result.status === "failed" ? "error" : "success",
+              }),
+            );
           void dispatch(refreshSnapshot());
           return;
         }
@@ -214,7 +366,7 @@ export function App() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [job?.id, job?.status, status, dispatch]);
+  }, [job?.id, job?.status, status, dispatch, dialog]);
   async function logout() {
     try {
       await api.logout();
@@ -222,192 +374,192 @@ export function App() {
       dispatch(signedOut());
     }
   }
+
   if (status === "checking")
     return (
-      <Box className="loading-shell">
-        <CircularProgress size={28} />
-        <Typography color="text.secondary">正在连接管理服务…</Typography>
-      </Box>
+      <div className="loading-shell">
+        <Icon name="loading" size={24} className="animate-spin" />
+        <p>正在连接管理服务…</p>
+      </div>
     );
   if (status === "anonymous") return <Login />;
   const sidebar = (
-    <Box className="sidebar-inner">
+    <>
       <Brand />
-      <ActionButton
-        id="user.add"
-        variant="contained"
-        className="sidebar-create"
-      />
-      <Typography
-        className="nav-label"
-        variant="caption"
-        color="text.secondary"
-      >
-        工作空间
-      </Typography>
-      <List component="nav" aria-label="主要导航" disablePadding>
+      <nav aria-label="主要导航">
+        <p className="nav-group-label">工作空间</p>
         {navigation.map(([path, label, icon], index) => (
-          <Box key={path}>
-            {index === 4 && <Divider sx={{ mx: 1.5, my: 2 }} />}
-            <ListItemButton
-              component={Link}
+          <div key={path}>
+            {index === 4 && <p className="nav-group-label mt-7">系统</p>}
+            <Link
+              title={collapsed ? label : undefined}
               to={path}
-              selected={current?.[0] === path}
+              onClick={() => setMobileOpen(false)}
               aria-current={current?.[0] === path ? "page" : undefined}
+              className={cn("nav-item", current?.[0] === path && "active")}
             >
-              <ListItemIcon sx={{ minWidth: 33 }}>
-                <Icon name={icon} />
-              </ListItemIcon>
-              <ListItemText
-                primary={label}
-                primaryTypographyProps={{ fontSize: 13 }}
-              />
+              <Icon name={icon} />
+              <span>{label}</span>
               {path === "/users" && (
-                <Typography variant="caption" color="text.secondary">
-                  {snapshot?.users.length}
-                </Typography>
+                <small>{snapshot?.users.length ?? 0}</small>
               )}
-            </ListItemButton>
-          </Box>
+            </Link>
+          </div>
         ))}
-      </List>
-      <Box className="sidebar-bottom">
-        <Paper variant="outlined" className="connection-card">
-          <Icon
-            name={error ? "warning" : "check"}
-            color={error ? "warning" : "primary"}
-          />
-          <Box>
-            <Typography variant="body2">
-              {error
-                ? "状态读取失败"
-                : snapshot?.role === "slave"
-                  ? "从机已连接"
-                  : "主控已连接"}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              管理服务
-            </Typography>
-          </Box>
-        </Paper>
-        <Typography
-          className="version"
-          variant="caption"
-          color="text.secondary"
-        >
-          sbmgr {snapshot?.version || ""}
-        </Typography>
-      </Box>
-    </Box>
+      </nav>
+      <div className="sidebar-bottom">
+        <div className="sidebar-state">
+          <span className={cn("state-dot", error && "state-error")} />
+          <span>
+            {error
+              ? "状态读取失败"
+              : snapshot?.role === "slave"
+                ? "从机已连接"
+                : "管理服务已连接"}
+          </span>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="account-button" aria-label="管理员菜单">
+              <span className="avatar">
+                {(session?.username || "AD").slice(0, 2).toUpperCase()}
+              </span>
+              <span className="account-copy">
+                <strong>{session?.username || "管理员"}</strong>
+                <small>
+                  {snapshot?.role === "slave" ? "从机" : "管理工作空间"} ·{" "}
+                  {snapshot?.version}
+                </small>
+              </span>
+              <Icon name="expand" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="top" align="start" className="w-52">
+            <DropdownMenuLabel>管理会话</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link to="/account">
+                <Icon name="shield" />
+                修改用户名与密码
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void logout()}>
+              <Icon name="logout" />
+              退出登录
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </>
   );
   return (
-    <Box className="app-shell">
-      <Drawer
-        variant={mobile ? "temporary" : "permanent"}
-        open={mobile ? drawer : true}
-        onClose={() => setDrawer(false)}
-        PaperProps={{ component: "aside", className: "sidebar-paper" }}
+    <div className={cn("app-shell", collapsed && "sidebar-collapsed")}>
+      <a
+        href="#content"
+        onClick={(event) => {
+          event.preventDefault();
+          document.getElementById("content")?.focus();
+        }}
+        className="skip-link"
       >
-        {sidebar}
-      </Drawer>
-      <Box className="workspace">
-        <Stack
-          component="header"
-          className="topbar"
-          direction="row"
-          alignItems="center"
-          gap={1.5}
+        跳到主要内容
+      </a>
+      <aside className="desktop-sidebar">{sidebar}</aside>
+      <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
+        <DialogContent
+          className="mobile-sidebar"
+          placement="left"
+          showCloseButton={false}
         >
-          {mobile && (
-            <IconButton
-              aria-label="展开导航"
-              aria-expanded={drawer}
-              onClick={() => setDrawer(true)}
-            >
-              <Icon name="menu" />
-            </IconButton>
-          )}
-          <Paper variant="outlined" className="path-bar">
-            <Breadcrumbs separator={<Icon name="next" sx={{ fontSize: 15 }} />}>
-              <Stack
-                direction="row"
-                alignItems="center"
-                gap={1}
-                className="path-root"
-              >
-                <Icon name="home" color="action" />
-                <Typography variant="body2" color="text.secondary">
-                  工作空间
-                </Typography>
-              </Stack>
-              <Typography variant="body2" noWrap>
-                {title}
-              </Typography>
-            </Breadcrumbs>
-          </Paper>
-          <Stack direction="row" alignItems="center" gap={0.7} flexShrink={0}>
+          <DialogTitle className="sr-only">导航</DialogTitle>
+          <DialogDescription className="sr-only">
+            工作空间导航与管理员操作
+          </DialogDescription>
+          {sidebar}
+        </DialogContent>
+      </Dialog>
+      <div className="workspace">
+        <header className="topbar">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="desktop-toggle"
+            aria-label={collapsed ? "展开导航" : "折叠导航"}
+            aria-expanded={!collapsed}
+            onClick={() => setCollapsed((v) => !v)}
+          >
+            <Icon name="menu" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="mobile-toggle"
+            aria-label="展开导航"
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen(true)}
+          >
+            <Icon name="menu" />
+          </Button>
+          <span className="topbar-divider" />
+          <Button
+            variant="outline"
+            className="search-trigger"
+            aria-label="搜索页面与用户"
+            onClick={() => setSearchOpen(true)}
+          >
+            <Icon name="search" />
+            <span>搜索页面、用户…</span>
+            <kbd>Ctrl K</kbd>
+          </Button>
+          <div className="ml-auto flex items-center gap-1 sm:gap-2">
             {(snapshot?.pending || snapshot?.mesh_pending) && (
-              <Badge kind="warning">待应用</Badge>
-            )}
-            <Tooltip title="刷新状态">
-              <span>
-                <IconButton
-                  aria-label="刷新状态"
-                  disabled={loading}
-                  onClick={() => {
-                    void dispatch(refreshSnapshot());
-                    if (!catalog.length) void dispatch(loadCatalog());
-                  }}
-                >
-                  <Icon name="refresh" />
-                </IconButton>
+              <span className="pending-indicator">
+                <Badge kind="warning">待应用</Badge>
               </span>
-            </Tooltip>
-            <ActionButton id="config.apply" variant="contained" />
-            <Divider
-              orientation="vertical"
-              flexItem
-              className="top-divider"
-              sx={{ mx: 0.5, my: 1 }}
-            />
-            <Tooltip title="退出登录">
-              <IconButton aria-label="退出登录" onClick={() => void logout()}>
-                <Icon name="logout" />
-              </IconButton>
-            </Tooltip>
-          </Stack>
-        </Stack>
-        <Paper component="main" variant="outlined" className="main-panel">
-          {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
-            </Alert>
-          )}
-          {job && (
-            <Alert
-              severity={
-                job.status === "failed"
-                  ? "error"
-                  : job.status === "success"
-                    ? "success"
-                    : "info"
-              }
-              sx={{ mb: 3 }}
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="刷新状态"
+              title="刷新状态"
+              disabled={loading}
+              onClick={() => {
+                void dispatch(refreshSnapshot());
+                if (!catalog.length) void dispatch(loadCatalog());
+              }}
             >
+              <Icon name="refresh" className={loading ? "animate-spin" : ""} />
+            </Button>
+            <ThemeMenu />
+            {snapshot?.pending && (
+              <ActionButton id="config.apply" size="sm" variant="default" />
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="退出登录"
+              title="退出登录"
+              onClick={() => void logout()}
+            >
+              <Icon name="logout" />
+            </Button>
+          </div>
+        </header>
+        <main id="content" tabIndex={-1} className="main-content">
+          {error && <Alert kind="error">{error}</Alert>}
+          {job && job.status !== "success" && (
+            <Alert kind={job.status === "failed" ? "error" : "info"}>
               <strong>{job.title}</strong> · {job.message || "正在执行…"}
-              {job.status === "running" && <LinearProgress sx={{ mt: 1 }} />}
             </Alert>
           )}
           {snapshot?.role === "slave" && (
-            <Alert severity="info" sx={{ mb: 3 }}>
-              当前是从机。用户、设备与节点授权请在主机管理。
-            </Alert>
+            <Alert>当前是从机。用户、设备与节点授权请在主机管理。</Alert>
           )}
           {!snapshot ? (
-            <Stack alignItems="center" py={10} gap={2}>
-              <CircularProgress size={25} />
-              <Typography color="text.secondary">正在读取管理状态…</Typography>
-            </Stack>
+            <div className="loading-shell">
+              <Icon name="loading" className="animate-spin" />
+              正在读取管理状态…
+            </div>
           ) : (
             <Routes>
               <Route path="/overview" element={<Overview />} />
@@ -416,43 +568,39 @@ export function App() {
               <Route path="/routes" element={<RoutesPage />} />
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/ops" element={<Operations />} />
+              <Route path="/account" element={<Account />} />
               <Route path="*" element={<Navigate to="/overview" replace />} />
             </Routes>
           )}
-        </Paper>
-        <Stack
-          component="footer"
-          direction="row"
-          justifyContent="space-between"
-          className="footer"
-        >
-          <Typography variant="caption">sbmgr 控制台</Typography>
-          <Typography variant="caption">
+        </main>
+        <footer className="app-footer">
+          <span>sbmgr 控制台</span>
+          <span>
             {snapshot
               ? `更新于 ${new Date(snapshot.time).toLocaleTimeString("zh-CN")}`
               : ""}
-          </Typography>
-        </Stack>
-      </Box>
+          </span>
+        </footer>
+      </div>
+      <NavigationSearch open={searchOpen} onOpenChange={setSearchOpen} />
       <ActionDialog />
-      <Snackbar
-        open={Boolean(notice)}
-        autoHideDuration={6500}
-        onClose={(_, reason) => {
-          if (reason !== "clickaway") dispatch(clearNotice());
-        }}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        {notice ? (
-          <Alert
-            severity={notice.severity}
-            variant="filled"
-            onClose={() => dispatch(clearNotice())}
-          >
-            {notice.message}
+      {notice && (
+        <div className="toast">
+          <Alert kind={notice.severity}>
+            <div className="flex items-center gap-4">
+              <span>{notice.message}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="关闭通知"
+                onClick={() => dispatch(clearNotice())}
+              >
+                <Icon name="close" />
+              </Button>
+            </div>
           </Alert>
-        ) : undefined}
-      </Snackbar>
-    </Box>
+        </div>
+      )}
+    </div>
   );
 }

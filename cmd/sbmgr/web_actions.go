@@ -77,6 +77,7 @@ func webActions() []webAction {
 		add("user."+op.id, op.title, "user", "user "+op.id, saved, op.danger, []string{"user"}, user)
 	}
 	add("node.add", "分配节点", "user", "node add", saved, false, []string{"user"}, user, device, f("name", "节点显示名称", "text", true), source("outbound", "线路", "outbounds", false), up, down)
+	add("node.assign", "分配线路", "user", "", "线路授权已保存，订阅已更新；应用配置使运行中的入口授权生效。已有节点的名称、身份、限速与用量保持不变。", false, nil, user, device, f("selection", "线路选择", "text", true), f("expected", "原授权版本", "text", true))
 	add("node.set", "名称与节点限速", "node", "node set", saved, false, []string{"user", "node"}, user, node, device, f("name", "新的显示名称（留空保留）", "text", false), up, down)
 	add("node.delete", "撤销节点", "node", "node delete", saved, true, []string{"user", "node"}, user, node, device)
 	add("device.add", "新增设备", "user", "device add", saved, false, []string{"user"}, user, f("name", "设备名称", "text", true), source("from", "复制节点自设备", "devices", false))
@@ -106,6 +107,7 @@ func webActions() []webAction {
 	add("mesh.init", "初始化主从管理", "routes", "mesh init", meshSaved, false, nil, f("id", "本机标识", "text", true), f("cluster", "集群标识", "text", true))
 	add("mesh.add", "登记从机", "routes", "mesh add", meshSaved, false, nil, f("id", "从机标识", "text", true), f("host", "SSH 地址", "text", true), f("port", "SSH 端口（默认 22）", "number", false), f("user", "SSH 用户（默认 root）", "text", false), f("key", "主机上的专用私钥路径", "text", true), f("home", "从机应用目录", "text", true))
 	add("mesh.route", "编排线路", "routes", "mesh route", meshSaved, false, nil, f("id", "线路标识（相同标识更新）", "text", true), source("entry", "客户端入口", "members", true), f("hops", "经过的成员标识（逗号分隔；本机落地填入口标识）", "text", true), f("exit", "末跳出站 tag（留空直接出站）", "text", false), selectField("protocols", "跨机传输协议", "hysteria2", "socks", "wireguard"))
+	add("mesh.wire", "保存线路连线", "routes", "", meshSaved, false, nil, f("id", "线路标识", "text", true), source("entry", "客户端入口", "members", true), f("exit", "落地", "text", false), f("revision", "原拓扑版本", "number", true), f("replace", "更新已有线路", "checkbox", false))
 	add("mesh.remove-route", "删除线路", "route", "mesh remove-route", meshSaved, true, nil, f("id", "线路标识", "text", true))
 	add("mesh.remove", "移除从机", "member", "mesh remove", meshSaved, true, nil, f("id", "从机标识", "text", true))
 	add("subscription.set", "订阅服务设置", "subscriptions", "subscription set", "设置已保存；监听与证书变化需要重启 sbmgr 服务。", false, nil, selectField("enabled", "启用订阅", "true", "false"), f("listen", "监听 host:port", "text", false), f("base-url", "公开 HTTPS 基础地址", "text", false), f("tls-cert", "证书绝对路径", "text", false), f("tls-key", "私钥绝对路径", "text", false))
@@ -231,6 +233,12 @@ func (a *app) executeWebActionLocked(input webActionInput, args []string) error 
 	}
 	if webSlaveMutation(s, input.Action) {
 		return errors.New("从机用户授权由主机统一管理")
+	}
+	if input.Action == "node.assign" {
+		return a.webAssignRoutes(input)
+	}
+	if input.Action == "mesh.wire" {
+		return a.webWireRoute(input)
 	}
 	if input.Action == "proxy.add" || input.Action == "proxy.replace" {
 		kind, err := parseProxyAdminKind(input.Fields["kind"])

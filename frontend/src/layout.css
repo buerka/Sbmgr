@@ -1,0 +1,250 @@
+.app-shell {
+  --sidebar-width: 256px;
+  min-height: 100dvh;
+}
+.desktop-sidebar {
+  width: var(--sidebar-width);
+  position: fixed;
+  inset: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: var(--sidebar);
+  z-index: 30;
+  transition: width 0.18s ease;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 4px 8px;
+  margin-bottom: 24px;
+  white-space: nowrap;
+}
+.brand-icon {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.brand strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+.brand small {
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.nav-group-label {
+  padding: 0 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 8px;
+  margin: 2px 0;
+  border-radius: 6px;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.nav-item:hover,
+.nav-item.active {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.nav-item.active {
+  font-weight: 500;
+}
+.nav-item small {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.sidebar-bottom {
+  margin-top: auto;
+  padding-top: 28px;
+}
+.sidebar-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  flex-shrink: 0;
+}
+.state-error {
+  background: var(--destructive);
+}
+.account-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  text-align: left;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 6px;
+}
+.account-button:hover {
+  background: var(--accent);
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--muted);
+  font-size: 12px;
+}
+.account-copy {
+  flex: 1;
+  min-width: 0;
+}
+.account-copy strong,
+.account-copy small {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.account-copy strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.account-copy small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+.workspace {
+  margin-left: var(--sidebar-width);
+  min-width: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  transition: margin-left 0.18s ease;
+}
+.topbar {
+  height: 80px;
+  flex-shrink: 0;
+  padding: 16px 32px 16px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--background);
+}
+.topbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 8px;
+}
+.search-trigger {
+  height: 32px;
+  width: 256px;
+  justify-content: flex-start;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+kbd {
+  display: inline-flex;
+  align-items: center;
+  font-family: inherit;
+  line-height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--muted);
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.search-trigger kbd {
+  margin-left: auto;
+}
+.main-content {
+  padding: 16px 32px 32px 16px;
+  flex: 1;
+  min-width: 0;
+}
+.main-content > .alert {
+  margin-bottom: 20px;
+}
+.page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.page-heading > div:first-child {
+  min-width: 0;
+}
+.app-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  padding: 16px 32px 20px 16px;
+}
+.mobile-toggle {
+  display: none;
+}
+.sidebar-collapsed {
+  --sidebar-width: 68px;
+}
+.sidebar-collapsed .desktop-sidebar {
+  padding: 16px 10px;
+}
+.sidebar-collapsed .desktop-sidebar .brand {
+  padding: 4px 8px;
+}
+.sidebar-collapsed .desktop-sidebar .brand > span:not(.brand-icon),
+.sidebar-collapsed .desktop-sidebar .brand > svg,
+.sidebar-collapsed .desktop-sidebar .nav-item span,
+.sidebar-collapsed .desktop-sidebar .nav-item small,
+.sidebar-collapsed .desktop-sidebar .nav-group-label,
+.sidebar-collapsed .desktop-sidebar .sidebar-state,
+.sidebar-collapsed .desktop-sidebar .account-copy,
+.sidebar-collapsed .desktop-sidebar .account-button > svg {
+  display: none;
+}
+.sidebar-collapsed .desktop-sidebar .nav-item {
+  justify-content: center;
+  height: 40px;
+}
+.skip-link {
+  position: fixed;
+  top: -100px;
+  left: 20px;
+  z-index: 100;
+  padding: 10px 16px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: 6px;
+}
+.skip-link:focus {
+  top: 10px;
+}

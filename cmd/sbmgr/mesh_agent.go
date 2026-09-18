@@ -27,6 +27,7 @@ type meshResponse struct {
 	Transaction string      `json:"transaction,omitempty"`
 	Error       string      `json:"error,omitempty"`
 	Usage       []meshUsage `json:"usage,omitempty"`
+	Exits       []webExit   `json:"exits,omitempty"`
 }
 
 func decodeMeshJSON(reader io.Reader, target any) error {
@@ -90,9 +91,13 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 		if r.Access != nil {
 			return errors.New("此操作不接受入口授权")
 		}
-		if r.Operation == "status" {
+		if r.Operation == "status" || r.Operation == "inventory" {
 			if r.Plan != nil || r.Transaction != "" {
 				return errors.New("状态请求含无效参数")
+			}
+			if r.Operation == "inventory" {
+				response.Exits, err = webLocalExits(s)
+				return err
 			}
 			return nil
 		}

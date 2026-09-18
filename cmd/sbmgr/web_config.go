@@ -23,6 +23,7 @@ type webConfig struct {
 	Version      int    `json:"version"`
 	Listen       string `json:"listen"`
 	Origin       string `json:"origin"`
+	BasePath     string `json:"base_path,omitempty"`
 	Username     string `json:"username"`
 	Salt         string `json:"salt"`
 	PasswordHash string `json:"password_hash"`
@@ -35,6 +36,9 @@ func webConfigPath(statePath string) string {
 }
 
 func validateWebConfig(c webConfig) error {
+	if err := validateWebBasePath(c.BasePath); err != nil {
+		return err
+	}
 	host, _, err := net.SplitHostPort(c.Listen)
 	if err != nil {
 		return errors.New("Web 监听地址必须是 host:port")
@@ -59,6 +63,23 @@ func validateWebConfig(c webConfig) error {
 	hash, e2 := hex.DecodeString(c.PasswordHash)
 	if e1 != nil || e2 != nil || len(salt) != 32 || len(hash) != 32 {
 		return errors.New("无效的 Web 密码摘要")
+	}
+	return nil
+}
+
+// Keep a single unambiguous URL segment; no escapes, separators or dot segments.
+// An empty path preserves existing installations at the origin root.
+func validateWebBasePath(base string) error {
+	if base == "" {
+		return nil
+	}
+	if len(base) < 2 || len(base) > 129 || base[0] != '/' {
+		return errors.New("Web 路径须为 / 加 1–128 位英文字母、数字、下划线或连字符")
+	}
+	for _, ch := range base[1:] {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+			return errors.New("Web 路径须为单层路径，只含英文字母、数字、下划线或连字符")
+		}
 	}
 	return nil
 }
@@ -104,6 +125,7 @@ func (a *app) webCmd(args []string) error {
 	fs := a.newFlagSet("web configure")
 	listen := fs.String("listen", "127.0.0.1:9090", "Web 监听地址")
 	origin := fs.String("origin", "", "浏览器访问来源；默认按监听地址生成")
+	basePath := fs.String("base-path", "", "页面与 API 的统一路径前缀；默认根路径，修改后需重启")
 	username := fs.String("username", "admin", "管理员账号")
 	passwordFile := fs.String("password-file", "", "从文件读取密码，不在参数或日志中传入密码")
 	passwordStdin := fs.Bool("password-stdin", false, "从标准输入读取密码，适合自动化")
@@ -137,7 +159,7 @@ func (a *app) webCmd(args []string) error {
 	if _, err := rand.Read(salt); err != nil {
 		return err
 	}
-	c := webConfig{Version: 1, Listen: *listen, Origin: strings.TrimSuffix(*origin, "/"), Username: strings.TrimSpace(*username), Salt: hex.EncodeToString(salt), TLSCert: *cert, TLSKey: *key}
+	c := webConfig{Version: 1, Listen: *listen, Origin: strings.TrimSuffix(*origin, "/"), BasePath: strings.TrimSuffix(*basePath, "/"), Username: strings.TrimSpace(*username), Salt: hex.EncodeToString(salt), TLSCert: *cert, TLSKey: *key}
 	if c.Origin == "" {
 		scheme := "http"
 		if c.TLSCert != "" {

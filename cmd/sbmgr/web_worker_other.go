@@ -19,7 +19,7 @@ func launchWebProcess(ctx context.Context, c webConfig, lookup webLookup) (*subs
 	if err != nil {
 		return nil, err
 	}
-	server := newWebHTTPServer(ln.Addr().String(), c.Origin, lookup)
+	server := newWebHTTPServer(ln.Addr().String(), c.Origin, c.BasePath, lookup)
 	workerCtx, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { <-workerCtx.Done(); _ = server.Close() }()

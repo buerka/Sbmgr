@@ -114,7 +114,7 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 	if ctx.Err() != nil {
 		return webError(503, "请求已取消")
 	}
-	if len(q.Body) > webMaxRequest || len(q.Path) > 256 || len(q.Session) > 64 || len(q.CSRF) > 64 || len(q.Remote) > 128 {
+	if len(q.Body) > webMaxRequest || len(q.Path) > 512 || len(q.Session) > 64 || len(q.CSRF) > 64 || len(q.Remote) > 128 {
 		return webError(400, "请求过大")
 	}
 	// Check at the privileged boundary too: the HTTP worker has no authority
@@ -123,12 +123,17 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 	if err != nil {
 		return webError(503, "管理设置不可用")
 	}
+	requestPath, ok := webRelativePath(q.Path, c.BasePath)
+	if !ok {
+		return webError(404, "接口不存在")
+	}
+	q.Path = requestPath
 	u, _ := url.Parse(c.Origin)
 	if q.Host != u.Host || (q.Method != "GET" && q.Origin != c.Origin) || (q.Origin != "" && q.Origin != c.Origin) {
 		return webError(403, "请求来源不匹配")
 	}
 	b.mu.Lock()
-	if c.PasswordHash != b.config.PasswordHash || c.Username != b.config.Username || c.Origin != b.config.Origin {
+	if c.PasswordHash != b.config.PasswordHash || c.Username != b.config.Username || c.Origin != b.config.Origin || c.BasePath != b.config.BasePath {
 		clear(b.sessions)
 	}
 	b.config = c
@@ -201,6 +206,10 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		r.Logout = true
 		return r
 	}
+	if q.Path == "/api/account" && q.Method == "POST" {
+		defer b.mu.Unlock()
+		return b.changeWebAccount(q, now)
+	}
 	if strings.HasPrefix(q.Path, "/api/jobs/") && q.Method == "GET" {
 		j, ok := b.jobs[strings.TrimPrefix(q.Path, "/api/jobs/")]
 		b.mu.Unlock()
@@ -219,6 +228,8 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		return webJSON(200, state)
 	case q.Path == "/api/catalog" && q.Method == "GET":
 		return webJSON(200, webActions())
+	case strings.HasPrefix(q.Path, "/api/route-inventory/") && q.Method == "GET":
+		return b.a.webRouteInventory(strings.TrimPrefix(q.Path, "/api/route-inventory/"))
 	case q.Path == "/api/actions" && q.Method == "POST":
 		var input webActionInput
 		if err := webDecode(q.Body, &input); err != nil {
@@ -266,15 +277,35 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 	}
 }
 
-func newWebHTTPServer(address, origin string, lookup webLookup) *http.Server {
-	assets, _ := fs.Sub(webAssets, "web/dist")
-	return newWebHTTPServerWithAssets(address, origin, lookup, assets)
+func webRelativePath(requestPath, basePath string) (string, bool) {
+	if !strings.HasPrefix(requestPath, basePath+"/") || strings.Contains(requestPath, "\\") || strings.Contains(requestPath, "//") || (requestPath != basePath+"/" && path.Clean(requestPath) != requestPath) {
+		return "", false
+	}
+	return strings.TrimPrefix(requestPath, basePath), true
 }
 
-func newWebHTTPServerWithAssets(address, origin string, lookup webLookup, assets fs.FS) *http.Server {
+func newWebHTTPServer(address, origin, basePath string, lookup webLookup) *http.Server {
+	assets, _ := fs.Sub(webAssets, "web/dist")
+	return newWebHTTPServerWithAssets(address, origin, basePath, lookup, assets)
+}
+
+func newWebHTTPServerWithAssets(address, origin, basePath string, lookup webLookup, assets fs.FS) *http.Server {
 	secure := strings.HasPrefix(origin, "https://")
 	slots := make(chan struct{}, 16)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+		requestPath, ok := webRelativePath(r.URL.Path, basePath)
+		// Reject alternate encodings rather than turning the path into an alias.
+		if !ok || r.URL.EscapedPath() != r.URL.Path {
+			if basePath != "" && r.URL.Path == basePath && r.URL.EscapedPath() == basePath && (r.Method == "GET" || r.Method == "HEAD") {
+				http.Redirect(w, r, basePath+"/", http.StatusPermanentRedirect)
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
 		select {
 		case slots <- struct{}{}:
 			defer func() { <-slots }()
@@ -292,7 +323,7 @@ func newWebHTTPServerWithAssets(address, origin string, lookup webLookup, assets
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-"+nonce+"'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		if strings.HasPrefix(requestPath, "/api/") {
 			if r.Method != "GET" && r.Method != "POST" {
 				w.WriteHeader(405)
 				return
@@ -313,10 +344,10 @@ func newWebHTTPServerWithAssets(address, origin string, lookup webLookup, assets
 			q := webRequest{Method: r.Method, Path: r.URL.Path, Origin: r.Header.Get("Origin"), Host: r.Host, Remote: subscriptionClientIP(r), Session: session, CSRF: r.Header.Get("X-CSRF-Token"), Body: body}
 			response := lookup(r.Context(), q)
 			if response.SetSession != "" {
-				http.SetCookie(w, &http.Cookie{Name: webCookie, Value: response.SetSession, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
+				http.SetCookie(w, &http.Cookie{Name: webCookie, Value: response.SetSession, Path: basePath + "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
 			}
 			if response.Logout {
-				http.SetCookie(w, &http.Cookie{Name: webCookie, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: -1})
+				http.SetCookie(w, &http.Cookie{Name: webCookie, Path: basePath + "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 			}
 			w.Header().Set("Content-Type", response.Type)
 			if response.Filename != "" {
@@ -331,10 +362,10 @@ func newWebHTTPServerWithAssets(address, origin string, lookup webLookup, assets
 			return
 		}
 		file, mime := "", ""
-		if r.URL.Path == "/" {
+		if requestPath == "/" {
 			file, mime = "index.html", "text/html; charset=utf-8"
-		} else if strings.HasPrefix(r.URL.Path, "/assets/") && path.Clean(r.URL.Path) == r.URL.Path {
-			file = strings.TrimPrefix(r.URL.Path, "/")
+		} else if strings.HasPrefix(requestPath, "/assets/") {
+			file = strings.TrimPrefix(requestPath, "/")
 			if !fs.ValidPath(file) || strings.Contains(file, "\\") {
 				http.NotFound(w, r)
 				return

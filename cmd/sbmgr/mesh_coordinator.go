@@ -23,7 +23,11 @@ var meshExchange = func(a *app, member mesh.Member, r meshRequest, local bool) (
 		return meshResponse{}, errors.New("从机连接设置无效")
 	}
 	command := "SBMGR_HOME=" + posixShellQuote(member.AppDir) + " " + posixShellQuote(member.AppDir+"/sbmgr") + " admin mesh rpc"
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	timeout := 45 * time.Second
+	if r.Operation == "inventory" {
+		timeout = 8 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	raw, err := json.Marshal(r)
 	if err != nil {

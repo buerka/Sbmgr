@@ -1,4 +1,3 @@
-import { Box, Button, Divider, Stack, Typography } from "@mui/material";
 import { Link } from "react-router-dom";
 import {
   ActionButton,
@@ -9,6 +8,7 @@ import {
   Panel,
   UserTable,
 } from "../components/common";
+import { Button } from "../components/ui/button";
 import { Icon } from "../components/Icons";
 import { bytes, rate } from "../format";
 import { useAppSelector } from "../store";
@@ -24,9 +24,9 @@ export function Overview() {
       <PageHeader
         title="运行总览"
         description="查看当前用量、用户状态与管理任务。"
-        actions={<ActionButton id="user.add" variant="contained" />}
+        actions={<ActionButton id="user.add" variant="default" />}
       />
-      <Box className="metrics">
+      <div className="metrics">
         <Metric
           label="已启用用户"
           value={enabled}
@@ -50,76 +50,75 @@ export function Overview() {
           caption={`${s.routes.length} 条主从线路`}
           icon="routes"
         />
-      </Box>
+      </div>
       <Panel
         title="用户概览"
         description="当前的管理对象"
         actions={
-          <Button component={Link} to="/users" endIcon={<Icon name="next" />}>
-            全部用户
+          <Button asChild variant="ghost" size="sm">
+            <Link to="/users">
+              全部用户
+              <Icon name="next" />
+            </Link>
           </Button>
         }
       >
         <UserTable users={s.users.slice(0, 5)} />
       </Panel>
-      <Box className="two-columns">
+      <div className="two-columns">
         <Panel title="服务器" description="主机统一管理，各入口独立转发">
-          <Box px={2.5}>
+          <div className="px-6">
             {s.members.length ? (
               s.members.map((m) => (
-                <Stack
-                  key={m.id}
-                  className="row-item"
-                  direction="row"
-                  justifyContent="space-between"
-                  alignItems="center"
-                >
-                  <Box>
-                    <Typography variant="body2">{m.id}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {m.client?.server || m.host || "本机"}
-                    </Typography>
-                  </Box>
+                <div key={m.id} className="row-item">
+                  <div className="flex items-center gap-3">
+                    <span className="surface-icon">
+                      <Icon name="server" />
+                    </span>
+                    <div>
+                      <p className="font-medium text-sm">{m.id}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {m.client?.server || m.host || "本机"}
+                      </p>
+                    </div>
+                  </div>
                   <Badge kind={m.master ? "success" : "default"}>
                     {m.master ? "主机" : "从机"}
                   </Badge>
-                </Stack>
+                </div>
               ))
             ) : (
-              <Stack
-                className="row-item"
-                direction="row"
-                justifyContent="space-between"
-              >
-                <Box>
-                  <Typography variant="body2">本机</Typography>
-                  <Typography variant="caption" color="text.secondary">
+              <div className="row-item">
+                <div>
+                  <p className="text-sm font-medium">本机</p>
+                  <p className="text-xs text-muted-foreground mt-1">
                     独立管理模式
-                  </Typography>
-                </Box>
-                <Badge>本地</Badge>
-              </Stack>
+                  </p>
+                </div>
+                <Badge kind="default">本地</Badge>
+              </div>
             )}
-          </Box>
+          </div>
         </Panel>
         <Panel title="近期告警" description="异常状态与配额提示">
           {s.alerts?.length ? (
-            <Box px={2.5}>
+            <div className="px-6">
               {s.alerts
                 .slice(-4)
                 .reverse()
                 .map((a, i) => (
-                  <Box key={i} py={1.7}>
-                    <Typography variant="body2">
-                      {a.user || "系统"} · {a.kind}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {a.message}
-                    </Typography>
-                    {i < 3 && <Divider sx={{ mt: 1.5 }} />}
-                  </Box>
+                  <div className="row-item" key={i}>
+                    <div>
+                      <p className="text-sm font-medium">
+                        {a.user || "系统"} · {a.kind}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {a.message}
+                      </p>
+                    </div>
+                  </div>
                 ))}
-            </Box>
+            </div>
           ) : (
             <Empty
               title="暂无告警"
@@ -128,7 +127,7 @@ export function Overview() {
             />
           )}
         </Panel>
-      </Box>
+      </div>
     </>
   );
 }

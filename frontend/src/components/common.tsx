@@ -1,34 +1,33 @@
-import { useId, useState, type ReactNode } from "react";
+import { Fragment, useRef, type ComponentProps, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { Icon, type IconName } from "./Icons";
+import { Button } from "./ui/button";
 import {
-  Box,
-  Button,
-  Chip,
-  Divider,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
-  Paper,
-  Stack,
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "./ui/dropdown-menu";
+import {
   Table,
   TableBody,
   TableCell,
-  TableContainer,
   TableHead,
+  TableHeader,
   TableRow,
-  Typography,
-  type ButtonProps,
-} from "@mui/material";
-import { Link } from "react-router-dom";
-import { Icon, type IconName } from "./Icons";
+} from "./ui/table";
+import { Progress } from "./ui/feedback";
 import { openAction, useAppDispatch, useAppSelector } from "../store";
 import { bytes, rate } from "../format";
+import { cn } from "../lib/utils";
 import type { Context, User } from "../types";
-
+import { rememberActionTrigger } from "./actionFocus";
 const actionIcons: Record<string, IconName> = {
   "user.add": "add",
   "device.add": "add",
   "node.add": "add",
+  "node.assign": "routes",
   "mesh.add": "add",
   "mesh.route": "routes",
   "proxy.add": "add",
@@ -45,19 +44,31 @@ export function ActionButton({
   id,
   context = {},
   children,
+  variant = "outline",
   ...props
-}: Omit<ButtonProps, "id"> & { id: string; context?: Context }) {
+}: Omit<ComponentProps<typeof Button>, "id"> & {
+  id: string;
+  context?: Context;
+}) {
   const dispatch = useAppDispatch();
-  const { catalog, job } = useAppSelector((s) => s.admin);
+  const { catalog, job, snapshot } = useAppSelector((s) => s.admin);
   const action = catalog.find((a) => a.id === id);
   return (
     <Button
-      variant="outlined"
-      disabled={!action || job?.status === "running"}
-      startIcon={actionIcons[id] ? <Icon name={actionIcons[id]} /> : undefined}
-      onClick={() => dispatch(openAction({ id, context }))}
+      variant={variant}
       {...props}
+      disabled={
+        props.disabled ||
+        !action ||
+        job?.status === "running" ||
+        (snapshot?.role === "slave" && /^(user|device|node)\./.test(id))
+      }
+      onClick={(event) => {
+        rememberActionTrigger(event.currentTarget);
+        dispatch(openAction({ id, context }));
+      }}
     >
+      {actionIcons[id] && <Icon name={actionIcons[id]} />}{" "}
       {children || action?.title || id}
     </Button>
   );
@@ -72,67 +83,81 @@ export function ActionMenu({
   label = "更多操作",
   items,
   icon = "more",
+  compact = false,
 }: {
   label?: string;
   items: MenuAction[];
   icon?: IconName;
+  compact?: boolean;
 }) {
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null),
-    id = useId();
   const dispatch = useAppDispatch(),
-    { catalog, job } = useAppSelector((s) => s.admin);
+    { catalog, job, snapshot } = useAppSelector((s) => s.admin);
+  const openingDialog = useRef(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
-    <>
-      <Button
-        variant="outlined"
-        color="inherit"
-        startIcon={<Icon name={icon} />}
-        endIcon={<Icon name="chevron" />}
-        aria-haspopup="menu"
-        aria-controls={anchor ? id : undefined}
-        aria-expanded={Boolean(anchor)}
-        onClick={(e) => setAnchor(e.currentTarget)}
-      >
-        {label}
-      </Button>
-      <Menu
-        id={id}
-        anchorEl={anchor}
-        open={Boolean(anchor)}
-        onClose={() => setAnchor(null)}
-        MenuListProps={{ "aria-label": label }}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant={compact ? "ghost" : "outline"}
+          size={compact ? "icon" : "default"}
+          className={compact ? "h-8 w-8" : undefined}
+          ref={trigger}
+          aria-label={label}
+        >
+          <Icon name={icon} />
+          {!compact && (
+            <>
+              {label}
+              <Icon name="chevron" />
+            </>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        aria-label={label}
+        align="end"
+        className="min-w-48"
+        onCloseAutoFocus={(e) => {
+          if (openingDialog.current) {
+            e.preventDefault();
+            openingDialog.current = false;
+          }
+        }}
       >
         {items.map((item) => {
           const action = catalog.find((a) => a.id === item.id);
           return (
-            <MenuItem
-              key={item.id}
-              disabled={!action || job?.status === "running"}
-              divider={item.divider}
-              sx={action?.danger ? { color: "error.main" } : undefined}
-              onClick={() => {
-                setAnchor(null);
-                dispatch(
-                  openAction({ id: item.id, context: item.context || {} }),
-                );
-              }}
-            >
-              <ListItemIcon sx={{ color: "inherit" }}>
+            <Fragment key={item.id}>
+              <DropdownMenuItem
+                variant={action?.danger ? "destructive" : "default"}
+                disabled={
+                  !action ||
+                  job?.status === "running" ||
+                  (snapshot?.role === "slave" &&
+                    /^(user|device|node)\./.test(item.id))
+                }
+                onSelect={() => {
+                  openingDialog.current = true;
+                  rememberActionTrigger(trigger.current);
+                  dispatch(
+                    openAction({ id: item.id, context: item.context || {} }),
+                  );
+                }}
+              >
                 <Icon
                   name={
                     actionIcons[item.id] ||
                     (action?.danger ? "warning" : "settings")
                   }
                 />
-              </ListItemIcon>
-              <ListItemText>
                 {item.label || action?.title || item.id}
-              </ListItemText>
-            </MenuItem>
+              </DropdownMenuItem>
+              {item.divider && <DropdownMenuSeparator />}
+            </Fragment>
           );
         })}
-      </Menu>
-    </>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 export function PageHeader({
@@ -145,26 +170,17 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <Stack
-      className="page-heading"
-      direction={{ xs: "column", md: "row" }}
-      justifyContent="space-between"
-      gap={2}
-    >
-      <Box>
-        <Typography variant="h1">{title}</Typography>
+    <div className="page-heading">
+      <div>
+        <h1>{title}</h1>
         {description && (
-          <Typography variant="body2" color="text.secondary" mt={0.8}>
-            {description}
-          </Typography>
+          <p className="text-muted-foreground mt-1">{description}</p>
         )}
-      </Box>
+      </div>
       {actions && (
-        <Stack direction="row" gap={1} flexWrap="wrap" alignItems="flex-start">
-          {actions}
-        </Stack>
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
       )}
-    </Stack>
+    </div>
   );
 }
 export function Panel({
@@ -179,33 +195,18 @@ export function Panel({
   children: ReactNode;
 }) {
   return (
-    <Paper component="section" variant="outlined" className="panel">
-      <Stack
-        className="panel-heading"
-        direction="row"
-        justifyContent="space-between"
-        alignItems="center"
-        gap={2}
-        flexWrap="wrap"
-      >
-        <Box>
-          <Typography variant="h2">{title}</Typography>
+    <section className="panel">
+      <div className="panel-heading">
+        <div>
+          <h2>{title}</h2>
           {description && (
-            <Typography
-              variant="caption"
-              color="text.secondary"
-              display="block"
-              mt={0.5}
-            >
-              {description}
-            </Typography>
+            <p className="text-sm text-muted-foreground mt-1">{description}</p>
           )}
-        </Box>
-        {actions}
-      </Stack>
-      <Divider />
+        </div>
+        {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      </div>
       {children}
-    </Paper>
+    </section>
   );
 }
 export function Empty({
@@ -218,17 +219,15 @@ export function Empty({
   icon?: IconName;
 }) {
   return (
-    <Stack className="empty" alignItems="center" gap={0.8}>
-      <Icon name={icon} sx={{ fontSize: 30, color: "#9bafbf", mb: 0.5 }} />
-      <Typography variant="body2" color="text.secondary">
-        {title}
-      </Typography>
+    <div className="empty">
+      <div className="empty-icon">
+        <Icon name={icon} size={22} />
+      </div>
+      <p className="font-medium">{title}</p>
       {description && (
-        <Typography variant="caption" color="text.secondary">
-          {description}
-        </Typography>
+        <p className="text-sm text-muted-foreground max-w-sm">{description}</p>
       )}
-    </Stack>
+    </div>
   );
 }
 export function Metric({
@@ -243,18 +242,14 @@ export function Metric({
   icon?: IconName;
 }) {
   return (
-    <Paper variant="outlined" className="metric">
-      <Stack direction="row" justifyContent="space-between" gap={1}>
-        <Typography variant="body2" color="text.secondary">
-          {label}
-        </Typography>
-        <Icon name={icon} sx={{ color: "#7798b5" }} />
-      </Stack>
-      <Typography className="metric-value">{value}</Typography>
-      <Typography variant="caption" color="text.secondary">
-        {caption}
-      </Typography>
-    </Paper>
+    <section className="metric">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium">{label}</h2>
+        <Icon name={icon} className="text-muted-foreground" />
+      </div>
+      <p className="metric-value">{value}</p>
+      <p className="text-xs text-muted-foreground">{caption}</p>
+    </section>
   );
 }
 export function Badge({
@@ -265,131 +260,178 @@ export function Badge({
   kind?: "success" | "warning" | "default" | "error";
 }) {
   return (
-    <Chip
-      label={children}
-      color={kind}
-      variant="filled"
-      sx={
-        kind === "success"
-          ? { bgcolor: "#eaf5ef", color: "#2e7650" }
-          : kind === "warning"
-            ? { bgcolor: "#fff3df", color: "#91601b" }
-            : undefined
-      }
-    />
+    <span className={cn("status-badge", `status-${kind}`)}>{children}</span>
   );
 }
 export function DataTable({
   headings,
   children,
 }: {
-  headings: string[];
+  headings: ReactNode[];
   children: ReactNode;
 }) {
   return (
-    <TableContainer>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            {headings.map((h, i) => (
-              <TableCell key={i}>{h}</TableCell>
-            ))}
-          </TableRow>
-        </TableHead>
-        <TableBody>{children}</TableBody>
-      </Table>
-    </TableContainer>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          {headings.map((h, i) => (
+            <TableHead key={i}>{h}</TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>{children}</TableBody>
+    </Table>
   );
 }
-export function UserTable({ users }: { users: User[] }) {
-  if (!users.length)
-    return (
-      <Empty
-        title="没有符合条件的用户"
-        description="试试其他名称或状态，或创建第一个用户。"
-        icon="users"
-      />
-    );
+export const userColumns = {
+  status: "状态",
+  usage: "本期用量 / 配额",
+  speed: "实时速率",
+  devices: "设备 / 节点",
+  expires: "到期时间",
+};
+export type UserColumn = keyof typeof userColumns;
+export function UserTable({
+  users,
+  columns = Object.keys(userColumns) as UserColumn[],
+  sort,
+  onSort,
+}: {
+  users: User[];
+  columns?: UserColumn[];
+  sort?: "asc" | "desc";
+  onSort?: () => void;
+}) {
   return (
-    <DataTable
-      headings={[
-        "用户",
-        "状态",
-        "本期用量 / 配额",
-        "实时速率",
-        "设备 / 节点",
-        "到期时间",
-        "",
-      ]}
-    >
-      {users.map((u) => (
-        <TableRow key={u.name} hover>
-          <TableCell>
-            <Stack direction="row" gap={1.4} alignItems="center">
-              <Box className="user-avatar">
-                <Icon name="users" />
-              </Box>
-              <Box>
-                <Button
-                  component={Link}
-                  to={`/users/${encodeURIComponent(u.name)}`}
-                  className="user-link"
+    <div className="table-frame">
+      <DataTable
+        headings={[
+          onSort ? (
+            <button
+              className="sort-button"
+              onClick={onSort}
+              aria-label={`按用户名${sort === "asc" ? "降序" : "升序"}排列`}
+            >
+              用户
+              <Icon name={sort === "asc" ? "up" : "down"} />
+            </button>
+          ) : (
+            "用户"
+          ),
+          ...columns.map((c) => userColumns[c]),
+          <span className="sr-only">操作</span>,
+        ]}
+      >
+        {!users.length && (
+          <TableRow>
+            <TableCell colSpan={columns.length + 2}>
+              <Empty
+                title="没有符合条件的用户"
+                description="试试其他名称或状态，或创建第一个用户。"
+                icon="users"
+              />
+            </TableCell>
+          </TableRow>
+        )}
+        {users.map((u) => (
+          <TableRow key={u.name}>
+            <TableCell>
+              <Link
+                className="font-medium hover:underline underline-offset-4"
+                to={`/users/${encodeURIComponent(u.name)}`}
+              >
+                {u.name}
+              </Link>
+            </TableCell>
+            {columns.map((col) => (
+              <TableCell key={col}>
+                {col === "status" ? (
+                  <Badge
+                    kind={
+                      u.status === "已启用"
+                        ? "success"
+                        : u.status === "已禁用"
+                          ? "default"
+                          : "warning"
+                    }
+                  >
+                    {u.status}
+                  </Badge>
+                ) : col === "usage" ? (
+                  <div className="usage-cell">
+                    <div className="flex justify-between gap-4 text-xs">
+                      <span>{bytes(u.used)}</span>
+                      <span className="text-muted-foreground">
+                        {u.quota ? bytes(u.quota + u.extra_quota) : "不限"}
+                      </span>
+                    </div>
+                    <Progress
+                      label={`${u.name} 配额使用率`}
+                      value={
+                        u.quota ? (u.used / (u.quota + u.extra_quota)) * 100 : 0
+                      }
+                    />
+                  </div>
+                ) : col === "speed" ? (
+                  <div className="flex items-center gap-3 tabular-nums">
+                    <span className="inline-flex items-center gap-1">
+                      <Icon
+                        name="down"
+                        size={12}
+                        className="text-muted-foreground"
+                      />
+                      {rate(u.current_down)}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      <Icon name="up" size={12} />
+                      {rate(u.current_up)}
+                    </span>
+                  </div>
+                ) : col === "devices" ? (
+                  <span className="text-muted-foreground">
+                    {u.devices.length} 台 / {u.nodes.length} 个
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {u.expires || "长期有效"}
+                  </span>
+                )}
+              </TableCell>
+            ))}
+            <TableCell className="w-10">
+              <div className="flex items-center gap-1">
+                <ActionButton
+                  id="node.assign"
+                  context={{ user: u.name }}
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`分配线路：${u.name}`}
                 >
-                  {u.name}
-                </Button>
-                <Typography component="span" className="cell-caption">
-                  {{
-                    total: "双向计费",
-                    upload: "上传计费",
-                    download: "下载计费",
-                  }[u.quota_mode] || "双向计费"}
-                </Typography>
-              </Box>
-            </Stack>
-          </TableCell>
-          <TableCell>
-            <Badge
-              kind={
-                u.status === "已启用"
-                  ? "success"
-                  : u.status === "已禁用"
-                    ? "default"
-                    : "warning"
-              }
-            >
-              {u.status}
-            </Badge>
-          </TableCell>
-          <TableCell>
-            {bytes(u.used)}{" "}
-            <Box component="span" color="text.secondary">
-              / {u.quota ? bytes(u.quota + u.extra_quota) : "不限"}
-            </Box>
-            <Typography component="span" className="cell-caption">
-              上传 {bytes(u.upload)} · 下载 {bytes(u.download)}
-            </Typography>
-          </TableCell>
-          <TableCell>
-            {rate(u.current_down)}
-            <Typography component="span" className="cell-caption">
-              上传 {rate(u.current_up)}
-            </Typography>
-          </TableCell>
-          <TableCell>
-            {u.devices.length} 台 / {u.nodes.length} 个
-          </TableCell>
-          <TableCell>{u.expires || "长期有效"}</TableCell>
-          <TableCell>
-            <Button
-              component={Link}
-              to={`/users/${encodeURIComponent(u.name)}`}
-              endIcon={<Icon name="next" />}
-            >
-              管理
-            </Button>
-          </TableCell>
-        </TableRow>
-      ))}
-    </DataTable>
+                  分配线路
+                </ActionButton>
+                <ActionMenu
+                  label={`管理用户：${u.name}`}
+                  compact
+                  items={[
+                    { id: "user.set", context: { user: u.name } },
+                    { id: "user.ip", context: { user: u.name } },
+                    {
+                      id: "user.access",
+                      context: { user: u.name },
+                      divider: true,
+                    },
+                    {
+                      id: u.enabled ? "user.disable" : "user.enable",
+                      context: { user: u.name },
+                    },
+                    { id: "user.delete", context: { user: u.name } },
+                  ]}
+                />
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </DataTable>
+    </div>
   );
 }
