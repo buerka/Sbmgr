@@ -111,7 +111,11 @@ def repository_files() -> list[str]:
         cwd=ROOT,
         stderr=subprocess.STDOUT,
     )
-    return [item.decode("utf-8", "surrogateescape") for item in output.split(b"\0") if item]
+    paths = [item.decode("utf-8", "surrogateescape") for item in output.split(b"\0") if item]
+    # A working tree may contain pending deletions that are still present in
+    # the index. They are not public candidates and must not turn a local
+    # cleanup check into an unreadable-file error.
+    return [relative for relative in paths if (ROOT / Path(relative)).exists()]
 
 
 def forbidden_path_reason(relative: str) -> str | None:

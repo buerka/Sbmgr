@@ -91,4 +91,4 @@ sbmgr admin apply --restart
 - `cmd/sbmgr/web/dist/`：Vite 输出的临时构建目录，被 Git 忽略。先构建前端，再构建 Go；发布脚本自动执行两步。
 - 页面为 Emotion 创建每次响应独立的 CSP nonce，保留同源脚本、来源校验和后端认证边界。
 
-运行 `npm --prefix frontend run dev` 可启用 Vite 本地开发预览，API 代理到本机回环测试后端；正式验收使用完整 Go 二进制。前端组件测试使用 Vitest + React Testing Library。仅在本机或隔离测试数据上调试，不把生产凭据写入开发配置。
+运行 `npm --prefix frontend run dev` 可启用 Vite 本地开发预览，API 代理到本机回环服务；正式验收使用完整 Go 二进制。仅在本机或临时数据上调试，不把生产凭据写入开发配置。

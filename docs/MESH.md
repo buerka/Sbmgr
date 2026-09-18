@@ -86,4 +86,4 @@ sbmgr admin mesh apply
 
 中断后未决事务阻止新拓扑变更；恢复通信后运行 `sbmgr admin mesh recover`。已有最终提交决定则继续确认，否则恢复旧计划；同一事务可幂等重试，业务备份保留。
 
-`mesh check` 只验管理通道和修订。实际验收须覆盖线路 TCP/UDP、出口、订阅、停用、配额及双向限速；本机协议测试见[开发验证](DEVELOPMENT.md)。只读 Fleet 巡检设置见[运维指南](OPERATIONS.md)。
+`mesh check` 只验管理通道和修订。实际验收须覆盖线路 TCP/UDP、出口、订阅、停用、配额及双向限速；目标环境验收在部署方私有流程中执行。只读 Fleet 巡检设置见[运维指南](OPERATIONS.md)。

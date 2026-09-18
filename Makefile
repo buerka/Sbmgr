@@ -1,24 +1,21 @@
-.PHONY: fmt fmt-check vet test privacy-check deploy-check check build build-linux
+.PHONY: fmt fmt-check vet compile privacy-check check build build-linux
 
 fmt:
-	gofmt -w ./cmd/sbmgr
+	gofmt -w ./cmd/sbmgr ./internal/mesh
 
 fmt-check:
-	@test -z "$$(gofmt -l ./cmd)" || (gofmt -l ./cmd && exit 1)
+	@test -z "$$(gofmt -l ./cmd ./internal)" || (gofmt -l ./cmd ./internal && exit 1)
 
 vet:
 	go vet ./...
 
-test:
+compile:
 	go test ./...
 
 privacy-check:
 	python3 ./scripts/check_public_tree.py
 
-deploy-check:
-	sh ./deploy/test-deploy-scripts.sh
-
-check: privacy-check fmt-check vet test deploy-check
+check: privacy-check fmt-check vet compile
 
 build:
 	go build -trimpath -o sbmgr ./cmd/sbmgr

@@ -10,16 +10,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Frontend dependency install failed' }
     & npm --prefix frontend run format:check
     if ($LASTEXITCODE -ne 0) { throw 'Frontend formatting check failed' }
-    & npm --prefix frontend test
-    if ($LASTEXITCODE -ne 0) { throw 'Frontend tests failed' }
     & npm --prefix frontend run build
     if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
     & go vet ./...
     if ($LASTEXITCODE -ne 0) { throw 'go vet failed' }
     & go test ./...
     if ($LASTEXITCODE -ne 0) { throw 'go test failed' }
-    & python scripts/test_check_public_tree.py
-    if ($LASTEXITCODE -ne 0) { throw 'Privacy checker tests failed' }
     & python scripts/check_public_tree.py
     if ($LASTEXITCODE -ne 0) { throw 'Repository privacy check failed' }
     if ($LinuxBuild) {

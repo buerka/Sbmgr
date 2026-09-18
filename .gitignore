@@ -61,6 +61,28 @@ coverage.out
 Thumbs.db
 
 # Runtime data and private deployment material must never enter source control.
+/runtime-config/
+/private-config/
+/users*.json
+!/users*.example.json
+/clients*.json
+!/clients*.example.json
+/nodes*.json
+!/nodes*.example.json
+/routes*.json
+!/routes*.example.json
+/subscriptions*.json
+!/subscriptions*.example.json
+/dataimpulse*.json
+!/dataimpulse*.example.json
+*.yaml
+!*.example.yaml
+*.yml
+!*.example.yml
+!/.github/**/*.yaml
+!/.github/**/*.yml
+*.conf
+!*.example.conf
 /state.json
 /state.json.lock
 /state.json.migrated

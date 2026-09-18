@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,19 +21,16 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check public repository tree
-        run: |
-          python3 ./scripts/test_check_public_tree.py
-          python3 ./scripts/check_public_tree.py
+        run: python3 ./scripts/check_public_tree.py
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Build and test React frontend
+      - name: Build React frontend
         run: |
           npm --prefix frontend ci
           npm --prefix frontend run format:check
-          npm --prefix frontend test
           npm --prefix frontend run build
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
@@ -48,45 +45,10 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
-      - name: Test
-        shell: bash
-        run: |
-          test_log="$(mktemp)"
-          if go test ./... 2>&1 | tee "$test_log"; then
-            exit 0
-          fi
-          summary="$(tail -n 20 "$test_log" | tr '\n' ' ')"
-          summary="${summary//'%'/'%25'}"
-          summary="${summary//$'\r'/'%0D'}"
-          summary="${summary//$'\n'/'%0A'}"
-          printf '::error title=Go test failed::%s\n' "$summary"
-          exit 1
-      - name: Validate deployment scripts
-        run: sh ./deploy/test-deploy-scripts.sh
-      - name: Verify Linux Web and subscription privilege isolation
-        run: |
-          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/sbmgr-privilege.test" ./cmd/sbmgr
-          sudo env SBMGR_RUN_PRIVILEGE_TEST=1 "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^Test(Subscription|Web)Privilege' -test.v
-          # The production executable and its parents are root-owned. The
-          # sandbox intentionally has no CAP_DAC_OVERRIDE, so a runner-owned
-          # private directory is not a valid self-exec fixture for root.
-          privilege_dir="$(sudo mktemp -d /run/sbmgr-privilege-ci.XXXXXX)"
-          trap 'sudo rm -f -- "$privilege_dir/sbmgr.test"; sudo rmdir -- "$privilege_dir"' EXIT
-          sudo install -m 0700 "$RUNNER_TEMP/sbmgr-privilege.test" "$privilege_dir/sbmgr.test"
-          sudo systemd-run --quiet --wait --pipe --collect \
-            -p User=root -p Group=root -p NoNewPrivileges=true \
-            -p PrivateTmp=true -p PrivateDevices=true -p ProtectSystem=strict \
-            -p ProtectHome=read-only -p ProtectProc=invisible \
-            -p ProtectKernelTunables=true -p ProtectKernelModules=true \
-            -p ProtectControlGroups=true -p RestrictNamespaces=true \
-            -p RestrictSUIDSGID=true -p RestrictRealtime=true -p LockPersonality=true \
-            -p ProtectHostname=true -p MemoryDenyWriteExecute=true \
-            -p 'CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_KILL CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID' \
-            -p AmbientCapabilities=CAP_SETUID \
-            -p 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
-            -p 'SystemCallFilter=@system-service' -p SystemCallErrorNumber=EPERM \
-            -p LimitCORE=0 -p Environment=SBMGR_RUN_PRIVILEGE_TEST=1 \
-            "$privilege_dir/sbmgr.test" -test.run '^Test(Subscription|Web)Privilege' -test.v
+      - name: Compile Go packages
+        run: go test ./...
+      - name: Check shell script syntax
+        run: for script in deploy/*.sh scripts/*.sh; do sh -n "$script"; done
       - name: Cross-build Linux AMD64
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |

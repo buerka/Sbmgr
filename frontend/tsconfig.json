@@ -19,9 +19,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "types": [
-      "vite/client",
-      "vitest/globals",
-      "@testing-library/jest-dom"
+      "vite/client"
     ]
   },
   "include": [

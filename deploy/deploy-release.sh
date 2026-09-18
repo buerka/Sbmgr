@@ -117,7 +117,7 @@ systemd_nonnegative_integer() {
 wait_for_post_start_stability() {
     # Type=simple can be reported active before initialization failures surface.
     # Observe across more than two RestartSec=5s windows. No duration knobs are
-    # exposed; isolated regression tests provide a controlled sleep via PATH.
+    # exposed; the deployment check uses a bounded real wait.
     post_start_observations=9
     post_start_delay_seconds=2
     post_start_observation=1

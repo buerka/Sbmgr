@@ -29,7 +29,7 @@ Web 的“订阅交付”页按设备下载订阅地址或 YAML。普通页面�
 | 故障 | 父进程退出或通道损坏即关闭监听；子进程异常每 5 秒重试，后台维护继续；首次启动失败需修复后重启服务 |
 | 设置变化 | 监听、证书、开关变化需重启 `sbmgr.service`，可运行 `sbmgr service restart`；token 撤销、用户禁用无需重启 |
 
-升级先安装 core unit，详见[运维指南](OPERATIONS.md)。主服务的 SETUID/SETGID 与 `AmbientCapabilities=CAP_SETUID` 用于启动降权；处理 HTTP 时 capabilities 必须全为零，不应放宽 sandbox。验证入口见[开发验证](DEVELOPMENT.md)。
+升级先安装 core unit，详见[运维指南](OPERATIONS.md)。主服务的 SETUID/SETGID 与 `AmbientCapabilities=CAP_SETUID` 用于启动降权；处理 HTTP 时 capabilities 必须全为零，不应放宽 sandbox。构建与边界检查见[开发验证](DEVELOPMENT.md)。
 
 ## HTTPS 与反向代理
 

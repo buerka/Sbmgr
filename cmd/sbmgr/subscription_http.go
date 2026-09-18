@@ -12,8 +12,8 @@ import (
 	"github.com/skip2/go-qrcode"
 )
 
-// Only the unprivileged worker calls this in production. Unit tests provide a
-// direct lookup to exercise the same HTTP contract without requiring root.
+// Only the unprivileged worker calls this in production. The lookup remains
+// injected so the HTTP boundary never receives direct access to application state.
 func newSubscriptionHTTPServer(addr string, lookup subscriptionLookup) *http.Server {
 	limiter := &subscriptionLimiter{}
 	requests := make(chan struct{}, 4)
