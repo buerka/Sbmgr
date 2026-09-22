@@ -20,6 +20,7 @@ import {
   routePath,
   routeTag,
   routeDestination,
+  clientExitName,
 } from "./routeModel";
 import { useActionJob } from "./useActionJob";
 
@@ -206,6 +207,16 @@ export function RouteCanvas() {
         u.nodes.some((n) => n.outbound === routeTag(selected.id)),
       )
     : [];
+  const assignments = users.map((user) => ({
+    user,
+    devices: [
+      ...new Set(
+        user.nodes
+          .filter((node) => node.outbound === routeTag(selected!.id))
+          .map((node) => node.device),
+      ),
+    ],
+  }));
   return (
     <div className="route-studio">
       <div className="route-studio-toolbar">
@@ -408,7 +419,7 @@ export function RouteCanvas() {
                 );
                 const niceName = existing
                   ? routeDestination(existing)
-                  : exit.name;
+                  : clientExitName(exit.tag, exit.name);
                 return (
                   <button
                     key={exit.tag}
@@ -477,11 +488,13 @@ export function RouteCanvas() {
                   <h3>
                     {selected
                       ? routeName(selected)
-                      : `${draft?.exit || "直接出站"} via ${label}`}
+                      : draft?.exit
+                        ? `${clientExitName(draft.exit)} via ${label}`
+                        : label}
                   </h3>
                   <p className="text-xs text-muted-foreground mt-1">
                     {draft
-                      ? `${label} → ${draft.exit || "直接出站"}`
+                      ? `${label} → ${clientExitName(draft.exit)}`
                       : selected && routePath(s, selected)}
                   </p>
                 </div>
@@ -541,12 +554,28 @@ export function RouteCanvas() {
                 </form>
               ) : (
                 <div className="route-inspector-actions">
-                  <p>
-                    {users.length
-                      ? `已分配给 ${users.map((u) => u.name).join("、")}`
-                      : "尚未分配给用户"}
-                    <small>标识 {selected?.id}</small>
-                  </p>
+                  <div className="route-assignees">
+                    <div className="route-assignees-heading">
+                      <span>已分配用户</span>
+                      <strong>{assignments.length}</strong>
+                    </div>
+                    {assignments.length ? (
+                      <ul>
+                        {assignments.map(({ user, devices }) => (
+                          <li key={user.name}>
+                            <Link
+                              to={`/users/${encodeURIComponent(user.name)}`}
+                            >
+                              {user.name}
+                            </Link>
+                            <small>{devices.join("、")}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>尚未分配给用户</p>
+                    )}
+                  </div>
                   {selected && localRoute(selected) ? (
                     <Button
                       size="sm"
@@ -579,7 +608,7 @@ export function RouteCanvas() {
                   {selected && (
                     <ActionMenu
                       compact
-                      label={`管理线路：${selected.id}`}
+                      label={`管理线路：${routeName(selected)}`}
                       items={[
                         {
                           id: "mesh.remove-route",

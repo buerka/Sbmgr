@@ -16,6 +16,7 @@ import { optionLabels } from "../components/formModel";
 import { bytes, dateTime, rate } from "../format";
 import { useAppSelector } from "../store";
 import type { Context } from "../types";
+import { memberName, nodeDisplayName } from "../components/routeModel";
 const speed = (n?: number) => (n ? `${n} Mbps` : "不限");
 function SettingCard({
   title,
@@ -215,48 +216,53 @@ export function UserDetail() {
                       "操作",
                     ]}
                   >
-                    {nodes.map((n) => (
-                      <TableRow key={n.name}>
-                        <TableCell>
-                          <span className="inline-flex items-center gap-2 font-medium">
-                            <Icon
-                              name="routes"
-                              className="text-muted-foreground"
-                            />
-                            {n.name}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <Badge kind="default">{n.entry}</Badge>
-                        </TableCell>
-                        <TableCell>{bytes(n.upload + n.download)}</TableCell>
-                        <TableCell>
-                          {speed(n.up_mbps)} / {speed(n.down_mbps)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <ActionButton
-                              id="node.set"
-                              context={{ ...dc, node: n.name }}
-                              variant="ghost"
-                              size="sm"
-                            >
-                              编辑
-                            </ActionButton>
-                            <ActionMenu
-                              label={`更多：${n.name}`}
-                              compact
-                              items={[
-                                {
-                                  id: "node.delete",
-                                  context: { ...dc, node: n.name },
-                                },
-                              ]}
-                            />
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {nodes.map((n) => {
+                      const displayName = nodeDisplayName(s, n);
+                      return (
+                        <TableRow key={n.name}>
+                          <TableCell>
+                            <span className="inline-flex items-center gap-2 font-medium">
+                              <Icon
+                                name="routes"
+                                className="text-muted-foreground"
+                              />
+                              {displayName}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge kind="default">
+                              {memberName(s, n.entry)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>{bytes(n.upload + n.download)}</TableCell>
+                          <TableCell>
+                            {speed(n.up_mbps)} / {speed(n.down_mbps)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <ActionButton
+                                id="node.set"
+                                context={{ ...dc, node: n.name }}
+                                variant="ghost"
+                                size="sm"
+                              >
+                                编辑
+                              </ActionButton>
+                              <ActionMenu
+                                label={`更多：${displayName}`}
+                                compact
+                                items={[
+                                  {
+                                    id: "node.delete",
+                                    context: { ...dc, node: n.name },
+                                  },
+                                ]}
+                              />
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </DataTable>
                 ) : (
                   <Empty
