@@ -2,6 +2,12 @@ import type { Snapshot, User } from "../types";
 
 export const routeTag = (id: string) => `sbmgr-mesh-${id}`;
 
+export function canonicalOutbound(s: Snapshot, outbound: string) {
+  if (s.routes.some((r) => routeTag(r.id) === outbound)) return outbound;
+  const route = s.routes.find((r) => r.outbound_aliases?.includes(outbound));
+  return route ? routeTag(route.id) : outbound;
+}
+
 // Route IDs stay stable for state, subscriptions and assignments.  These
 // labels are the names users see in their clients, so the topology editor
 // must not expose internal host or outbound names such as "to-att via DMIT".
@@ -89,7 +95,9 @@ export function routePath(s: Snapshot, r: Snapshot["routes"][number]) {
   return entries.concat(r.exit ? routeDestination(r) : "直接出站").join(" → ");
 }
 export function nodeDisplayName(s: Snapshot, node: User["nodes"][number]) {
-  const route = s.routes.find((r) => routeTag(r.id) === node.outbound);
+  const route = s.routes.find(
+    (r) => routeTag(r.id) === canonicalOutbound(s, node.outbound),
+  );
   return route ? routeName(route) : canonicalRouteName(node.name);
 }
 export function assignmentOptions(s: Snapshot, user: User, device: string) {
@@ -113,9 +121,10 @@ export function assignmentOptions(s: Snapshot, user: User, device: string) {
     });
   }
   for (const n of existing) {
-    if (!items.some((r) => r.outbound === n.outbound))
+    const outbound = canonicalOutbound(s, n.outbound);
+    if (!items.some((r) => r.outbound === outbound))
       items.push({
-        outbound: n.outbound,
+        outbound,
         name: nodeDisplayName(s, n),
         entry: "已有授权",
         path: n.outbound || "默认直出",

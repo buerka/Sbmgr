@@ -21,6 +21,7 @@ import {
   routeTag,
   routeDestination,
   clientExitName,
+  canonicalOutbound,
 } from "./routeModel";
 import { useActionJob } from "./useActionJob";
 
@@ -204,7 +205,9 @@ export function RouteCanvas() {
       : undefined;
   const users = selected
     ? s.users.filter((u) =>
-        u.nodes.some((n) => n.outbound === routeTag(selected.id)),
+        u.nodes.some(
+          (n) => canonicalOutbound(s, n.outbound) === routeTag(selected.id),
+        ),
       )
     : [];
   const assignments = users.map((user) => ({
@@ -212,7 +215,11 @@ export function RouteCanvas() {
     devices: [
       ...new Set(
         user.nodes
-          .filter((node) => node.outbound === routeTag(selected!.id))
+          .filter(
+            (node) =>
+              canonicalOutbound(s, node.outbound) ===
+              routeTag(selected!.id),
+          )
           .map((node) => node.device),
       ),
     ],

@@ -127,6 +127,7 @@ export interface Snapshot {
   routes: {
     id: string;
     name?: string;
+    outbound_aliases?: string[];
     entry: string;
     hops: string[];
     exit: string;

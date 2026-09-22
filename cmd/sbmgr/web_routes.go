@@ -117,9 +117,14 @@ func (a *app) webRouteInventory(memberID string) webReply {
 // Reuse deployed client labels where possible without renaming any existing
 // nodes or changing their subscription identities.
 func webRouteName(s *State, r mesh.Route) string {
+	return webRouteNameWithAliases(s, r, webRouteAliasMap(s))
+}
+
+func webRouteNameWithAliases(s *State, r mesh.Route, aliases map[string]string) string {
+	canonical := mesh.RouteTag(r.ID)
 	for _, u := range s.Users {
 		for _, n := range u.Nodes {
-			if n.Outbound == mesh.RouteTag(r.ID) {
+			if webCanonicalOutboundWithAliases(aliases, n.Outbound) == canonical {
 				return n.Name
 			}
 		}
@@ -130,11 +135,139 @@ func webRouteName(s *State, r mesh.Route) string {
 	return r.Exit + " via " + strings.ToUpper(s.Mesh.Entry(r))
 }
 
-func webAssignmentVersion(u *User, device string) string {
+// webRouteAliasMap maps legacy local outbounds to the mesh route that now
+// represents the same path.  The map is deliberately conservative: aliases
+// are inferred only for an applied, local master route and only when the old
+// outbound has the same sing-box semantics.  Ambiguous aliases are discarded
+// instead of silently assigning an old node to the wrong entry.
+func webRouteAliasMap(s *State) map[string]string {
+	aliases := map[string]string{}
+	if s == nil || s.Mesh == nil || s.MeshAgent.Active == nil || s.MeshRollout != nil || s.MeshAgent.Transaction != "" || s.MeshAgent.Active.Revision != s.Mesh.Revision || !s.MeshAgent.Active.Master {
+		return aliases
+	}
+	base, err := readOutboundBaseConfig(s.BaseConfig)
+	if err != nil {
+		return aliases
+	}
+	tags := map[string]string{}
+	plainDirect := map[string]bool{}
+	for index, raw := range base.outbounds {
+		object, err := decodeOutboundObject(raw, index)
+		if err != nil {
+			return map[string]string{}
+		}
+		tag, err := optionalJSONString(object, "tag")
+		if err != nil || tag == "" {
+			continue
+		}
+		tags[tag] = tag
+		kind, err := optionalJSONString(object, "type")
+		if err == nil && strings.EqualFold(kind, "direct") && len(object) == 2 {
+			plainDirect[tag] = true
+		}
+	}
+	final := base.finalOutboundTag()
+	if final == "" && len(base.outbounds) > 0 {
+		// sing-box and the rate renderer both resolve an omitted route.final
+		// to the first outbound.  Treat the empty legacy tag as a direct
+		// route only when that effective target is a plain direct outbound.
+		if first, err := decodeOutboundObject(base.outbounds[0], 0); err == nil {
+			final, _ = optionalJSONString(first, "tag")
+		}
+	}
+	add := func(old, routeID string) {
+		if _, exists := aliases[old]; exists {
+			if aliases[old] != routeID {
+				// Keep an explicit collision marker. It is removed below and
+				// therefore cannot cause an unsafe merge.
+				aliases[old] = ""
+			}
+			return
+		}
+		aliases[old] = routeID
+	}
+	for _, r := range s.Mesh.Routes {
+		entry := s.Mesh.Entry(r)
+		local := entry == s.Mesh.Master && len(r.Hops) == 1 && r.Hops[0] == entry && len(r.Transports) == 0
+		if !local || !webActiveMasterRoute(s, r.ID) {
+			continue
+		}
+		routeID := mesh.RouteTag(r.ID)
+		if r.Exit != "" {
+			// mesh.Plan.Augment clones the configured outbound, so the
+			// legacy tag is equivalent only when that outbound exists.
+			if _, ok := tags[r.Exit]; ok {
+				add(r.Exit, routeID)
+			}
+			continue
+		}
+		// An empty legacy outbound follows route.final.  A mesh direct
+		// route is equivalent only to a plain direct final, never to a
+		// proxy, selector, or customised direct outbound.
+		if plainDirect[final] {
+			add("", routeID)
+			add(final, routeID)
+		}
+	}
+	for old, routeID := range aliases {
+		if routeID == "" {
+			delete(aliases, old)
+		}
+	}
+	return aliases
+}
+
+func webActiveMasterRoute(s *State, id string) bool {
+	if s == nil || s.Mesh == nil || s.MeshAgent.Active == nil || !s.MeshAgent.Active.Master || s.MeshAgent.Active.Revision != s.Mesh.Revision {
+		return false
+	}
+	for _, route := range s.MeshAgent.Active.Catalog {
+		if route.ID == id && route.Entry == s.Mesh.Master {
+			return true
+		}
+	}
+	return false
+}
+
+func webCanonicalOutbound(s *State, outbound string) string {
+	return webCanonicalOutboundWithAliases(webRouteAliasMap(s), outbound)
+}
+
+func webCanonicalOutboundWithAliases(aliases map[string]string, outbound string) string {
+	if strings.HasPrefix(outbound, "sbmgr-mesh-") {
+		return outbound
+	}
+	if routeID, ok := aliases[outbound]; ok {
+		return routeID
+	}
+	return outbound
+}
+
+func webRouteAliases(s *State, id string) []string {
+	return webRouteAliasesFromMap(webRouteAliasMap(s), id)
+}
+
+func webRouteAliasesFromMap(aliases map[string]string, id string) []string {
+	routeID := mesh.RouteTag(id)
+	result := make([]string, 0, 2)
+	for old, canonical := range aliases {
+		if canonical == routeID {
+			result = append(result, old)
+		}
+	}
+	slices.Sort(result)
+	return result
+}
+
+func webAssignmentVersion(s *State, u *User, device string) string {
+	aliases := webRouteAliasMap(s)
 	var values []any
 	for _, n := range u.Nodes {
 		if n.Device == device {
-			values = append(values, []any{n.Name, n.Outbound, n.UUID, n.UploadMbps, n.DownloadMbps})
+			// Include the raw tag as well as its canonical route.  This keeps
+			// the optimistic lock sensitive to an identity/config change while
+			// allowing a legacy alias and its mesh route to share one option.
+			values = append(values, []any{n.Name, n.Outbound, webCanonicalOutboundWithAliases(aliases, n.Outbound), n.UUID, n.UploadMbps, n.DownloadMbps})
 		}
 	}
 	raw, _ := json.Marshal(values)
@@ -159,7 +292,7 @@ func (a *app) webAssignRoutes(input webActionInput) error {
 		if d == nil {
 			return errors.New("设备不存在")
 		}
-		if input.Fields["expected"] != webAssignmentVersion(u, d.Name) {
+		if input.Fields["expected"] != webAssignmentVersion(s, u, d.Name) {
 			return errors.New("此设备的线路已被修改，请关闭分配窗口并重新打开")
 		}
 		var selection []struct {
@@ -169,27 +302,29 @@ func (a *app) webAssignRoutes(input webActionInput) error {
 		if webDecode([]byte(input.Fields["selection"]), &selection) != nil || len(selection) == 0 || len(selection) > 512 {
 			return errors.New("至少保留一条线路，最多选择 512 条")
 		}
+		aliases := webRouteAliasMap(s)
 		available, existing, chosen := map[string]bool{}, map[string]bool{}, map[string]bool{}
 		for _, n := range nodeTemplates(s) {
-			available[n.Outbound] = true
+			available[webCanonicalOutboundWithAliases(aliases, n.Outbound)] = true
 		}
 		for _, n := range u.Nodes {
 			if n.Device == d.Name {
-				existing[n.Outbound] = true
+				existing[webCanonicalOutboundWithAliases(aliases, n.Outbound)] = true
 			}
 		}
 		for _, selected := range selection {
-			if chosen[selected.Outbound] {
+			canonical := webCanonicalOutboundWithAliases(aliases, selected.Outbound)
+			if chosen[canonical] {
 				return errors.New("线路不能重复选择")
 			}
-			chosen[selected.Outbound] = true
-			if existing[selected.Outbound] {
+			chosen[canonical] = true
+			if existing[canonical] {
 				continue
 			}
-			if !available[selected.Outbound] {
+			if !available[canonical] {
 				return errors.New("所选线路不存在或尚未应用")
 			}
-			if strings.HasPrefix(selected.Outbound, "sbmgr-mesh-") && (s.Mesh == nil || s.MeshRollout != nil || s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision) {
+			if strings.HasPrefix(canonical, "sbmgr-mesh-") && (s.Mesh == nil || s.MeshRollout != nil || s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision) {
 				return errors.New("请先应用线路拓扑，再分配新线路")
 			}
 			if err := validateManagedName(selected.Name); err != nil {
@@ -199,7 +334,7 @@ func (a *app) webAssignRoutes(input webActionInput) error {
 		kept := make([]Node, 0, len(u.Nodes)+len(selection))
 		names := map[string]bool{}
 		for _, n := range u.Nodes {
-			if n.Device != d.Name || chosen[n.Outbound] {
+			if n.Device != d.Name || chosen[webCanonicalOutboundWithAliases(aliases, n.Outbound)] {
 				kept = append(kept, n)
 				if n.Device == d.Name {
 					names[strings.ToLower(n.Name)] = true
@@ -207,7 +342,8 @@ func (a *app) webAssignRoutes(input webActionInput) error {
 			}
 		}
 		for _, selected := range selection {
-			if existing[selected.Outbound] {
+			canonical := webCanonicalOutboundWithAliases(aliases, selected.Outbound)
+			if existing[canonical] {
 				continue
 			}
 			name := selected.Name
@@ -215,7 +351,7 @@ func (a *app) webAssignRoutes(input webActionInput) error {
 				name = fmt.Sprintf("%s (%d)", selected.Name, suffix)
 			}
 			names[strings.ToLower(name)] = true
-			n := Node{Name: name, Device: d.Name, UUID: newUUID(), Outbound: selected.Outbound, AuthUser: uniqueAuthUser(s, u.Name+":"+slug(d.Name)+":"+slug(name))}
+			n := Node{Name: name, Device: d.Name, UUID: newUUID(), Outbound: canonical, AuthUser: uniqueAuthUser(s, u.Name+":"+slug(d.Name)+":"+slug(name))}
 			// Include each new identity in the uniqueness check for the next one.
 			u.Nodes = append(u.Nodes, n)
 			kept = append(kept, n)

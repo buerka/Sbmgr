@@ -18,7 +18,7 @@ import {
   DialogDescription,
 } from "./ui/dialog";
 import { Icon } from "./Icons";
-import { assignmentOptions } from "./routeModel";
+import { assignmentOptions, canonicalOutbound } from "./routeModel";
 import { useActionJob } from "./useActionJob";
 import { restoreActionTrigger } from "./actionFocus";
 
@@ -38,7 +38,11 @@ export function RouteAssignment({
     context.device || user?.devices[0]?.name || "",
   );
   const initial = (d: string) => [
-    ...new Set(user.nodes.filter((n) => n.device === d).map((n) => n.outbound)),
+    ...new Set(
+      user.nodes
+        .filter((n) => n.device === d)
+        .map((n) => canonicalOutbound(baseline, n.outbound)),
+    ),
   ];
   const [selected, setSelected] = useState(() => (user ? initial(device) : []));
   const [search, setSearch] = useState("");
