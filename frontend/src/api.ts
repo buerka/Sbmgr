@@ -7,6 +7,7 @@ import type {
   Session,
   Snapshot,
   RouteInventory,
+  PortalSnapshot,
 } from "./types";
 
 const http = axios.create({
@@ -55,7 +56,52 @@ async function request<T>(
     throw new Error("请求未完成，请刷新状态后重试。");
   }
 }
+async function deliveryFile(context: Context, format: "link" | "yaml") {
+  try {
+    const response = await http.post<Blob>(
+      "/delivery",
+      { ...context, format },
+      { responseType: "blob" },
+    );
+    return response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401)
+      unauthenticated();
+    throw new Error("订阅交付失败，请检查设备授权、配额及有效期。");
+  }
+}
+async function subscriptionLink(context: Context) {
+  const text = (await (await deliveryFile(context, "link")).text()).trim();
+  try {
+    const url = new URL(text);
+    if (!/^https?:$/.test(url.protocol) || /\s/.test(text)) throw new Error();
+    return text;
+  } catch {
+    throw new Error("订阅地址格式不正确，请检查订阅服务设置。");
+  }
+}
 export const api = {
+  portalInvite: (user: string) =>
+    request<{ url: string; expires: string; message: string }>(
+      "/portal-invite",
+      { user },
+    ),
+  inviteInfo: (token: string) =>
+    request<{ username: string; expires: string }>("/invite/info", { token }),
+  acceptInvite: (token: string, password: string) =>
+    request<{ message: string }>("/invite/accept", { token, password }),
+  me: () => request<PortalSnapshot>("/me"),
+  selfPassword: (current_password: string, new_password: string) =>
+    request<{ message: string }>("/me/password", {
+      current_password,
+      new_password,
+    }),
+  portalAccount: (user: string, enabled: boolean, password: string) =>
+    request<{ message: string }>("/portal-account", {
+      user,
+      enabled,
+      password,
+    }),
   session: () => request<Session>("/session"),
   login: (username: string, password: string) =>
     request<Session>("/login", { username, password }),
@@ -73,24 +119,39 @@ export const api = {
   action: (input: ActionInput) => request<Job>("/actions", input),
   job: (id: string, signal?: AbortSignal) =>
     request<Job>(`/jobs/${encodeURIComponent(id)}`, undefined, signal),
-  async delivery(context: Context, format: string) {
-    try {
-      const response = await http.post<Blob>(
-        "/delivery",
-        { ...context, format },
-        { responseType: "blob" },
+  async copySubscriptionLink(context: Context) {
+    if (!navigator.clipboard) {
+      throw new Error(
+        "当前浏览器无法使用剪贴板，请通过 HTTPS 访问或选择下载 TXT。",
       );
-      const url = URL.createObjectURL(response.data);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download =
-        format === "yaml" ? "subscription.yaml" : "subscription.txt";
-      anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 401)
-        unauthenticated();
-      throw new Error("订阅交付失败，请检查设备授权、配额及有效期。");
     }
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+        // Start the clipboard operation inside the user's gesture, before the network response.
+        const content = subscriptionLink(context).then(
+          (text) => new Blob([text], { type: "text/plain" }),
+        );
+        void content.catch(() => {});
+        await navigator.clipboard.write([
+          new ClipboardItem({ "text/plain": content }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(await subscriptionLink(context));
+      }
+    } catch {
+      throw new Error(
+        "未能复制链接，请检查设备授权及剪贴板权限，或选择下载 TXT。",
+      );
+    }
+  },
+  async delivery(context: Context, format: "link" | "yaml") {
+    const data = await deliveryFile(context, format);
+    const url = URL.createObjectURL(data);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download =
+      format === "yaml" ? "subscription.yaml" : "subscription.txt";
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
 };

@@ -279,6 +279,9 @@ func (a *app) installMeshAccess(s *State, access *meshAccess) error {
 	next.Users = nil
 	next.MeshLease = &MeshLease{Sequence: access.Sequence, Until: access.Until, Quota: map[string]int64{}, Policies: map[string]string{}}
 	for _, supplied := range access.Users {
+		if supplied.Portal != nil {
+			return errors.New("从机授权不接受面板登录凭据")
+		}
 		// Do not accept runtime histories, subscriptions, billing or remote
 		// file paths in an identity grant.
 		if supplied.Upload != 0 || supplied.Download != 0 || len(supplied.TrafficSamples) > 0 || len(supplied.UsageHistory) > 0 || len(supplied.RecentAccesses) > 0 || len(supplied.BillingHistory) > 0 || supplied.Billing.Enabled {

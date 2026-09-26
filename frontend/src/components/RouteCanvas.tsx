@@ -217,8 +217,7 @@ export function RouteCanvas() {
         user.nodes
           .filter(
             (node) =>
-              canonicalOutbound(s, node.outbound) ===
-              routeTag(selected!.id),
+              canonicalOutbound(s, node.outbound) === routeTag(selected!.id),
           )
           .map((node) => node.device),
       ),

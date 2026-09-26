@@ -1,8 +1,15 @@
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useState,
+  type FormEvent,
+} from "react";
 import { api } from "../api";
 import {
   closeAction,
   jobReceived,
+  refreshSnapshot,
   useAppDispatch,
   useAppSelector,
 } from "../store";
@@ -39,6 +46,7 @@ import { Badge } from "./common";
 import { restoreActionTrigger } from "./actionFocus";
 import { RouteAssignment } from "./RouteAssignment";
 const hints: Record<string, string> = {
+  days: "0 关闭按时间清理（默认）；1–3650 按文件修改时间保留对应天数。后台维护默认每分钟检查，停服期间不执行。不限制备份份数。",
   quota: "单位 G / M / T，填写 0 表示不限流量。",
   "extra-quota": "仅增加本账期的额度；0 表示没有附加流量。",
   "up-mbps": "Mbps，0 表示不限。",
@@ -137,12 +145,17 @@ export function ActionForm({
   context,
   snapshot,
   onClose,
+  embedded = false,
+  onDirtyChange,
 }: {
   action: Action;
   context: Context;
   snapshot: Snapshot;
   onClose: () => void;
+  embedded?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const idPrefix = useId();
   const [scope, setScope] = useState(context),
     [initial, setInitial] = useState(() =>
       initialFields(action, context, snapshot),
@@ -150,23 +163,63 @@ export function ActionForm({
   const [values, setValues] = useState<Context>(initial),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
+    [refreshFailed, setRefreshFailed] = useState(false),
     [discard, setDiscard] = useState(false),
     [submittedJob, setSubmittedJob] = useState<string | null>(null);
   const job = useAppSelector((s) => s.admin.job);
   const dispatch = useAppDispatch(),
     edit = isEdit(action, context),
     changed = changedFields(action, values, initial, context),
-    dirty = changed.length > 0;
+    dirty = changed.length > 0,
+    blocked =
+      busy ||
+      job?.status === "running" ||
+      refreshFailed ||
+      (snapshot.role === "slave" && action.id.startsWith("user."));
+  const contextKey = JSON.stringify(context);
+  useLayoutEffect(
+    () => onDirtyChange?.(dirty || busy || refreshFailed),
+    [dirty, busy, refreshFailed, onDirtyChange],
+  );
+  useEffect(() => {
+    if (!embedded || dirty || busy || refreshFailed) return;
+    const populated = initialFields(action, context, snapshot);
+    if (JSON.stringify(populated) !== JSON.stringify(initial)) {
+      setInitial(populated);
+      setValues(populated);
+      setScope(context);
+    }
+  }, [embedded, action, contextKey, snapshot, dirty, busy, refreshFailed]);
   useEffect(() => {
     if (!submittedJob || job?.id !== submittedJob || job.status === "running")
       return;
     setSubmittedJob(null);
-    setBusy(false);
     if (job.status === "success") {
-      setValues({});
-      onClose();
-    } else setError(job.message || "保存失败，你的修改仍保留在表单中。");
-  }, [job, submittedJob, onClose]);
+      if (embedded) {
+        void dispatch(refreshSnapshot())
+          .unwrap()
+          .then((fresh) => {
+            const populated = initialFields(action, scope, fresh);
+            setInitial(populated);
+            setValues(populated);
+            setError("");
+            setRefreshFailed(false);
+          })
+          .catch(() => {
+            setRefreshFailed(true);
+            setError("保存成功，但刷新当前设置失败。请重新加载当前设置。");
+          })
+          .finally(() => setBusy(false));
+      } else {
+        setBusy(false);
+        setValues({});
+        onClose();
+      }
+    } else {
+      setBusy(false);
+      setError(job.message || "保存失败，你的修改仍保留在表单中。");
+    }
+  }, [job, submittedJob, onClose, embedded, dispatch, action, scope]);
   const setField = (field: Field, value: string) => {
     setError("");
     setDiscard(false);
@@ -189,8 +242,24 @@ export function ActionForm({
       else onClose();
     }
   };
+  async function reloadCurrent() {
+    setBusy(true);
+    try {
+      const fresh = await dispatch(refreshSnapshot()).unwrap();
+      const populated = initialFields(action, scope, fresh);
+      setInitial(populated);
+      setValues(populated);
+      setRefreshFailed(false);
+      setError("");
+    } catch {
+      setError("仍无法加载当前设置，请稍后重试。");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (blocked) return;
     setError("");
     const fields = collectFields(action, values, initial, context);
     const missing = action.fields.find(
@@ -242,8 +311,8 @@ export function ActionForm({
       return null;
     const value = values[field.key] || "",
       modified = value !== (initial[field.key] || ""),
-      id = `field-${field.key}`,
-      helpId = `help-${field.key}`;
+      id = `${idPrefix}-field-${field.key}`,
+      helpId = `${idPrefix}-help-${field.key}`;
     const helper =
       edit && modified && field.type !== "secret-text"
         ? `原值：${display(initial[field.key] || "", field)}`
@@ -390,7 +459,14 @@ export function ActionForm({
                     : "text"
               }
               min={field.type === "number" ? 0 : undefined}
-              step={field.type === "number" ? "any" : undefined}
+              max={action.id === "backup.retention" ? 3650 : undefined}
+              step={
+                field.type === "number"
+                  ? action.id === "backup.retention"
+                    ? 1
+                    : "any"
+                  : undefined
+              }
               autoComplete="off"
               maxLength={131072}
               onChange={(e) => setField(field, e.target.value)}
@@ -424,6 +500,174 @@ export function ActionForm({
         f.key !== "clear-expire" &&
         !lockedField(f, context),
     );
+  const form = (
+    <form
+      onSubmit={submit}
+      className="editor-form"
+      aria-label={action.title}
+      aria-busy={busy}
+    >
+      <div className="editor-heading">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            {embedded ? (
+              <h2>{action.title}</h2>
+            ) : (
+              <DialogTitle>{action.title}</DialogTitle>
+            )}
+            {!embedded && (
+              <DialogDescription className="mt-2">
+                {edit
+                  ? "修改当前设置，完成后保存。"
+                  : action.danger
+                    ? "请确认操作对象与生效范围。"
+                    : "填写以下信息，完成后提交。"}
+              </DialogDescription>
+            )}
+          </div>
+          {!embedded && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label="关闭"
+              disabled={busy}
+              onClick={close}
+              className="-mr-2 -mt-2"
+            >
+              <Icon name="close" />
+            </Button>
+          )}
+        </div>
+        {!embedded && (
+          <div className="flex items-center gap-2 mt-4">
+            <Badge kind="default">
+              {[scope.user, scope.device, scope.node]
+                .filter(Boolean)
+                .join(" / ") ||
+                context.id ||
+                "当前工作空间"}
+            </Badge>
+            {edit && (
+              <span className="text-xs text-muted-foreground">
+                已载入当前设置
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      <fieldset className="editor-content" disabled={blocked}>
+        <div className="effect-note">
+          <Icon name={action.danger ? "warning" : "shield"} />
+          <p>
+            {action.effect
+              .replace(/^已保存拓扑；/, "保存后，")
+              .replace(/^已保存；/, "保存后，")
+              .replace(/^设置已保存；/, "保存后，")}
+          </p>
+        </div>
+        {ungrouped.length > 0 && (
+          <div className="form-section">{ungrouped.map(renderField)}</div>
+        )}
+        {grouped.map(([title, keys]) => {
+          const fields = action.fields.filter(
+            (f) =>
+              keys.includes(f.key) &&
+              f.key !== "clear-expire" &&
+              !lockedField(f, context),
+          );
+          return (
+            fields.length > 0 && (
+              <section className="form-section" key={title}>
+                {grouped.length > 1 && <h3>{title}</h3>}
+                {fields.map(renderField)}
+              </section>
+            )
+          );
+        })}
+        {action.fields.some((f) => f.type === "secret-text") && (
+          <p className="field-hint">已有密码与私钥不会回显，请填写新的配置。</p>
+        )}
+      </fieldset>
+      <div className="editor-bottom">
+        {error && <Alert kind="error">{error}</Alert>}
+        {refreshFailed && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void reloadCurrent()}
+            disabled={busy}
+          >
+            重新加载当前设置
+          </Button>
+        )}
+        {discard && !embedded && (
+          <Alert kind="warning">
+            <p>有尚未保存的修改。继续编辑，或放弃后关闭。</p>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onClose}
+              className="mt-2"
+            >
+              放弃修改
+            </Button>
+          </Alert>
+        )}
+        <div className="editor-footer">
+          <span className="text-xs text-muted-foreground mr-auto">
+            {busy
+              ? "正在保存，请稍候…"
+              : edit
+                ? dirty
+                  ? `已修改 ${changed.length} 项`
+                  : "尚未修改"
+                : ""}
+          </span>
+          {embedded ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setValues(initial);
+                setError("");
+              }}
+              disabled={blocked || !dirty}
+            >
+              重置未保存修改
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={close}
+              disabled={busy}
+            >
+              取消
+            </Button>
+          )}
+          <Button
+            variant={action.danger ? "destructive" : "default"}
+            type="submit"
+            disabled={blocked || (edit && !dirty)}
+          >
+            {busy && <Icon name="loading" className="animate-spin" />}
+            {busy
+              ? "正在保存…"
+              : edit
+                ? "保存修改"
+                : action.danger
+                  ? "确认操作"
+                  : /\.(add|init|clone)$/.test(action.id)
+                    ? "创建"
+                    : "执行"}
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+  if (embedded)
+    return <div className="action-editor embedded-action-editor">{form}</div>;
   return (
     <Dialog
       open
@@ -446,122 +690,7 @@ export function ActionForm({
           close();
         }}
       >
-        <form onSubmit={submit} className="editor-form">
-          <div className="editor-heading">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <DialogTitle>{action.title}</DialogTitle>
-                <DialogDescription className="mt-2">
-                  {edit
-                    ? "修改当前设置，完成后保存。"
-                    : action.danger
-                      ? "请确认操作对象与生效范围。"
-                      : "填写以下信息，完成后提交。"}
-                </DialogDescription>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="关闭"
-                disabled={busy}
-                onClick={close}
-                className="-mr-2 -mt-2"
-              >
-                <Icon name="close" />
-              </Button>
-            </div>
-            <div className="flex items-center gap-2 mt-4">
-              <Badge kind="default">
-                {[scope.user, scope.device, scope.node]
-                  .filter(Boolean)
-                  .join(" / ") ||
-                  context.id ||
-                  "当前工作空间"}
-              </Badge>
-              {edit && (
-                <span className="text-xs text-muted-foreground">
-                  已载入当前设置
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="editor-content">
-            <div className="effect-note">
-              <Icon name={action.danger ? "warning" : "shield"} />
-              <p>
-                {action.effect
-                  .replace(/^已保存拓扑；/, "保存后，")
-                  .replace(/^已保存；/, "保存后，")
-                  .replace(/^设置已保存；/, "保存后，")}
-              </p>
-            </div>
-            {ungrouped.length > 0 && (
-              <div className="form-section">{ungrouped.map(renderField)}</div>
-            )}
-            {grouped.map(([title, keys]) => {
-              const fields = action.fields.filter(
-                (f) =>
-                  keys.includes(f.key) &&
-                  f.key !== "clear-expire" &&
-                  !lockedField(f, context),
-              );
-              return (
-                fields.length > 0 && (
-                  <section className="form-section" key={title}>
-                    {grouped.length > 1 && <h3>{title}</h3>}
-                    {fields.map(renderField)}
-                  </section>
-                )
-              );
-            })}
-            {action.fields.some((f) => f.type === "secret-text") && (
-              <p className="field-hint">
-                已有密码与私钥不会回显，请填写新的配置。
-              </p>
-            )}
-          </div>
-          <div className="editor-bottom">
-            {error && <Alert kind="error">{error}</Alert>}
-            {discard && (
-              <Alert kind="warning">
-                <p>有尚未保存的修改。继续编辑，或放弃后关闭。</p>
-                <Button variant="ghost" onClick={onClose} className="mt-2">
-                  放弃修改
-                </Button>
-              </Alert>
-            )}
-            <div className="editor-footer">
-              <span className="text-xs text-muted-foreground mr-auto">
-                {busy
-                  ? "正在保存，请稍候…"
-                  : edit
-                    ? dirty
-                      ? `已修改 ${changed.length} 项`
-                      : "尚未修改"
-                    : ""}
-              </span>
-              <Button variant="outline" onClick={close} disabled={busy}>
-                取消
-              </Button>
-              <Button
-                variant={action.danger ? "destructive" : "default"}
-                type="submit"
-                disabled={busy || (edit && !dirty)}
-              >
-                {busy && <Icon name="loading" className="animate-spin" />}
-                {busy
-                  ? "正在保存…"
-                  : edit
-                    ? "保存修改"
-                    : action.danger
-                      ? "确认操作"
-                      : /\.(add|init|clone)$/.test(action.id)
-                        ? "创建"
-                        : "执行"}
-              </Button>
-            </div>
-          </div>
-        </form>
+        {form}
       </DialogContent>
     </Dialog>
   );

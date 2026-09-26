@@ -60,6 +60,14 @@ func (b *webBackend) changeWebAccount(q webRequest, now time.Time) webReply {
 			status = 403
 			return errors.New("当前密码不正确")
 		}
+		state, err := loadState(a.statePath)
+		if err != nil {
+			return errors.New("读取用户状态失败，无法检查登录名")
+		}
+		if user := findUser(state, input.Username); user != nil && user.Portal != nil {
+			status = 400
+			return errors.New("管理员登录名不能与已开通或已邀请的用户重名")
+		}
 		next = current
 		next.Username = input.Username
 		if input.Password != "" {

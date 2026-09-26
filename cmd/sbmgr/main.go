@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const stateVersion = 12
+const stateVersion = 14
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -50,6 +50,7 @@ type State struct {
 	StatsApplyPending bool                         `json:"stats_apply_pending,omitempty"`
 	ActiveConnections map[string]ActiveConnection  `json:"active_connections,omitempty"`
 	Health            HealthSettings               `json:"health,omitempty"`
+	Backup            BackupSettings               `json:"backup,omitzero"`
 	OutboundHealth    map[string]OutboundHealth    `json:"outbound_health,omitempty"`
 	LastHealthCheck   string                       `json:"last_health_check,omitempty"`
 	Notifications     NotificationSettings         `json:"notifications,omitempty"`
@@ -78,6 +79,7 @@ type ClientSettings struct {
 
 type User struct {
 	recentIndex map[string]int // transient write-side lookup, rebuilt after pruning
+	Portal      *PortalAccount `json:"portal,omitempty"`
 
 	Name                string                  `json:"name"`
 	Enabled             bool                    `json:"enabled"`
@@ -2253,6 +2255,16 @@ func migrateState(s *State) error {
 				}
 			}
 			s.Version = 12
+		case 12:
+			// Age-based cleanup is opt-in; upgrading must not delete old backups.
+			s.Backup = BackupSettings{}
+			s.Version = 13
+		case 13:
+			// Existing proxy identities do not implicitly gain a Web login.
+			for i := range s.Users {
+				s.Users[i].Portal = nil
+			}
+			s.Version = 14
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}
@@ -2261,6 +2273,12 @@ func migrateState(s *State) error {
 }
 
 func validateState(s *State) error {
+	if err := validatePortalAccounts(s); err != nil {
+		return err
+	}
+	if err := validateBackupSettings(s.Backup); err != nil {
+		return err
+	}
 	if err := validateRuntimeSettings(s); err != nil {
 		return err
 	}
@@ -2478,28 +2496,6 @@ func backupStateBeforeWrite(path string, next []byte) error {
 		}
 	} else if err != nil {
 		return err
-	}
-	return pruneDailyStateBackups(dir, 14)
-}
-
-func pruneDailyStateBackups(dir string, keep int) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	var names []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if !entry.IsDir() && len(name) == len("state-20060102.json") && strings.HasPrefix(name, "state-") && strings.HasSuffix(name, ".json") {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	for len(names) > keep {
-		if err := os.Remove(filepath.Join(dir, names[0])); err != nil {
-			return err
-		}
-		names = names[1:]
 	}
 	return nil
 }

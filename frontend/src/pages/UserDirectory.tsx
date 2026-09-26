@@ -60,7 +60,7 @@ export function Users() {
     <>
       <PageHeader
         title="用户管理"
-        description="管理用户的用量、设备与访问权限。"
+        description="点击用户所在的整行，进入统一配置页管理用量、设备、线路与访问权限。"
         actions={
           <>
             <ActionMenu

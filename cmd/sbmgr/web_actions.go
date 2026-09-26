@@ -95,6 +95,7 @@ func webActions() []webAction {
 	add("config.apply", "应用配置", "ops", "apply --restart", "配置已校验并应用。失败时保留或恢复原运行配置。", true, nil)
 	add("config.check", "校验配置", "ops", "check", "配置校验通过。", false, nil)
 	add("backup.create", "创建备份", "ops", "backup create", "已创建一致性状态备份。", false, nil)
+	add("backup.retention", "自动清理设置", "backup", "backup retention", "仅作用于本机，下次后台维护生效，无需应用配置。只清理到期的手动和每日状态备份，删除不可撤销；每类保留最新一份，恢复保护、迁移留存和配置备份不受影响。部分删除失败会记录错误，并在下一轮重试。", true, nil, f("days", "保留天数", "number", true))
 	add("backup.restore", "恢复备份", "backup", "backup restore", "状态已恢复；检查后应用配置。", true, []string{"name"}, source("name", "备份", "backups", true))
 	add("health.check", "检查出站健康", "ops", "health check", "出站健康检查完成。", false, nil)
 	add("health.set", "健康检查设置", "ops", "health set", "健康设置已保存，后台下一轮生效。", false, nil, selectField("mode", "自动探测", "auto", "off"), f("interval", "间隔分钟", "number", false), f("timeout", "超时秒数", "number", false), f("failures", "告警失败次数", "number", false), f("targets", "探测目标 tag=host:port（逗号分隔）", "text", false))

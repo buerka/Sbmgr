@@ -296,6 +296,9 @@ func (a *app) daemonCycleLocked() error {
 		return err
 	}
 	var cycleErrors []error
+	if err := a.cleanupExpiredBackupsLocked(s.Backup, time.Now()); err != nil {
+		cycleErrors = append(cycleErrors, fmt.Errorf("定时清理状态备份: %w", err))
+	}
 	marksChanged, marksErr := ensureNodeMarks(s)
 	if marksErr != nil {
 		return marksErr

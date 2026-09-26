@@ -20,6 +20,7 @@ interface AdminState {
   loading: boolean;
   error: string;
   dialog: ActionTarget | null;
+  userDraftDirty: boolean;
   job: Job | null;
   notice: { message: string; severity: "success" | "error" | "info" } | null;
 }
@@ -31,6 +32,7 @@ const initialState: AdminState = {
   loading: false,
   error: "",
   dialog: null,
+  userDraftDirty: false,
   job: null,
   notice: null,
 };
@@ -55,6 +57,9 @@ const slice = createSlice({
     openAction(state, action: PayloadAction<ActionTarget>) {
       if (state.job?.status !== "running") state.dialog = action.payload;
     },
+    setUserDraftDirty(state, action: PayloadAction<boolean>) {
+      state.userDraftDirty = action.payload;
+    },
     closeAction(state) {
       state.dialog = null;
     },
@@ -74,7 +79,7 @@ const slice = createSlice({
     });
     builder.addCase(refreshSnapshot.fulfilled, (state, action) => {
       state.loading = false;
-      if (state.status === "authenticated") {
+      if (state.status === "authenticated" && state.session?.role !== "user") {
         state.snapshot = action.payload;
         state.error = "";
       }
@@ -84,7 +89,8 @@ const slice = createSlice({
       state.error = action.error.message || "状态读取失败";
     });
     builder.addCase(loadCatalog.fulfilled, (state, action) => {
-      if (state.status === "authenticated") state.catalog = action.payload;
+      if (state.status === "authenticated" && state.session?.role !== "user")
+        state.catalog = action.payload;
     });
     builder.addCase(loadCatalog.rejected, (state, action) => {
       state.error = action.error.message || "操作列表读取失败";
@@ -96,6 +102,7 @@ export const {
   signedOut,
   openAction,
   closeAction,
+  setUserDraftDirty,
   jobReceived,
   notify,
   clearNotice,
@@ -113,7 +120,9 @@ configureAPI({
 });
 export async function bootstrap() {
   try {
-    store.dispatch(signedIn(await api.session()));
+    const session = await api.session();
+    store.dispatch(signedIn(session));
+    if (session.role === "user") return;
     await Promise.all([
       store.dispatch(loadCatalog()),
       store.dispatch(refreshSnapshot()),

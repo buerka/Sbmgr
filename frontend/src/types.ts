@@ -2,6 +2,7 @@ export type Context = Record<string, string>;
 export interface Session {
   csrf: string;
   username?: string;
+  role?: "admin" | "user";
 }
 export interface AccessPolicy {
   allowed_domains?: string[];
@@ -59,6 +60,12 @@ export interface Node {
   current_down: number;
 }
 export interface User {
+  portal?: {
+    configured: boolean;
+    enabled: boolean;
+    invited: boolean;
+    invite_expires: string;
+  };
   name: string;
   enabled: boolean;
   status: string;
@@ -101,6 +108,34 @@ export interface User {
     count: number;
   }[];
 }
+export interface PortalSnapshot {
+  time: string;
+  subscription_enabled: boolean;
+  user: Pick<
+    User,
+    | "name"
+    | "enabled"
+    | "status"
+    | "quota"
+    | "extra_quota"
+    | "quota_mode"
+    | "used"
+    | "upload"
+    | "download"
+    | "expires"
+    | "up_mbps"
+    | "down_mbps"
+    | "current_up"
+    | "current_down"
+    | "billing"
+  > & {
+    devices: Device[];
+    nodes: (Pick<
+      Node,
+      "name" | "device" | "upload" | "download" | "current_up" | "current_down"
+    > & { available: boolean })[];
+  };
+}
 export interface ClientEntry {
   server: string;
   port: number;
@@ -133,7 +168,19 @@ export interface Snapshot {
     exit: string;
     protocols?: string[];
   }[];
-  backups: { name: string; size: number; modified: string }[];
+  backups: {
+    name: string;
+    size: number;
+    modified: string;
+    expires?: string;
+    protected?: string;
+  }[];
+  backup_settings?: { retention_days: number };
+  backup_storage?: {
+    total_bytes: number;
+    state_bytes: number;
+    other_bytes: number;
+  };
   health: Record<string, { tag: string; target: string; healthy: boolean }>;
   health_settings?: {
     mode: string;

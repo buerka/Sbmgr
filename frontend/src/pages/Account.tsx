@@ -9,6 +9,7 @@ import { Icon } from "../components/Icons";
 
 export function Account() {
   const session = useAppSelector((s) => s.admin.session);
+  const personal = session?.role === "user";
   const job = useAppSelector((s) => s.admin.job);
   const dispatch = useAppDispatch();
   const [username, setUsername] = useState(session?.username || "");
@@ -21,8 +22,12 @@ export function Account() {
   return (
     <>
       <PageHeader
-        title="管理账号"
-        description="修改当前面板的登录用户名与密码。"
+        title={personal ? "密码设置" : "管理账号"}
+        description={
+          personal
+            ? "修改自己的面板登录密码。"
+            : "修改当前面板的登录用户名与密码。"
+        }
       />
       <div className="account-settings">
         <aside>
@@ -33,7 +38,9 @@ export function Account() {
           <p>
             当前账号 <strong>{session?.username}</strong>
           </p>
-          <p>修改成功后，所有已登录会话都会退出。下次使用新的账号信息登录。</p>
+          <p>
+            修改成功后，此账号的所有已登录会话都会退出。下次使用新的账号信息登录。
+          </p>
         </aside>
         <form
           className="account-form"
@@ -52,11 +59,9 @@ export function Account() {
             }
             setBusy(true);
             try {
-              const result = await api.account(
-                username.trim(),
-                current,
-                password,
-              );
+              const result = personal
+                ? await api.selfPassword(current, password)
+                : await api.account(username.trim(), current, password);
               setCurrent("");
               setPassword("");
               setConfirm("");
@@ -78,11 +83,16 @@ export function Account() {
                 id="admin-username"
                 autoComplete="username"
                 value={username}
+                readOnly={personal}
                 maxLength={64}
                 required
                 onChange={(e) => setUsername(e.target.value)}
               />
-              <p className="field-hint">当前值已填入；仅修改密码时保留此项。</p>
+              <p className="field-hint">
+                {personal
+                  ? "登录名由管理员绑定，不能自行修改。"
+                  : "当前值已填入；仅修改密码时保留此项。"}
+              </p>
             </div>
             <div>
               <label htmlFor="admin-current">当前密码</label>
@@ -96,7 +106,9 @@ export function Account() {
                 onChange={(e) => setCurrent(e.target.value)}
               />
               <p className="field-hint">
-                修改用户名或密码，都需要验证当前密码。
+                {personal
+                  ? "修改密码需要验证当前密码。"
+                  : "修改用户名或密码，都需要验证当前密码。"}
               </p>
             </div>
             <div className="account-passwords">
@@ -107,10 +119,15 @@ export function Account() {
                   autoComplete="new-password"
                   type="password"
                   value={password}
+                  required={personal}
                   maxLength={1024}
                   onChange={(e) => setPassword(e.target.value)}
                 />
-                <p className="field-hint">留空保留原密码，至少 12 字节。</p>
+                <p className="field-hint">
+                  {personal
+                    ? "新密码必填，至少 12 字节。"
+                    : "留空保留原密码，至少 12 字节。"}
+                </p>
               </div>
               <div>
                 <label htmlFor="admin-confirm">确认新密码</label>
@@ -128,7 +145,11 @@ export function Account() {
           </fieldset>
           {error && <Alert kind="error">{error}</Alert>}
           <div className="account-footer">
-            <p>仅更新本机的管理账号，即时生效。</p>
+            <p>
+              {personal
+                ? "仅修改自己的面板密码，代理身份与订阅链接不变。"
+                : "仅更新本机的管理账号，即时生效。"}
+            </p>
             <Button
               type="submit"
               disabled={

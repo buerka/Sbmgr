@@ -18,8 +18,6 @@ import (
 	"unicode/utf8"
 )
 
-const outboundEndpointBackupLimit = 20
-
 // OutboundEndpointSummary is the non-sensitive portion of a remotely managed
 // outbound. Passwords, keys and protocol-specific options deliberately never
 // leave the base configuration parser.
@@ -654,34 +652,7 @@ func createOutboundEndpointBackup(basePath string, original []byte, now time.Tim
 	if err := atomicWrite(path, original, 0600); err != nil {
 		return "", err
 	}
-	if err := pruneOutboundEndpointBackups(directory, outboundEndpointBackupLimit); err != nil {
-		return "", fmt.Errorf("备份已创建但清理旧备份失败: %w", err)
-	}
 	return path, nil
-}
-
-func pruneOutboundEndpointBackups(directory string, keep int) error {
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return err
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		name := entry.Name()
-		if !entry.IsDir() && strings.HasPrefix(name, "config.base-pre-endpoint-") && strings.HasSuffix(name, ".json") {
-			names = append(names, name)
-		}
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(names)))
-	if keep < 0 {
-		keep = 0
-	}
-	for _, name := range names[min(keep, len(names)):] {
-		if err := os.Remove(filepath.Join(directory, name)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func restoreOutboundEndpointBackup(basePath, backupPath string, expectedCurrentHash [sha256.Size]byte) error {

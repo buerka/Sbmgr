@@ -48,8 +48,11 @@ type webReply struct {
 }
 type webLookup func(context.Context, webRequest) webReply
 type webSession struct {
-	CSRF    string
-	Expires time.Time
+	CSRF     string
+	Expires  time.Time
+	Role     string
+	Username string
+	Epoch    string
 }
 type webAttempt struct {
 	Count int
@@ -143,6 +146,10 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 			delete(b.sessions, id)
 		}
 	}
+	if (q.Path == "/api/invite/info" || q.Path == "/api/invite/accept") && q.Method == "POST" {
+		defer b.mu.Unlock()
+		return b.usePortalInvite(q, now)
+	}
 	if q.Path == "/api/login" && q.Method == "POST" {
 		defer b.mu.Unlock()
 		for ip, a := range b.attempts {
@@ -162,8 +169,19 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		if webDecode(q.Body, &input) != nil || len(input.Password) > 1024 || len(input.Username) > 64 {
 			return webError(400, "登录信息格式不正确")
 		}
-		hash, err := webPasswordHash(input.Password, c.Salt)
-		if err != nil || subtle.ConstantTimeCompare([]byte(hash), []byte(c.PasswordHash)) != 1 || subtle.ConstantTimeCompare([]byte(input.Username), []byte(c.Username)) != 1 {
+		principal := webSession{Role: "admin", Username: c.Username}
+		authenticated := false
+		if strings.EqualFold(input.Username, c.Username) {
+			hash, err := webPasswordHash(input.Password, c.Salt)
+			authenticated = err == nil && subtle.ConstantTimeCompare([]byte(hash), []byte(c.PasswordHash)) == 1 && subtle.ConstantTimeCompare([]byte(input.Username), []byte(c.Username)) == 1
+		} else {
+			var err error
+			principal, authenticated, err = b.authenticatePortal(input.Username, input.Password)
+			if err != nil {
+				return webError(503, "登录服务暂不可用")
+			}
+		}
+		if !authenticated {
 			if attempt.Count == 0 {
 				attempt.Until = now.Add(5 * time.Minute)
 			}
@@ -177,12 +195,22 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 			return webError(401, "账号或密码错误")
 		}
 		delete(b.attempts, q.Remote)
-		if len(b.sessions) >= 32 {
+		roleCount, ownerCount := 0, 0
+		for _, s := range b.sessions {
+			if s.Role == principal.Role {
+				roleCount++
+			}
+			if s.Role == principal.Role && s.Username == principal.Username {
+				ownerCount++
+			}
+		}
+		if (principal.Role == "admin" && roleCount >= 32) || (principal.Role == "user" && (roleCount >= 1024 || ownerCount >= 5)) {
 			return webError(429, "登录会话过多，请稍后重试")
 		}
 		id, csrf := webRandom(), webRandom()
-		b.sessions[id] = webSession{csrf, now.Add(8 * time.Hour)}
-		r := webJSON(200, map[string]string{"csrf": csrf, "username": c.Username})
+		principal.CSRF, principal.Expires = csrf, now.Add(8*time.Hour)
+		b.sessions[id] = principal
+		r := webJSON(200, map[string]string{"csrf": csrf, "username": principal.Username, "role": principal.Role})
 		r.SetSession = id
 		return r
 	}
@@ -195,9 +223,17 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		b.mu.Unlock()
 		return webError(403, "操作校验已失效，请刷新页面")
 	}
+	if session.Role == "user" {
+		defer b.mu.Unlock()
+		return b.lookupPortalLocked(q, session, now)
+	}
+	if session.Role != "admin" {
+		b.mu.Unlock()
+		return webError(401, "请重新登录")
+	}
 	if q.Path == "/api/session" && q.Method == "GET" {
 		b.mu.Unlock()
-		return webJSON(200, map[string]string{"csrf": session.CSRF, "username": c.Username})
+		return webJSON(200, map[string]string{"csrf": session.CSRF, "username": c.Username, "role": "admin"})
 	}
 	if q.Path == "/api/logout" && q.Method == "POST" {
 		delete(b.sessions, q.Session)
@@ -209,6 +245,14 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 	if q.Path == "/api/account" && q.Method == "POST" {
 		defer b.mu.Unlock()
 		return b.changeWebAccount(q, now)
+	}
+	if q.Path == "/api/portal-invite" && q.Method == "POST" {
+		defer b.mu.Unlock()
+		return b.createPortalInvite(q, now)
+	}
+	if q.Path == "/api/portal-account" && q.Method == "POST" {
+		defer b.mu.Unlock()
+		return b.managePortalAccount(q)
 	}
 	if strings.HasPrefix(q.Path, "/api/jobs/") && q.Method == "GET" {
 		j, ok := b.jobs[strings.TrimPrefix(q.Path, "/api/jobs/")]

@@ -49,7 +49,10 @@ import { UserDetail } from "./pages/UserDetail";
 import { RoutesPage } from "./pages/Routes";
 import { Subscriptions } from "./pages/Subscriptions";
 import { Operations } from "./pages/Operations";
+import { Audit, Backups } from "./pages/OperationRecords";
 import { Account } from "./pages/Account";
+import { Portal } from "./pages/Portal";
+import { Activate } from "./pages/Activate";
 const navigation: [string, string, IconName][] = [
   ["/overview", "运行总览", "home"],
   ["/users", "用户管理", "users"],
@@ -72,7 +75,7 @@ function Brand() {
     </Link>
   );
 }
-function ThemeMenu() {
+export function ThemeMenu() {
   const { theme, setTheme } = useTheme();
   return (
     <DropdownMenu>
@@ -131,6 +134,7 @@ function Login() {
       );
       form.reset();
       dispatch(signedIn(session));
+      if (session.role === "user") return;
       await Promise.all([dispatch(loadCatalog()), dispatch(refreshSnapshot())]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
@@ -152,13 +156,13 @@ function Login() {
         <div className="mt-8 mb-6">
           <h1>登录控制台</h1>
           <p className="text-muted-foreground text-sm mt-2">
-            管理你的用户、设备与线路。
+            登录后查看自己的服务；管理员可管理用户、设备与线路。
           </p>
         </div>
         <form onSubmit={submit} className="space-y-5">
           {notice && <Alert kind={notice.severity}>{notice.message}</Alert>}
           <div className="space-y-2">
-            <label htmlFor="username">管理员账号</label>
+            <label htmlFor="username">登录账号</label>
             <Input
               id="username"
               name="username"
@@ -187,8 +191,7 @@ function Login() {
           </Button>
         </form>
         <p className="text-xs text-muted-foreground mt-6 leading-relaxed">
-          使用部署时设置的管理员账号。忘记密码时，请在服务器通过{" "}
-          <code>sbmgr web configure</code> 重新设置。
+          普通用户使用管理员开通的账号；忘记密码请联系管理员重置。
         </p>
       </div>
     </main>
@@ -211,6 +214,18 @@ function NavigationSearch({
       icon,
       group: "页面",
     })),
+    {
+      path: "/ops/backups",
+      label: "状态备份",
+      icon: "backup" as IconName,
+      group: "系统运维",
+    },
+    {
+      path: "/ops/audit",
+      label: "操作审计",
+      icon: "document" as IconName,
+      group: "系统运维",
+    },
     ...users.map((u) => ({
       path: `/users/${encodeURIComponent(u.name)}`,
       label: u.name,
@@ -286,12 +301,14 @@ export function App() {
       job,
       notice,
       session,
+      userDraftDirty,
     } = useAppSelector((s) => s.admin),
     dispatch = useAppDispatch(),
     location = useLocation();
   const [collapsed, setCollapsed] = useState(false),
     [mobileOpen, setMobileOpen] = useState(false),
-    [searchOpen, setSearchOpen] = useState(false);
+    [searchOpen, setSearchOpen] = useState(false),
+    [logoutConfirm, setLogoutConfirm] = useState(false);
   const current = navigation.find(([path]) =>
     location.pathname.startsWith(path),
   );
@@ -301,6 +318,7 @@ export function App() {
   }, [location.pathname]);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (session?.role === "user") return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setSearchOpen((v) => !v);
@@ -308,19 +326,19 @@ export function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [session?.role]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => dispatch(clearNotice()), 6500);
     return () => clearTimeout(timer);
   }, [notice, dispatch]);
   useEffect(() => {
-    if (status !== "authenticated") return;
+    if (status !== "authenticated" || session?.role === "user") return;
     const timer = setInterval(() => {
       if (!document.hidden && !dialog) void dispatch(refreshSnapshot());
     }, 10000);
     return () => clearInterval(timer);
-  }, [status, dialog, dispatch]);
+  }, [status, session?.role, dialog, dispatch]);
   useEffect(() => {
     if (status !== "authenticated" || !job || job.status !== "running") return;
     let cancelled = false,
@@ -367,7 +385,12 @@ export function App() {
       controller.abort();
     };
   }, [job?.id, job?.status, status, dispatch, dialog]);
-  async function logout() {
+  async function logout(discardDraft = false) {
+    if (userDraftDirty && !discardDraft) {
+      setLogoutConfirm(true);
+      return;
+    }
+    setLogoutConfirm(false);
     try {
       await api.logout();
     } finally {
@@ -375,6 +398,8 @@ export function App() {
     }
   }
 
+  if (location.pathname === "/activate")
+    return <Activate themeControl={<ThemeMenu />} />;
   if (status === "checking")
     return (
       <div className="loading-shell">
@@ -383,6 +408,7 @@ export function App() {
       </div>
     );
   if (status === "anonymous") return <Login />;
+  if (session?.role === "user") return <Portal themeControl={<ThemeMenu />} />;
   const sidebar = (
     <>
       <Brand />
@@ -568,6 +594,8 @@ export function App() {
               <Route path="/routes" element={<RoutesPage />} />
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/ops" element={<Operations />} />
+              <Route path="/ops/backups" element={<Backups />} />
+              <Route path="/ops/audit" element={<Audit />} />
               <Route path="/account" element={<Account />} />
               <Route path="*" element={<Navigate to="/overview" replace />} />
             </Routes>
@@ -584,6 +612,22 @@ export function App() {
       </div>
       <NavigationSearch open={searchOpen} onOpenChange={setSearchOpen} />
       <ActionDialog />
+      <Dialog open={logoutConfirm} onOpenChange={setLogoutConfirm}>
+        <DialogContent>
+          <DialogTitle>放弃修改并退出？</DialogTitle>
+          <DialogDescription>
+            用户配置还有未保存的修改，退出后这些输入会丢失。
+          </DialogDescription>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setLogoutConfirm(false)}>
+              继续编辑
+            </Button>
+            <Button variant="destructive" onClick={() => void logout(true)}>
+              放弃修改并退出
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       {notice && (
         <div className="toast">
           <Alert kind={notice.severity}>

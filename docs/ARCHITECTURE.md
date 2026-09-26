@@ -11,7 +11,7 @@ Web API / admin → 跨进程锁 → SQLite 迁移、校验、事务 → state.d
                               ↑
 daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 
-管理员浏览器 → 独立低权限 HTTP → 有界管理 IPC → 来源/登录/CSRF → 白名单业务操作
+面板浏览器 → 独立低权限 HTTP → 有界管理 IPC → 来源/登录/角色/CSRF → 白名单业务操作
 设备订阅请求 → 低权限 HTTP → 独立有界只读 IPC → 单设备查询
 ```
 
@@ -28,6 +28,7 @@ daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 | 用户、设备、模板、批量 | `device.go`、`user_template.go`、`batch.go` |
 | React / TypeScript / shadcn/ui 页面与状态 | `frontend/src/{pages,components}`、`api.ts`、`store.ts`、`theme.tsx`、`tokens.css` |
 | Web 认证、动作、静态资源与降权 | `web_{config,http,account,actions,routes,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
+| 普通用户登录、单次邀请与隔离 | `portal_state.go`、`web_portal.go`、`web_invite.go`；前端 `Portal`、`Activate`、`PortalAccess` |
 | 参数化自动化、单文件安装 | `automation.go`、`service.go`、`deploy/embed.go` |
 | 后台统计与网络维护 | `daemon.go`、`stats.go`、`usage.go`、`network_maintenance.go` |
 | 限速、共享 WG 接入 | `rate.go`、`counter_keys.go`、`wireguard_bridge.go` |

@@ -17,8 +17,8 @@ import (
 	"unicode"
 )
 
-// Web credentials belong to the local control service, not the replicated
-// business state. A slave never receives the administrator password hash.
+// Administrator credentials belong to the local control service, not the
+// business state. Neither administrator nor user login hashes reach slaves.
 type webConfig struct {
 	Version      int    `json:"version"`
 	Listen       string `json:"listen"`
@@ -183,6 +183,17 @@ func (a *app) webCmd(args []string) error {
 		}
 	}
 	return a.withStateLock(func() error {
+		if _, err := os.Stat(a.statePath); err == nil {
+			state, err := loadState(a.statePath)
+			if err != nil {
+				return errors.New("读取用户状态失败，无法检查登录名")
+			}
+			if user := findUser(state, c.Username); user != nil && user.Portal != nil {
+				return errors.New("管理员登录名不能与已开通或已邀请的用户重名")
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return errors.New("无法检查用户状态")
+		}
 		data, err := json.MarshalIndent(c, "", "  ")
 		if err != nil {
 			return err

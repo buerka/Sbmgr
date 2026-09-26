@@ -11,6 +11,7 @@ export const patchActions = new Set([
   "device.access",
   "subscription.set",
   "health.set",
+  "backup.retention",
   "client.set",
   "template.set",
 ]);
@@ -57,27 +58,26 @@ export function initialFields(
     };
   if (action.id === "user.ip" || action.id === "device.ip") {
     const p = (action.id === "device.ip" ? d : u)?.ip_policy;
-    if (p)
-      fields = {
-        "ip-enabled": String(Boolean(p.enabled)),
-        "ip-mode": p.mode || "enforce",
-        "ip-binding": p.binding || "dynamic",
-        "ip-max": num(p.max_ips, 1),
-        "ip-handover-seconds": num(p.handover_seconds, 60),
-        "ip-allowed": (p.bound_ips || []).join(","),
-        "ip-temp": (p.temporary_ips || []).join(","),
-        "ip-temp-minutes": p.temporary_until
-          ? String(
-              Math.max(
-                0,
-                Math.ceil(
-                  (Date.parse(p.temporary_until) - Date.parse(state.time)) /
-                    60000,
-                ),
+    fields = {
+      "ip-enabled": String(Boolean(p?.enabled)),
+      "ip-mode": p?.mode || "enforce",
+      "ip-binding": p?.binding || "dynamic",
+      "ip-max": num(p?.max_ips, 1),
+      "ip-handover-seconds": num(p?.handover_seconds, 60),
+      "ip-allowed": (p?.bound_ips || []).join(","),
+      "ip-temp": (p?.temporary_ips || []).join(","),
+      "ip-temp-minutes": p?.temporary_until
+        ? String(
+            Math.max(
+              0,
+              Math.ceil(
+                (Date.parse(p.temporary_until) - Date.parse(state.time)) /
+                  60000,
               ),
-            )
-          : "",
-      };
+            ),
+          )
+        : "",
+    };
   }
   if (action.id === "user.burst" && u) {
     const p = u.burst || {};
@@ -119,6 +119,8 @@ export function initialFields(
     };
   if (action.id === "template.set")
     fields = { path: state.subscription.template_path || "" };
+  if (action.id === "backup.retention")
+    fields = { days: num(state.backup_settings?.retention_days) };
   if (action.id === "health.set" && state.health_settings) {
     const p = state.health_settings;
     fields = {

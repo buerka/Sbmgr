@@ -1,4 +1,5 @@
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { Link, useBlocker, useParams } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   ActionButton,
@@ -8,83 +9,151 @@ import {
   Empty,
   Panel,
 } from "../components/common";
+import { ActionForm } from "../components/ActionEditor";
+import { PortalAccess } from "../components/PortalAccess";
+import { DeviceDelivery } from "../components/DeviceDelivery";
 import { Button } from "../components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "../components/ui/dialog";
 import { Progress } from "../components/ui/feedback";
 import { TableCell, TableRow } from "../components/ui/table";
-import { Icon } from "../components/Icons";
+import { Icon, type IconName } from "../components/Icons";
 import { optionLabels } from "../components/formModel";
 import { bytes, dateTime, rate } from "../format";
-import { useAppSelector } from "../store";
-import type { Context } from "../types";
+import { setUserDraftDirty, useAppDispatch, useAppSelector } from "../store";
+import type { Snapshot, User } from "../types";
 import { memberName, nodeDisplayName } from "../components/routeModel";
+import "./user-workspace.css";
+
 const speed = (n?: number) => (n ? `${n} Mbps` : "不限");
-function SettingCard({
-  title,
-  description,
-  action,
-  context,
-  rows,
-}: {
+const sections: {
+  id: string;
   title: string;
-  description: string;
-  action: string;
-  context: Context;
-  rows: [string, string][];
+  icon: IconName;
+  forms: string[];
+}[] = [
+  { id: "basic", title: "基本设置", icon: "settings", forms: ["user.set"] },
+  { id: "devices", title: "设备与线路", icon: "routes", forms: [] },
+  {
+    id: "access",
+    title: "访问控制",
+    icon: "shield",
+    forms: ["user.ip", "user.access"],
+  },
+  {
+    id: "protection",
+    title: "流量保护",
+    icon: "traffic",
+    forms: ["user.burst", "user.throttle"],
+  },
+  { id: "delivery", title: "订阅交付", icon: "link", forms: [] },
+  { id: "activity", title: "用量与记录", icon: "health", forms: [] },
+  { id: "login", title: "面板登录", icon: "shield", forms: ["portal.account"] },
+];
+const noop = () => {};
+
+function UserSetting({
+  id,
+  user,
+  snapshot,
+  onDirty,
+}: {
+  id: string;
+  user: User;
+  snapshot: Snapshot;
+  onDirty: (id: string, dirty: boolean) => void;
 }) {
-  return (
-    <section className="setting-card">
-      <div className="flex justify-between items-center gap-3">
-        <h2>{title}</h2>
-        <ActionButton
-          id={action}
-          context={context}
-          variant="ghost"
-          size="sm"
-          aria-label={`编辑${title}`}
-        >
-          编辑
-        </ActionButton>
-      </div>
-      <p className="text-sm text-muted-foreground mt-1">{description}</p>
-      <dl className="settings-list">
-        {rows.map(([k, v]) => (
-          <div key={k}>
-            <dt>{k}</dt>
-            <dd>{v}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
+  const action = useAppSelector((s) =>
+    s.admin.catalog.find((a) => a.id === id),
   );
-}
-export function UserDetail() {
-  const { name } = useParams(),
-    s = useAppSelector((s) => s.admin.snapshot)!,
-    u = s.users.find((u) => u.name === name);
-  if (!u)
+  const reportDirty = useCallback(
+    (dirty: boolean) => onDirty(id, dirty),
+    [id, onDirty],
+  );
+  if (!action)
     return (
       <Empty
-        title="用户不存在"
-        description="请从用户列表重新选择。"
-        icon="users"
+        title="设置暂不可用"
+        description="请刷新页面以重新加载管理操作。"
       />
     );
+  return (
+    <ActionForm
+      action={action}
+      context={{ user: user.name }}
+      snapshot={snapshot}
+      onClose={noop}
+      embedded
+      onDirtyChange={reportDirty}
+    />
+  );
+}
+
+export function UserDetail() {
+  const { name } = useParams();
+  const s = useAppSelector((s) => s.admin.snapshot)!;
+  const u = s.users.find((u) => u.name === name);
+  return u ? (
+    <UserWorkspace key={u.name} u={u} s={s} />
+  ) : (
+    <Empty
+      title="用户不存在"
+      description="请从用户列表重新选择。"
+      icon="users"
+    />
+  );
+}
+
+function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
+  const dispatch = useAppDispatch();
+  const [tab, setTab] = useState("basic");
+  const [drafts, setDrafts] = useState<Record<string, boolean>>({});
+  const dirty = Object.values(drafts).some(Boolean);
+  const reportDirty = useCallback((id: string, value: boolean) => {
+    setDrafts((current) =>
+      current[id] === value ? current : { ...current, [id]: value },
+    );
+  }, []);
+  useLayoutEffect(() => {
+    dispatch(setUserDraftDirty(dirty));
+    return () => {
+      dispatch(setUserDraftDirty(false));
+    };
+  }, [dirty, dispatch]);
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && currentLocation.pathname !== nextLocation.pathname,
+  );
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   const context = { user: u.name },
     quota = u.quota + u.extra_quota;
   return (
-    <>
+    <div className="user-workspace-page">
       <Link to="/users" className="back-link">
         <Icon name="back" />
         用户管理
       </Link>
       <div className="profile-header">
-        <div className="flex items-center gap-4">
-          <div className="profile-avatar">
+        <div className="flex items-center gap-4 min-w-0">
+          <div className="profile-avatar shrink-0">
             {u.name.slice(0, 2).toUpperCase()}
           </div>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1>{u.name}</h1>
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="break-all">{u.name}</h1>
               <Badge kind={u.status === "已启用" ? "success" : "warning"}>
                 {u.status}
               </Badge>
@@ -95,23 +164,10 @@ export function UserDetail() {
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <ActionButton id="node.assign" context={context} variant="default">
-            分配线路
-          </ActionButton>
-          <ActionButton id="user.set" context={context}>
-            编辑配额
-          </ActionButton>
-          <ActionMenu
-            label="用户操作"
-            items={[
-              { id: u.enabled ? "user.disable" : "user.enable", context },
-              { id: "user.unblock", context },
-              { id: "user.reset", context, divider: true },
-              { id: "user.delete", context },
-            ]}
-          />
-        </div>
+        <p className="workspace-save-status" role="status">
+          <span className={dirty ? "draft-dot" : "saved-dot"} />
+          {dirty ? "有未保存的修改" : "当前设置已载入"}
+        </p>
       </div>
       <div className="user-summary">
         <div>
@@ -144,13 +200,79 @@ export function UserDetail() {
           </small>
         </div>
       </div>
-      <Tabs.Root defaultValue="devices">
-        <Tabs.List className="tab-list" aria-label="用户详情分类">
-          <Tabs.Trigger value="devices">设备与节点</Tabs.Trigger>
-          <Tabs.Trigger value="policies">配额与策略</Tabs.Trigger>
-          <Tabs.Trigger value="activity">连接记录</Tabs.Trigger>
+      <Tabs.Root value={tab} onValueChange={setTab}>
+        <Tabs.List
+          className="tab-list workspace-tabs"
+          aria-label="用户配置分类"
+        >
+          {sections.map((section) => (
+            <Tabs.Trigger key={section.id} value={section.id}>
+              <Icon name={section.icon} />
+              {section.title}
+              {section.forms.some((id) => drafts[id]) && (
+                <span className="draft-dot" aria-label="有未保存修改" />
+              )}
+            </Tabs.Trigger>
+          ))}
         </Tabs.List>
-        <Tabs.Content value="devices" className="tab-content">
+        <Tabs.Content
+          value="login"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          <PortalAccess
+            user={u}
+            disabled={s.role === "slave"}
+            onDirty={reportDirty}
+          />
+        </Tabs.Content>
+        <Tabs.Content
+          value="basic"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          <div className="workspace-intro">
+            <h2>基本设置</h2>
+            <p>
+              管理此用户的配额、账期、有效期和速率。表单已填入当前值，各部分单独保存。
+            </p>
+          </div>
+          <UserSetting
+            id="user.set"
+            user={u}
+            snapshot={s}
+            onDirty={reportDirty}
+          />
+          <section className="workspace-account-actions">
+            <div>
+              <h2>账号管理</h2>
+              <p>
+                启停与解除封禁保存后需应用配置。删除用户会撤销其设备与节点授权。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <ActionButton
+                id={u.enabled ? "user.disable" : "user.enable"}
+                context={context}
+              />
+              <ActionButton id="user.unblock" context={context} />
+              <ActionButton id="user.clone" context={{ from: u.name }} />
+              <ActionButton
+                id="user.delete"
+                disabled={dirty}
+                title={dirty ? "请先保存或重置未保存的修改" : undefined}
+                context={context}
+                variant="ghost"
+                className="text-destructive"
+              />
+            </div>
+          </section>
+        </Tabs.Content>
+        <Tabs.Content
+          value="devices"
+          className="tab-content workspace-tab"
+          forceMount
+        >
           <div className="section-toolbar">
             <div>
               <h2>已授权设备</h2>
@@ -188,16 +310,20 @@ export function UserDetail() {
                       {d.enabled ? "已启用" : "已停用"}
                     </Badge>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <ActionButton id="node.assign" context={dc}>
                       分配线路
+                    </ActionButton>
+                    <ActionButton id="device.ip" context={dc}>
+                      来源规则
+                    </ActionButton>
+                    <ActionButton id="device.access" context={dc}>
+                      访问规则
                     </ActionButton>
                     <ActionMenu
                       label="设备设置"
                       items={[
                         "node.add",
-                        "device.ip",
-                        "device.access",
                         d.enabled ? "device.disable" : "device.enable",
                         "device.rotate-link",
                         "device.rotate",
@@ -274,103 +400,93 @@ export function UserDetail() {
               </section>
             );
           })}
-          <Button asChild variant="outline">
-            <Link to="/subscriptions">
-              <Icon name="link" />
-              管理设备订阅
-            </Link>
-          </Button>
         </Tabs.Content>
-        <Tabs.Content value="policies" className="tab-content">
-          <p className="text-sm text-muted-foreground mb-5">
-            以下为当前保存的设置。编辑时会带入原值，保存后按提示应用配置。
-          </p>
-          <div className="settings-grid">
-            <SettingCard
-              title="配额与限速"
-              description="决定用户可以使用多少流量，以及最高速率。"
-              action="user.set"
-              context={context}
-              rows={[
-                ["流量配额", u.quota ? bytes(u.quota) : "不限"],
-                ["附加流量", bytes(u.extra_quota)],
-                ["上传 / 下载", `${speed(u.up_mbps)} / ${speed(u.down_mbps)}`],
-                ["有效期", u.expires || "长期有效"],
-                [
-                  "自动账期",
-                  u.billing?.enabled
-                    ? `每月 ${u.billing.cycle_day} 日`
-                    : "关闭",
-                ],
-              ]}
+        <Tabs.Content
+          value="access"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          <div className="workspace-intro">
+            <h2>访问控制</h2>
+            <p>
+              设置整个用户的来源
+              IP、域名、端口和并发规则。设备自己的规则在「设备与线路」中设置。
+            </p>
+          </div>
+          <div className="workspace-form-stack">
+            <UserSetting
+              id="user.ip"
+              user={u}
+              snapshot={s}
+              onDirty={reportDirty}
             />
-            <SettingCard
-              title="来源 IP"
-              description="控制哪些网络来源可以使用此用户。"
-              action="user.ip"
-              context={context}
-              rows={[
-                ["当前状态", u.ip_policy?.enabled ? "开启" : "关闭"],
-                ["绑定方式", optionLabels[u.ip_policy?.binding || "dynamic"]],
-                ["最多来源", `${u.ip_policy?.max_ips ?? 1} 个 IP`],
-                ["固定名单", u.ip_policy?.bound_ips?.join(", ") || "无"],
-                ["换绑宽限", `${u.ip_policy?.handover_seconds ?? 60} 秒`],
-              ]}
-            />
-            <SettingCard
-              title="访问与并发"
-              description="按域名、端口和连接数管理访问。"
-              action="user.access"
-              context={context}
-              rows={[
-                ["允许域名", u.access?.allowed_domains?.join(", ") || "不限"],
-                ["拒绝域名", u.access?.blocked_domains?.join(", ") || "无"],
-                ["拒绝端口", u.access?.blocked_ports?.join(", ") || "无"],
-                [
-                  "连接上限",
-                  u.access?.max_connections
-                    ? String(u.access.max_connections)
-                    : "不限",
-                ],
-                [
-                  "超限处理",
-                  optionLabels[u.access?.connection_action || "alert"],
-                ],
-              ]}
-            />
-            <SettingCard
-              title="异常流量保护"
-              description="短时间内用量异常时，自动保护线路。"
-              action="user.burst"
-              context={context}
-              rows={[
-                ["当前状态", u.burst?.enabled ? "开启" : "关闭"],
-                ["检测窗口", `${u.burst?.window_minutes || 0} 分钟`],
-                ["流量阈值", bytes(u.burst?.limit_bytes)],
-                ["处理方式", optionLabels[u.burst?.action || "hard"]],
-                ["保护时长", `${u.burst?.block_minutes || 0} 分钟`],
-              ]}
-            />
-            <SettingCard
-              title="阶梯限速"
-              description="接近流量配额时，逐档降低可用速率。"
-              action="user.throttle"
-              context={context}
-              rows={[
-                ["当前状态", u.throttle?.enabled ? "开启" : "关闭"],
-                [
-                  "第一档",
-                  `${u.throttle?.tier1_usage_percent || 0}% 用量 → ${u.throttle?.tier1_speed_percent || 0}% 速率`,
-                ],
-                [
-                  "第二档",
-                  `${u.throttle?.tier2_usage_percent || 0}% 用量 → ${u.throttle?.tier2_speed_percent || 0}% 速率`,
-                ],
-              ]}
+            <UserSetting
+              id="user.access"
+              user={u}
+              snapshot={s}
+              onDirty={reportDirty}
             />
           </div>
         </Tabs.Content>
-        <Tabs.Content value="activity" className="tab-content">
+        <Tabs.Content
+          value="protection"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          <div className="workspace-intro">
+            <h2>流量保护</h2>
+            <p>
+              为此用户设置异常流量处理和阶梯限速；关闭时仍保留所填参数。保存后需应用配置。
+            </p>
+          </div>
+          <div className="workspace-form-stack">
+            <UserSetting
+              id="user.burst"
+              user={u}
+              snapshot={s}
+              onDirty={reportDirty}
+            />
+            <UserSetting
+              id="user.throttle"
+              user={u}
+              snapshot={s}
+              onDirty={reportDirty}
+            />
+          </div>
+        </Tabs.Content>
+        <Tabs.Content
+          value="delivery"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          <div className="workspace-intro">
+            <h2>订阅交付</h2>
+            <p>
+              仅显示 {u.name} 的设备。可复制订阅链接、下载 TXT 或
+              YAML，也可轮换单台设备的订阅链接。
+            </p>
+          </div>
+          <DeviceDelivery user={u} />
+        </Tabs.Content>
+        <Tabs.Content
+          value="activity"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          <div className="section-toolbar">
+            <div>
+              <h2>用量与记录</h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                本期上传 {bytes(u.upload)} · 下载 {bytes(u.download)}
+                {u.billing?.next_reset
+                  ? ` · 下次重置 ${dateTime(u.billing.next_reset)}`
+                  : ""}
+              </p>
+            </div>
+            <ActionButton id="user.reset" context={context}>
+              重置本期用量
+            </ActionButton>
+          </div>
           <Panel title="活动连接" description="最近 50 项连接记录。">
             {u.connections.length ? (
               <DataTable headings={["设备 / 节点", "来源", "目标", "开始时间"]}>
@@ -413,6 +529,33 @@ export function UserDetail() {
           </Panel>
         </Tabs.Content>
       </Tabs.Root>
-    </>
+      <Dialog
+        open={blocker.state === "blocked"}
+        onOpenChange={(open) => {
+          if (!open && blocker.state === "blocked") blocker.reset();
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>离开用户配置？</DialogTitle>
+          <DialogDescription>
+            还有未保存的修改。切换标签不会丢失输入，离开此用户会放弃这些修改。
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => blocker.state === "blocked" && blocker.reset()}
+            >
+              继续编辑
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => blocker.state === "blocked" && blocker.proceed()}
+            >
+              放弃修改并离开
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

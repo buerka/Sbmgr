@@ -497,6 +497,7 @@
   padding: 24px 24px 16px;
 }
 .editor-content {
+  min-width: 0;
   padding: 0 24px 16px;
   overflow-y: auto;
   min-height: 0;
@@ -776,6 +777,7 @@
     padding: 20px 20px 16px;
   }
   .editor-content {
+    min-width: 0;
     padding: 0 20px 12px;
   }
   .editor-bottom {

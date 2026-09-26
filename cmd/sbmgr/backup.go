@@ -23,9 +23,28 @@ func (a *app) backupCmd(args []string) error {
 
 func (a *app) backupCmdLocked(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: sbmgr admin backup list|create|restore")
+		return errors.New("用法: sbmgr admin backup list|create|restore|retention")
 	}
 	switch args[0] {
+	case "retention":
+		fs := a.newFlagSet("backup retention")
+		days := fs.Int("days", -1, "保留天数，0 关闭按时间清理，1–3650 开启")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 || *days == -1 {
+			return errors.New("用法: sbmgr admin backup retention --days 0..3650")
+		}
+		s, err := loadState(a.statePath)
+		if err != nil {
+			return err
+		}
+		s.Backup = BackupSettings{RetentionDays: *days}
+		if err := saveState(a.statePath, s); err != nil {
+			return err
+		}
+		fmt.Fprintln(a.out, "保留策略已保存，下次后台维护生效；无需应用配置。")
+		return nil
 	case "list":
 		if len(args) != 1 {
 			return errors.New("backup list 不接受额外参数")
@@ -258,9 +277,6 @@ func createManualStateBackup(statePath string, now time.Time) (string, error) {
 	if err := atomicWrite(filepath.Join(dir, name), raw, 0600); err != nil {
 		return "", err
 	}
-	if err := pruneManualStateBackups(dir, 20); err != nil {
-		return "", fmt.Errorf("备份已创建，但清理旧手动备份失败: %w", err)
-	}
 	return name, nil
 }
 
@@ -282,47 +298,7 @@ func createManualSQLiteStateBackup(statePath string, now time.Time) (string, err
 	if err := sqliteBackupTo(statePath, filepath.Join(dir, name)); err != nil {
 		return "", err
 	}
-	if err := pruneManualStateBackups(dir, 20); err != nil {
-		return "", fmt.Errorf("备份已创建，但清理旧手动备份失败: %w", err)
-	}
 	return name, nil
-}
-
-func pruneManualStateBackups(dir string, keep int) error {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	type item struct {
-		name     string
-		modified time.Time
-	}
-	items := []item{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasPrefix(name, "state-manual-") ||
-			(!strings.HasSuffix(strings.ToLower(name), ".json") && !strings.HasSuffix(strings.ToLower(name), ".db")) {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		items = append(items, item{name: name, modified: info.ModTime()})
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].modified.After(items[j].modified) })
-	if keep < 0 {
-		keep = 0
-	}
-	for _, old := range items[min(keep, len(items)):] {
-		if err := os.Remove(filepath.Join(dir, old.name)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func listStateBackups(statePath string) ([]BackupInfo, error) {
@@ -342,9 +318,17 @@ func listStateBackups(statePath string) ([]BackupInfo, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
 		result = append(result, BackupInfo{Name: entry.Name(), Size: info.Size(), Modified: info.ModTime()})
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Modified.After(result[j].Modified) })
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Modified.Equal(result[j].Modified) {
+			return result[i].Name > result[j].Name
+		}
+		return result[i].Modified.After(result[j].Modified)
+	})
 	return result, nil
 }
 

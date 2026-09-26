@@ -1,0 +1,133 @@
+.user-workspace-page {
+  min-width: 0;
+}
+.workspace-save-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.draft-dot,
+.saved-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.draft-dot {
+  background: var(--foreground);
+}
+.saved-dot {
+  background: var(--muted-foreground);
+}
+.user-workspace-page .workspace-tabs {
+  width: 100%;
+  background: transparent;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+  gap: 24px;
+  margin-bottom: 28px;
+}
+.workspace-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 12px 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+}
+.workspace-tabs button[data-state="active"] {
+  background: transparent;
+  box-shadow: none;
+  border-bottom-color: var(--foreground);
+}
+.workspace-tab[data-state="inactive"] {
+  display: none;
+}
+.workspace-intro {
+  margin-bottom: 20px;
+}
+.workspace-intro p,
+.workspace-account-actions p {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 6px;
+}
+.workspace-form-stack {
+  display: grid;
+  gap: 24px;
+}
+.user-workspace-page .embedded-action-editor {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.embedded-action-editor .editor-form {
+  max-height: none;
+}
+.embedded-action-editor .editor-heading {
+  padding: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.embedded-action-editor .editor-content {
+  padding: 24px;
+  overflow: visible;
+}
+.embedded-action-editor .form-row {
+  grid-template-columns: minmax(160px, 0.7fr) minmax(0, 1fr);
+  max-width: 820px;
+  gap: 32px;
+}
+.embedded-action-editor .editor-bottom {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+.workspace-account-actions {
+  margin-top: 28px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.workspace-account-actions > div + div {
+  margin-top: 20px;
+}
+.user-workspace-page .device-heading {
+  align-items: flex-start;
+}
+@media (max-width: 720px) {
+  .user-workspace-page .workspace-tabs {
+    gap: 20px;
+  }
+  .workspace-tabs button {
+    font-size: 13px;
+  }
+  .embedded-action-editor .editor-heading,
+  .embedded-action-editor .editor-content,
+  .embedded-action-editor .editor-bottom,
+  .workspace-account-actions {
+    padding: 18px;
+  }
+  .embedded-action-editor .form-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .embedded-action-editor .form-row > label {
+    padding-top: 0;
+  }
+  .embedded-action-editor .editor-footer {
+    flex-wrap: wrap;
+  }
+  .embedded-action-editor .editor-footer > span {
+    flex-basis: 100%;
+  }
+  .workspace-save-status {
+    width: 100%;
+  }
+}

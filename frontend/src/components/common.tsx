@@ -1,5 +1,11 @@
-import { Fragment, useRef, type ComponentProps, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import {
+  Fragment,
+  useRef,
+  type ComponentProps,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Icon, type IconName } from "./Icons";
 import { Button } from "./ui/button";
 import {
@@ -302,6 +308,27 @@ export function UserTable({
   sort?: "asc" | "desc";
   onSort?: () => void;
 }) {
+  const navigate = useNavigate();
+  function openUser(event: MouseEvent<HTMLTableRowElement>, name: string) {
+    if (event.defaultPrevented || event.button !== 0) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (
+      target.closest(
+        "a, button, input, select, textarea, [role='button'], [role='link'], [contenteditable='true']",
+      )
+    )
+      return;
+    if (window.getSelection()?.toString()) return;
+    const path = `/users/${encodeURIComponent(name)}`;
+    if (event.metaKey || event.ctrlKey) {
+      const url = new URL(window.location.href);
+      url.hash = path;
+      window.open(url.href, "_blank", "noopener,noreferrer");
+    } else if (!event.shiftKey && !event.altKey) {
+      navigate(path);
+    }
+  }
   return (
     <div className="table-frame">
       <DataTable
@@ -334,7 +361,11 @@ export function UserTable({
           </TableRow>
         )}
         {users.map((u) => (
-          <TableRow key={u.name}>
+          <TableRow
+            key={u.name}
+            className="cursor-pointer"
+            onClick={(event) => openUser(event, u.name)}
+          >
             <TableCell>
               <Link
                 className="font-medium hover:underline underline-offset-4"
@@ -398,36 +429,8 @@ export function UserTable({
                 )}
               </TableCell>
             ))}
-            <TableCell className="w-10">
-              <div className="flex items-center gap-1">
-                <ActionButton
-                  id="node.assign"
-                  context={{ user: u.name }}
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`分配线路：${u.name}`}
-                >
-                  分配线路
-                </ActionButton>
-                <ActionMenu
-                  label={`管理用户：${u.name}`}
-                  compact
-                  items={[
-                    { id: "user.set", context: { user: u.name } },
-                    { id: "user.ip", context: { user: u.name } },
-                    {
-                      id: "user.access",
-                      context: { user: u.name },
-                      divider: true,
-                    },
-                    {
-                      id: u.enabled ? "user.disable" : "user.enable",
-                      context: { user: u.name },
-                    },
-                    { id: "user.delete", context: { user: u.name } },
-                  ]}
-                />
-              </div>
+            <TableCell className="w-10 text-muted-foreground">
+              <Icon name="next" aria-hidden="true" />
             </TableCell>
           </TableRow>
         ))}

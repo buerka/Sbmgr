@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 4
+	sqliteSchemaVersion = 5
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -89,6 +89,7 @@ var sqliteSchema = append([]string{
 		UNIQUE(user_id, name_key)
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS devices_user_ordinal_idx ON devices(user_id, ordinal)`,
+	sqlitePortalSchema,
 	`CREATE INDEX IF NOT EXISTS devices_subscription_token_idx ON devices(subscription_token)`,
 	`CREATE TABLE IF NOT EXISTS nodes (
 		id INTEGER PRIMARY KEY,
@@ -645,6 +646,25 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 4
+		case 4:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			if _, err := tx.Exec(sqlitePortalSchema); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE metadata SET value = '5' WHERE key = 'schema_version'`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`PRAGMA user_version = 5`); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 5
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
@@ -1061,6 +1081,9 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 			return err
 		}
 		userIDs[user.Name] = userID
+		if err := writeSQLitePortalAccount(tx, userID, user.Portal); err != nil {
+			return err
+		}
 
 		for deviceOrdinal := range user.Devices {
 			device := &user.Devices[deviceOrdinal]
@@ -1636,6 +1659,9 @@ func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
 		return nil, err
 	}
 
+	if err := readSQLitePortalAccounts(tx, state, userIDs); err != nil {
+		return nil, err
+	}
 	deviceIDs := map[int64]sqliteDeviceLocation{}
 	rows, err = tx.Query(`SELECT id, user_id, name, enabled, created_at, last_seen, ip_policy_json,
 		subscription_token, access_json FROM devices ORDER BY user_id, ordinal, id`)
@@ -2278,7 +2304,7 @@ func backupSQLiteBeforeWrite(path string, controlChanged bool, now time.Time) er
 	} else if err != nil {
 		return err
 	}
-	return pruneDailySQLiteBackups(directory, 14)
+	return nil
 }
 
 // installSQLiteStateForRestore builds and verifies a complete replacement
@@ -2478,28 +2504,6 @@ func copyInactiveFileAtomic(sourcePath, destinationPath string, mode os.FileMode
 		return err
 	}
 	return atomicWrite(destinationPath, raw, mode)
-}
-
-func pruneDailySQLiteBackups(directory string, keep int) error {
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return err
-	}
-	names := []string{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !entry.IsDir() && len(name) == len("state-20060102.db") && strings.HasPrefix(name, "state-") && strings.HasSuffix(name, ".db") {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	for len(names) > keep {
-		if err := os.Remove(filepath.Join(directory, names[0])); err != nil {
-			return err
-		}
-		names = names[1:]
-	}
-	return nil
 }
 
 func finalizeStandaloneSQLite(path string) error {

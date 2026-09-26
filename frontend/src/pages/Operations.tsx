@@ -1,12 +1,11 @@
 import {
   ActionButton,
   Badge,
-  DataTable,
   Empty,
   PageHeader,
   Panel,
 } from "../components/common";
-import { TableCell, TableRow } from "../components/ui/table";
+import { Link } from "react-router-dom";
 import { Icon, type IconName } from "../components/Icons";
 import { bytes, dateTime } from "../format";
 import { openAction, useAppDispatch, useAppSelector } from "../store";
@@ -52,43 +51,61 @@ export function Operations() {
           </button>
         ))}
       </div>
-      <Panel
-        title="状态备份"
-        description={`${s.backups.length} 份备份 · 恢复后需检查并应用配置。`}
-      >
-        {s.backups.length ? (
-          <DataTable headings={["备份名称", "创建时间", "大小", "操作"]}>
-            {s.backups.map((b) => (
-              <TableRow key={b.name}>
-                <TableCell>
-                  <span className="inline-flex items-center gap-2">
-                    <Icon name="backup" className="text-muted-foreground" />
-                    {b.name}
-                  </span>
-                </TableCell>
-                <TableCell>{dateTime(b.modified)}</TableCell>
-                <TableCell>{bytes(b.size)}</TableCell>
-                <TableCell>
-                  <ActionButton
-                    id="backup.restore"
-                    context={{ name: b.name }}
-                    variant="ghost"
-                    size="sm"
-                  >
-                    恢复
-                  </ActionButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </DataTable>
-        ) : (
-          <Empty
-            title="还没有备份"
-            description="创建一份备份，保留可恢复的业务状态。"
-            icon="backup"
+      <div className="two-columns mb-6">
+        <Link
+          to="/ops/backups"
+          className="operation-tile"
+          aria-label="查看状态备份"
+        >
+          <span className="surface-icon">
+            <Icon name="backup" size={22} />
+          </span>
+          <div className="min-w-0">
+            <h2>
+              状态备份{" "}
+              <span className="text-sm font-normal text-muted-foreground ml-2">
+                {s.backups.length} 份状态备份
+              </span>
+            </h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              总大小{" "}
+              {bytes(
+                s.backup_storage?.total_bytes ??
+                  s.backups.reduce((sum, b) => sum + b.size, 0),
+              )}{" "}
+              · 查看与管理保留期限
+            </p>
+          </div>
+          <Icon
+            name="next"
+            className="ml-auto shrink-0 text-muted-foreground"
           />
-        )}
-      </Panel>
+        </Link>
+        <Link
+          to="/ops/audit"
+          className="operation-tile"
+          aria-label="查看操作审计"
+        >
+          <span className="surface-icon">
+            <Icon name="document" size={22} />
+          </span>
+          <div className="min-w-0">
+            <h2>
+              操作审计{" "}
+              <span className="text-sm font-normal text-muted-foreground ml-2">
+                最近 {s.audit?.length || 0} 条
+              </span>
+            </h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              按操作者、操作或时间查找记录
+            </p>
+          </div>
+          <Icon
+            name="next"
+            className="ml-auto shrink-0 text-muted-foreground"
+          />
+        </Link>
+      </div>
       <div className="two-columns">
         <Panel
           title="出站健康"
@@ -167,21 +184,6 @@ export function Operations() {
           )}
         </Panel>
       </div>
-      <Panel title="操作审计" description="最近 100 项已完成的管理操作。">
-        {s.audit?.length ? (
-          <DataTable headings={["时间", "操作者", "操作"]}>
-            {s.audit.map((a, i) => (
-              <TableRow key={i}>
-                <TableCell>{dateTime(a.at)}</TableCell>
-                <TableCell>{a.actor}</TableCell>
-                <TableCell>{a.action}</TableCell>
-              </TableRow>
-            ))}
-          </DataTable>
-        ) : (
-          <Empty title="暂无操作记录" />
-        )}
-      </Panel>
     </>
   );
 }

@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { Provider } from "react-redux";
-import { HashRouter } from "react-router-dom";
+import { createHashRouter, RouterProvider } from "react-router-dom";
 import { setNonce } from "get-nonce";
 import "@fontsource/inter/latin-400.css";
 import "@fontsource/inter/latin-500.css";
@@ -16,13 +16,12 @@ const nonce = document.querySelector<HTMLMetaElement>(
   'meta[name="csp-nonce"]',
 )?.content;
 if (nonce && nonce !== "__CSP_NONCE__") setNonce(nonce);
+const router = createHashRouter([{ path: "*", element: <App /> }]);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider>
       <Provider store={store}>
-        <HashRouter>
-          <App />
-        </HashRouter>
+        <RouterProvider router={router} />
       </Provider>
     </ThemeProvider>
   </React.StrictMode>,

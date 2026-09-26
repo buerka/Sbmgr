@@ -2,6 +2,10 @@
 
 先遵守 [AGENTS.md](../AGENTS.md)。Go 工具链以 [go.mod](../go.mod) 为准；Linux 运行依赖见 [README](../README.md)。公开仓库只保存通用源码、构建文件和使用文档，不保存生产状态、真实代理配置、凭据或部署方验收资料。
 
+## macOS 开发环境
+
+从其他系统迁移源码后，需在 Mac 上单独安装工具链。使用 Homebrew 时运行 `brew install go`，再用 `go version` 确认；项目所需版本仍以 `go.mod` 为准，不复制 Windows 的 Go 二进制或 `node_modules`。前端依赖通过 `npm --prefix frontend ci` 重新安装。
+
 ## 常规验证
 
 ```sh

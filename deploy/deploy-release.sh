@@ -57,7 +57,6 @@ rollback_needed=0
 sbmgr_stopped=0
 app_state_lock_held=0
 legacy_state_lock_held=0
-snapshot_keep=20
 
 usage() {
     echo "用法: $0 [--home 绝对安装目录] [--sing-box-bin 绝对路径] <SHA256值或SHA256校验文件>" >&2
@@ -450,18 +449,6 @@ restore_previous_state() {
     return 0
 }
 
-prune_data_snapshots() {
-    find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name 'pre-*' -print |
-        LC_ALL=C sort -r |
-        awk -v keep="$snapshot_keep" 'NR > keep' |
-        while IFS= read -r old_snapshot; do
-            case "$old_snapshot" in
-                "$backup_root"/pre-*) rm -rf -- "$old_snapshot" ;;
-                *) echo "拒绝清理越界快照：$old_snapshot" >&2; return 1 ;;
-            esac
-        done
-}
-
 on_exit() {
     status=$?
     trap - EXIT HUP INT TERM
@@ -637,9 +624,6 @@ sbmgr_stopped=0
 rm -f -- "$rollback_binary"
 rollback_binary=
 rm -f -- "$candidate"
-if ! prune_data_snapshots; then
-    echo "部署成功，但旧数据快照清理失败；请检查 $backup_root" >&2
-fi
 trap - EXIT HUP INT TERM
 
 echo "sbmgr $new_version 部署完成（发布版本由 Git 标签 v$new_version 管理）"

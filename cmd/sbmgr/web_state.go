@@ -39,7 +39,7 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		for _, c := range firstWebItems(activeConnectionsForUser(s, u.Name), 50) {
 			connections = append(connections, map[string]string{"device": c.Device, "node": c.Node, "source": c.SourceIP, "target": c.Target, "since": c.StartedAt})
 		}
-		users = append(users, map[string]any{"name": u.Name, "enabled": u.Enabled, "status": userStatus(u), "quota": u.QuotaBytes, "extra_quota": u.ExtraQuotaBytes, "quota_mode": u.QuotaMode, "used": measuredUsage(u), "upload": u.Upload, "download": u.Download, "expires": u.Expires, "current_up": u.CurrentUploadMbps, "current_down": u.CurrentDownloadMbps, "devices": devices, "nodes": nodes, "connections": connections, "accesses": firstWebItems(u.RecentAccesses, 100), "history": lastWebItems(u.UsageHistory, 120), "access": u.Access, "up_mbps": u.UploadMbps, "down_mbps": u.DownloadMbps, "ip_policy": u.IPPolicy, "burst": u.Burst, "throttle": u.Throttle, "billing": u.Billing})
+		users = append(users, map[string]any{"name": u.Name, "portal": portalAccountView(&u), "enabled": u.Enabled, "status": userStatus(u), "quota": u.QuotaBytes, "extra_quota": u.ExtraQuotaBytes, "quota_mode": u.QuotaMode, "used": measuredUsage(u), "upload": u.Upload, "download": u.Download, "expires": u.Expires, "current_up": u.CurrentUploadMbps, "current_down": u.CurrentDownloadMbps, "devices": devices, "nodes": nodes, "connections": connections, "accesses": firstWebItems(u.RecentAccesses, 100), "history": lastWebItems(u.UsageHistory, 120), "access": u.Access, "up_mbps": u.UploadMbps, "down_mbps": u.DownloadMbps, "ip_policy": u.IPPolicy, "burst": u.Burst, "throttle": u.Throttle, "billing": u.Billing})
 	}
 	routes := []any{}
 	members := []any{}
@@ -78,8 +78,16 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		return nil, err
 	}
 	backupList := []any{}
-	for _, b := range backups {
-		backupList = append(backupList, map[string]any{"name": b.Name, "size": b.Size, "modified": b.Modified.Format(time.RFC3339)})
+	for _, b := range planBackupRetention(backups, s.Backup) {
+		expires := ""
+		if !b.ExpiresAt.IsZero() {
+			expires = b.ExpiresAt.Format(time.RFC3339)
+		}
+		backupList = append(backupList, map[string]any{"name": b.Name, "size": b.Size, "modified": b.Modified.Format(time.RFC3339), "expires": expires, "protected": b.Protected})
+	}
+	storage, err := measureBackupStorage(a.statePath, backups)
+	if err != nil {
+		return nil, err
 	}
 	proxies := []any{}
 	for _, kind := range []ManagedProxyKind{ManagedProxyOutbound, ManagedProxyEndpoint} {
@@ -104,10 +112,18 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		status := s.FleetStatus[server.Name]
 		fleet = append(fleet, map[string]any{"name": server.Name, "host": server.Host, "online": status.Online, "checked": status.CheckedAt})
 	}
-	return map[string]any{"audit": auditView, "fleet": fleet, "client": map[string]any{"server": s.Client.Server, "port": s.Client.Port}, "version": appVersion, "time": now.Format(time.RFC3339), "users": users, "outbounds": outbounds, "proxies": proxies, "members": members, "routes": routes, "role": role, "revision": revision, "pending": configurationPending(s) || runtimeApplyPending(s), "mesh_pending": s.MeshRollout != nil || (s.Mesh != nil && (s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision)), "backups": backupList, "alerts": s.Alerts, "health": s.OutboundHealth, "health_settings": normalizedHealthSettings(s.Health), "subscription": map[string]any{"enabled": s.Subscription.Enabled, "base_url": s.Subscription.BaseURL, "listen": s.Subscription.Listen, "template": s.Client.MihomoTemplate != "", "template_path": s.Client.MihomoTemplate, "tls_configured": s.Subscription.TLSCertFile != "" && s.Subscription.TLSKeyFile != ""}}, nil
+	return map[string]any{"audit": auditView, "fleet": fleet, "client": map[string]any{"server": s.Client.Server, "port": s.Client.Port}, "version": appVersion, "time": now.Format(time.RFC3339), "users": users, "outbounds": outbounds, "proxies": proxies, "members": members, "routes": routes, "role": role, "revision": revision, "pending": configurationPending(s) || runtimeApplyPending(s), "mesh_pending": s.MeshRollout != nil || (s.Mesh != nil && (s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision)), "backups": backupList, "backup_settings": s.Backup, "backup_storage": storage, "alerts": s.Alerts, "health": s.OutboundHealth, "health_settings": normalizedHealthSettings(s.Health), "subscription": map[string]any{"enabled": s.Subscription.Enabled, "base_url": s.Subscription.BaseURL, "listen": s.Subscription.Listen, "template": s.Client.MihomoTemplate != "", "template_path": s.Client.MihomoTemplate, "tls_configured": s.Subscription.TLSCertFile != "" && s.Subscription.TLSKeyFile != ""}}, nil
 }
 
 func (a *app) webDelivery(body []byte) webReply {
+	s, err := loadState(a.statePath)
+	if err != nil {
+		return webError(503, "状态不可用")
+	}
+	return webDeliveryFromState(s, body, "")
+}
+
+func webDeliveryFromState(s *State, body []byte, owner string) webReply {
 	var input struct {
 		User   string `json:"user"`
 		Device string `json:"device"`
@@ -116,9 +132,8 @@ func (a *app) webDelivery(body []byte) webReply {
 	if webDecode(body, &input) != nil {
 		return webError(400, "交付请求格式不正确")
 	}
-	s, err := loadState(a.statePath)
-	if err != nil {
-		return webError(503, "状态不可用")
+	if owner != "" && input.User != owner {
+		return webError(403, "只能获取自己的设备订阅")
 	}
 	u := findUser(s, input.User)
 	if u == nil {
@@ -132,6 +147,7 @@ func (a *app) webDelivery(body []byte) webReply {
 		return webError(403, "该用户或设备当前不可交付")
 	}
 	var data []byte
+	var err error
 	mime, name := "text/plain; charset=utf-8", "subscription.txt"
 	switch input.Format {
 	case "link":
