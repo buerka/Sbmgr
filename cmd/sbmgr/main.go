@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const stateVersion = 15
+const stateVersion = 17
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -33,7 +33,8 @@ var (
 )
 
 type State struct {
-	UserGroups        []UserGroup `json:"user_groups,omitempty"`
+	MachineTraffic    []MachineTrafficPeriod `json:"machine_traffic,omitempty"`
+	UserGroups        []UserGroup            `json:"user_groups,omitempty"`
 	connectionIndex   *connectionHeap
 	Version           int                          `json:"version"`
 	BaseConfig        string                       `json:"base_config"`
@@ -79,6 +80,7 @@ type ClientSettings struct {
 }
 
 type User struct {
+	DeviceLimit    int            `json:"device_limit,omitempty"`
 	GroupID        string         `json:"group_id,omitempty"`
 	GroupOverrides []string       `json:"group_overrides,omitempty"`
 	recentIndex    map[string]int // transient write-side lookup, rebuilt after pruning
@@ -279,6 +281,7 @@ type PendingSource struct {
 }
 
 type Device struct {
+	Label             string                  `json:"label,omitempty"`
 	Name              string                  `json:"name"`
 	Enabled           bool                    `json:"enabled"`
 	CreatedAt         string                  `json:"created_at,omitempty"`
@@ -996,6 +999,7 @@ func (a *app) userCmdLocked(args []string) error {
 		return nil
 	case "set":
 		fs := a.newFlagSet("user set")
+		deviceLimit := fs.Int("device-limit", -1, "自助设备总名额（含已有及停用设备），0 关闭自助管理")
 		quota := fs.String("quota", "", "新的总流量配额，如 100G；0 为不限")
 		quotaMode := fs.String("quota-mode", "", "配额计量方式: total/upload/download（双向合计/仅上传/仅下载）")
 		extraQuota := fs.String("extra-quota", "", "本账期附加流量包，如 20G；0 清除")
@@ -1038,6 +1042,12 @@ func (a *app) userCmdLocked(args []string) error {
 		u := findUser(s, name)
 		if u == nil {
 			return fmt.Errorf("用户 %q 不存在", name)
+		}
+		if flagWasSet(fs, "device-limit") {
+			if *deviceLimit < 0 || *deviceLimit > maxSelfServiceDevices {
+				return errors.New("设备名额必须为 0–100；0 关闭自助管理")
+			}
+			u.DeviceLimit = *deviceLimit
 		}
 		hadBurstBlock := u.BlockedUntil != ""
 		quotaSet, quotaModeSet, extraQuotaSet, expireSet, upSet, downSet, throttleSet, burstSet, ipSet, billingSet := false, false, false, false, false, false, false, false, false, false
@@ -1281,7 +1291,7 @@ func (a *app) userCmdLocked(args []string) error {
 			}
 			u.Billing = policy
 		}
-		if !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !burstSet && !ipSet && !billingSet {
+		if !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !burstSet && !ipSet && !billingSet && !flagWasSet(fs, "device-limit") {
 			return errors.New("没有指定要修改的字段")
 		}
 		if err := saveState(a.statePath, s); err != nil {
@@ -1289,7 +1299,9 @@ func (a *app) userCmdLocked(args []string) error {
 		}
 		burstOnly := burstSet && !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !ipSet && !billingSet
 		ipOnly := ipSet && !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !burstSet && !billingSet
-		if burstOnly && !(hadBurstBlock && !u.Burst.Enabled) {
+		if flagWasSet(fs, "device-limit") && fs.NFlag() == 1 {
+			fmt.Fprintf(a.out, "已更新用户 %s 的自助设备名额，即时生效；现有设备保持不变\n", u.Name)
+		} else if burstOnly && !(hadBurstBlock && !u.Burst.Enabled) {
 			fmt.Fprintf(a.out, "已更新用户 %s 的异常流量保护，后台下个维护周期生效\n", u.Name)
 		} else if ipOnly {
 			fmt.Fprintf(a.out, "已更新用户 %s 的来源 IP 规则，后台下个维护周期自动应用\n", u.Name)
@@ -2299,6 +2311,12 @@ func migrateState(s *State) error {
 		case 14:
 			normalizeUserGroups(s)
 			s.Version = 15
+		case 15:
+			// Self-service is opt-in; existing devices and policies remain unchanged.
+			s.Version = 16
+		case 16:
+			// Machine traffic starts with a baseline; no historical usage is inferred.
+			s.Version = 17
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}
@@ -2307,6 +2325,12 @@ func migrateState(s *State) error {
 }
 
 func validateState(s *State) error {
+	if err := validateMachineTraffic(s); err != nil {
+		return err
+	}
+	if err := validateDeviceSelfService(s); err != nil {
+		return err
+	}
 	if err := validateUserGroups(s); err != nil {
 		return err
 	}

@@ -67,6 +67,7 @@ func webActions() []webAction {
 	add("user.add", "新建用户", "users", "user add", "加入默认分组。配额、限速、到期日和线路留空时继承分组规则；分组未设置时沿用不限配额、不限速、长期有效和默认直出。明确填写的项作为个人配置。"+saved, false, []string{"user"}, f("user", "用户名", "text", true), quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("expire", "到期日（留空继承）", "date", false), f("node-name", "初始节点名称", "text", true), source("outbound", "初始线路（留空继承）", "outbounds", false), up, down)
 	add("user.clone", "复制用户策略", "users", "user clone", saved, false, []string{"user"}, f("user", "新用户名", "text", true), source("from", "复制自", "users", true))
 	add("user.set", "配额与限速", "user", "user set", saved, false, []string{"user"}, user, quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("extra-quota", "本期附加流量（0 清除）", "text", false), f("expire", "到期日", "date", false), f("clear-expire", "清除到期日", "checkbox", false), up, down, selectField("billing-enabled", "自动账期", "true", "false"), f("billing-day", "账期日（1–28）", "number", false))
+	add("user.devices", "自助设备名额", "user", "user set", "保存后名额即时生效。0 关闭自助管理；1–100 为设备总名额，包含已有和停用设备。减少名额不删除设备，超额时停止新增；各设备共用用户流量。", false, []string{"user"}, user, f("device-limit", "设备总名额（0 关闭自助管理）", "number", true))
 	add("user.ip", "来源 IP 规则", "user", "user set", saved, false, []string{"user"}, user, selectField("ip-enabled", "启用规则", "true", "false"), selectField("ip-mode", "执行方式", "enforce", "monitor"), selectField("ip-binding", "绑定方式", "dynamic", "auto", "manual"), f("ip-max", "最多来源 IP 数", "number", false), f("ip-handover-seconds", "换绑宽限秒数", "number", false), f("ip-allowed", "固定 IP（逗号分隔）", "text", false), f("ip-temp", "临时替代 IP（逗号分隔）", "text", false), f("ip-temp-minutes", "临时 IP 有效分钟数", "number", false))
 	add("user.burst", "异常流量保护", "user", "user set", saved, false, []string{"user"}, user, selectField("burst-enabled", "启用保护", "true", "false"), f("burst-window", "滑动窗口（分钟）", "number", false), f("burst-limit", "窗口流量阈值（如 2G）", "text", false), f("burst-block", "封禁分钟数", "number", false), selectField("burst-action", "处理方式", "soft", "hard"), f("burst-soft-up-kbps", "软封上传 Kbps", "number", false), f("burst-soft-down-kbps", "软封下载 Kbps", "number", false))
 	add("user.throttle", "阶梯限速", "user", "user set", saved, false, []string{"user"}, user, selectField("tiered", "启用阶梯限速", "true", "false"), f("tier1-usage", "第一档用量百分比", "number", false), f("tier1-speed", "第一档保留速度百分比", "number", false), f("tier2-usage", "第二档用量百分比", "number", false), f("tier2-speed", "第二档保留速度百分比", "number", false))
@@ -98,6 +99,7 @@ func webActions() []webAction {
 	add("backup.retention", "自动清理设置", "backup", "backup retention", "仅作用于本机，下次后台维护生效，无需应用配置。只清理到期的手动和每日状态备份，删除不可撤销；每类保留最新一份，恢复保护、迁移留存和配置备份不受影响。部分删除失败会记录错误，并在下一轮重试。", true, nil, f("days", "保留天数", "number", true))
 	add("backup.restore", "恢复备份", "backup", "backup restore", "状态已恢复；检查后应用配置。", true, []string{"name"}, source("name", "备份", "backups", true))
 	add("health.check", "检查出站健康", "ops", "health check", "出站健康检查完成。", false, nil)
+	add("machine.traffic_period", "机器续费周期", "machine", "", "只修改所选机器的统计日期，保存后立即显示；日期按主机本地时区，结束日包含当日。不会清除已采集数据，也不会改变用户流量配额。未采集的历史流量无法补算，保存失败时保留原周期，无需应用配置。", false, nil, source("member", "机器", "traffic-members", true), f("start", "周期开始日", "date", true), f("end", "周期结束日（含当日）", "date", true))
 	add("health.set", "健康检查设置", "ops", "health set", "健康设置已保存，后台下一轮生效。", false, nil, selectField("mode", "自动探测", "auto", "off"), f("interval", "间隔分钟", "number", false), f("timeout", "超时秒数", "number", false), f("failures", "告警失败次数", "number", false), f("targets", "探测目标 tag=host:port（逗号分隔）", "text", false))
 	for _, op := range []struct {
 		id, title, effect string
@@ -237,6 +239,9 @@ func (a *app) executeWebActionLocked(input webActionInput, args []string) error 
 	}
 	if webSlaveMutation(s, input.Action) {
 		return errors.New("从机用户授权由主机统一管理")
+	}
+	if input.Action == "machine.traffic_period" {
+		return a.setMachineTrafficPeriod(input.Fields["member"], input.Fields["start"], input.Fields["end"])
 	}
 	if strings.HasPrefix(input.Action, "group.") {
 		var change groupChange

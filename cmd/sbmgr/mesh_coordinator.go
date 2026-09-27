@@ -24,7 +24,7 @@ var meshExchange = func(a *app, member mesh.Member, r meshRequest, local bool) (
 	}
 	command := "SBMGR_HOME=" + posixShellQuote(member.AppDir) + " " + posixShellQuote(member.AppDir+"/sbmgr") + " admin mesh rpc"
 	timeout := 45 * time.Second
-	if r.Operation == "inventory" {
+	if r.Operation == "inventory" || r.Operation == "machine_traffic" {
 		timeout = 8 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

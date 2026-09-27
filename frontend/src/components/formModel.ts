@@ -2,6 +2,7 @@ import { inputSize, userNodeSpeed } from "../format";
 import type { Action, Context, Field, Snapshot } from "../types";
 export const patchActions = new Set([
   "user.set",
+  "user.devices",
   "node.set",
   "user.ip",
   "device.ip",
@@ -39,6 +40,8 @@ export function initialFields(
         (!context.device || n.device === context.device),
     );
   let fields: Context = {};
+  if (action.id === "user.devices" && u)
+    fields = { "device-limit": num(u.device_limit) };
   if (action.id === "user.set" && u)
     fields = {
       quota: inputSize(u.quota),
@@ -202,11 +205,16 @@ export function fieldOptions(
     case "users":
       return state.users.map((u) => [u.name, u.name]);
     case "devices":
-      return (u?.devices || []).map((d) => [d.name, d.name]);
+      return (u?.devices || []).map((d) => [d.name, d.label || d.name]);
     case "nodes":
       return (u?.nodes || [])
         .filter((n) => !values.device || n.device === values.device)
         .map((n) => [n.name, n.name]);
+    case "traffic-members":
+      return (state.machine_traffic || []).map((m) => [
+        m.member,
+        m.member === "local" ? "本机" : m.member,
+      ]);
     case "members":
       return state.members.map((m) => [m.id, m.id]);
     case "outbounds":

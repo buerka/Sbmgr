@@ -91,6 +91,13 @@ export const api = {
   acceptInvite: (token: string, password: string) =>
     request<{ message: string }>("/invite/accept", { token, password }),
   me: () => request<PortalSnapshot>("/me"),
+  selfDevice: (input: {
+    action: "add" | "rename" | "delete" | "rotate-link";
+    device?: string;
+    name?: string;
+    from?: string;
+    expected: string;
+  }) => request<{ message: string; pending: boolean }>("/me/devices", input),
   selfPassword: (current_password: string, new_password: string) =>
     request<{ message: string }>("/me/password", {
       current_password,

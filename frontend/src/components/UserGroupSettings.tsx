@@ -131,7 +131,7 @@ export function UserGroupSettings({
           ))}
         </div>
         <p className="text-sm text-muted-foreground">
-          未勾选的项目会继承分组规则；分组未设置该项时保留当前值。直接在其他标签页修改配额、限速、到期或线路，与分组规则不同的项会自动转为个人配置。
+          未勾选的项目会继承分组规则；分组未设置该项时保留当前值。直接在其他标签页修改设备名额、配额、限速、到期或线路，与分组规则不同的项会自动转为个人配置。
         </p>
         <div className="flex flex-wrap gap-2">
           <Button

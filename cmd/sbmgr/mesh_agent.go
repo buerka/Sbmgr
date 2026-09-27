@@ -20,14 +20,15 @@ type meshRequest struct {
 }
 
 type meshResponse struct {
-	Protocol    int         `json:"protocol"`
-	Member      string      `json:"member"`
-	Revision    uint64      `json:"revision"`
-	Phase       string      `json:"phase,omitempty"`
-	Transaction string      `json:"transaction,omitempty"`
-	Error       string      `json:"error,omitempty"`
-	Usage       []meshUsage `json:"usage,omitempty"`
-	Exits       []webExit   `json:"exits,omitempty"`
+	Protocol       int                    `json:"protocol"`
+	Member         string                 `json:"member"`
+	Revision       uint64                 `json:"revision"`
+	Phase          string                 `json:"phase,omitempty"`
+	Transaction    string                 `json:"transaction,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+	Usage          []meshUsage            `json:"usage,omitempty"`
+	Exits          []webExit              `json:"exits,omitempty"`
+	MachineTraffic *machineTrafficReading `json:"machine_traffic,omitempty"`
 }
 
 func decodeMeshJSON(reader io.Reader, target any) error {
@@ -75,7 +76,7 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 			response.Revision = j.Active.Revision
 		}
 		response.Phase, response.Transaction = j.Phase, j.Transaction
-		if r.Operation == "usage" || r.Operation == "access" {
+		if r.Operation == "usage" || r.Operation == "access" || r.Operation == "machine_traffic" {
 			if s.Mesh != nil || r.Plan != nil || r.Transaction != "" {
 				return errors.New("入口同步请求角色或参数无效")
 			}
@@ -85,6 +86,13 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 				}
 				response.Usage = meshUsageSnapshot(s)
 				return nil
+			}
+			if r.Operation == "machine_traffic" {
+				if r.Access != nil {
+					return errors.New("机器流量查询不接受授权")
+				}
+				response.MachineTraffic, err = localMachineTrafficReading(a.statePath)
+				return err
 			}
 			return a.installMeshAccess(s, r.Access)
 		}

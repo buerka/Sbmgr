@@ -140,6 +140,7 @@ function policyForm(g: UserGroup) {
     up: String(p.rate?.upload || 0),
     down: String(p.rate?.download || 0),
     expiry: p.expiry || "",
+    devices: String(p.devices || 0),
     routes: p.routes || [],
   };
 }
@@ -156,6 +157,12 @@ function parseQuota(value: string) {
 }
 function toPolicy(f: ReturnType<typeof policyForm>): GroupPolicy {
   const p: GroupPolicy = {};
+  if (f.enabled.includes("devices")) {
+    const n = Number(f.devices);
+    if (!f.devices.trim() || !Number.isInteger(n) || n < 0 || n > 100)
+      throw new Error("设备名额须为 0–100 的整数。");
+    p.devices = n;
+  }
   if (f.enabled.includes("quota"))
     p.quota = { bytes: parseQuota(f.quota), mode: f.mode };
   if (f.enabled.includes("rate")) {
@@ -356,6 +363,34 @@ function GroupWorkspace({ g, s }: { g: UserGroup; s: Snapshot }) {
                     </p>
                   ) : (
                     <div className="space-y-4 sm:pl-7">
+                      {key === "devices" && (
+                        <div className="space-y-2">
+                          <label htmlFor="group-devices">
+                            每位用户的设备总名额
+                          </label>
+                          <Input
+                            id="group-devices"
+                            className="max-w-xs"
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="1"
+                            disabled={locked}
+                            value={form.devices}
+                            onChange={(e) =>
+                              setForm({ ...form, devices: e.target.value })
+                            }
+                          />
+                          <p className="text-sm text-muted-foreground">
+                            0 关闭自助管理；1–100
+                            为设备总名额，包含已有和停用设备。减少名额不删除已有设备，超额期间不能新增。保存后名额立即生效。
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            设备共用用户配额；动态单活、来源 IP
+                            和并发规则继续有效。用户只能复制自己已有设备的线路与限制。
+                          </p>
+                        </div>
+                      )}
                       {key === "quota" && (
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div className="space-y-2">

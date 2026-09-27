@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 6
+	sqliteSchemaVersion = 8
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -90,6 +90,8 @@ var sqliteSchema = append([]string{
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS devices_user_ordinal_idx ON devices(user_id, ordinal)`,
 	sqlitePortalSchema,
+	sqliteDeviceSelfServiceSchema[0],
+	sqliteDeviceSelfServiceSchema[1],
 	sqliteGroupSchema[0],
 	sqliteGroupSchema[1],
 	sqliteGroupSchema[2],
@@ -255,7 +257,7 @@ var sqliteSchema = append([]string{
 		PRIMARY KEY(node_id, target)
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS node_destinations_count_idx ON node_destinations(node_id, count DESC)`,
-}, sqliteMeshSchema...)
+}, append(sqliteMeshSchema, sqliteMachineTrafficSchema...)...)
 
 func isSQLiteStatePath(path string) bool {
 	return !strings.EqualFold(filepath.Ext(strings.TrimSpace(path)), ".json")
@@ -689,6 +691,48 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 6
+		case 6:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for _, statement := range sqliteDeviceSelfServiceSchema {
+				if _, err := tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec("UPDATE metadata SET value = '7' WHERE key = 'schema_version'"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("PRAGMA user_version = 7"); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 7
+		case 7:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for _, statement := range sqliteMachineTrafficSchema {
+				if _, err := tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec("UPDATE metadata SET value = '8' WHERE key = 'schema_version'"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("PRAGMA user_version = 8"); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 8
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
@@ -1108,6 +1152,9 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 			return err
 		}
 		userIDs[user.Name] = userID
+		if err := writeSQLiteDeviceLimit(tx, userID, user.DeviceLimit); err != nil {
+			return err
+		}
 		if err := writeSQLiteGroupMember(tx, userID, user); err != nil {
 			return err
 		}
@@ -1150,6 +1197,9 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 				return err
 			}
 			deviceIDs[sqliteEntityKey(user.Name, device.Name)] = deviceID
+			if err := writeSQLiteDeviceLabel(tx, deviceID, device.Label); err != nil {
+				return err
+			}
 		}
 
 		for nodeOrdinal := range user.Nodes {
@@ -1739,6 +1789,9 @@ func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
 		return nil, err
 	}
 
+	if err := readSQLiteDeviceSelfService(tx, state, userIDs, deviceIDs); err != nil {
+		return nil, err
+	}
 	nodeIDs := map[int64]sqliteNodeLocation{}
 	rows, err = tx.Query(`SELECT id, user_id, device_id, name, auth_user, uuid, outbound, upload_mbps,
 		download_mbps, rate_mark, upload_bytes, download_bytes, current_upload_mbps,

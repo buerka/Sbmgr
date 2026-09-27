@@ -287,7 +287,7 @@ func ipRestrictionSetSignature(s *State, now time.Time) (string, error) {
 
 func (a *app) daemonCycle() error {
 	cycleErr := a.withStateLock(a.daemonCycleLocked)
-	return errors.Join(cycleErr, a.networkMaintenance(), a.meshSyncAccess(), a.meshLeaseCycle())
+	return errors.Join(cycleErr, a.networkMaintenance(), a.meshSyncAccess(), a.meshLeaseCycle(), a.machineTrafficCycle())
 }
 
 func (a *app) daemonCycleLocked() error {

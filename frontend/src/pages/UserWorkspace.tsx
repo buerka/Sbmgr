@@ -35,7 +35,12 @@ const sections: {
 }[] = [
   { id: "basic", title: "基本设置", icon: "settings", forms: ["user.set"] },
   { id: "group", title: "分组与继承", icon: "users", forms: ["user.group"] },
-  { id: "devices", title: "设备与线路", icon: "routes", forms: [] },
+  {
+    id: "devices",
+    title: "设备与线路",
+    icon: "routes",
+    forms: ["user.devices"],
+  },
   {
     id: "access",
     title: "访问控制",
@@ -274,6 +279,19 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
             </div>
             <ActionButton id="device.add" context={context} />
           </div>
+          <div className="mb-6">
+            <UserSetting
+              id="user.devices"
+              user={u}
+              snapshot={s}
+              onDirty={reportDirty}
+            />
+            <p className="text-sm text-muted-foreground mt-3">
+              已使用 {u.devices.length} 台 /{" "}
+              {u.device_limit ? `${u.device_limit} 台名额` : "自助管理未开放"}
+              。需要先在「面板登录」邀请用户开通账号。
+            </p>
+          </div>
           {!u.devices.length && (
             <Empty
               title="还没有设备"
@@ -292,7 +310,7 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                       <Icon name="device" size={20} />
                     </span>
                     <div>
-                      <h3>{d.name}</h3>
+                      <h3>{d.label || d.name}</h3>
                       <p className="text-xs text-muted-foreground mt-1">
                         {nodes.length} 个节点 · {bytes(d.upload + d.download)}{" "}
                         累计用量

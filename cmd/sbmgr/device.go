@@ -186,6 +186,9 @@ func (a *app) deviceCmdLocked(args []string) error {
 		}
 		return nil
 	case "add":
+		if u.DeviceLimit > 0 && len(u.Devices) >= u.DeviceLimit {
+			return errors.New("设备名额已用完，请先增加用户的设备名额")
+		}
 		fs := a.newFlagSet("device add")
 		name := fs.String("name", "", "设备名称")
 		from := fs.String("from", "", "复制哪个现有设备的节点；留空复制第一个设备")

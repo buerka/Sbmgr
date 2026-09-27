@@ -14,7 +14,7 @@ import (
 
 const defaultGroupID = "default"
 
-var groupScopes = []string{"quota", "rate", "expiry", "routes"}
+var groupScopes = []string{"quota", "rate", "expiry", "routes", "devices"}
 
 type UserGroup struct {
 	ID     string      `json:"id"`
@@ -34,10 +34,11 @@ type GroupRoute struct {
 	Name     string `json:"name"`
 }
 type GroupPolicy struct {
-	Quota  *GroupQuota   `json:"quota,omitempty"`
-	Rate   *GroupRate    `json:"rate,omitempty"`
-	Expiry *string       `json:"expiry,omitempty"`
-	Routes *[]GroupRoute `json:"routes,omitempty"`
+	Devices *int          `json:"devices,omitempty"`
+	Quota   *GroupQuota   `json:"quota,omitempty"`
+	Rate    *GroupRate    `json:"rate,omitempty"`
+	Expiry  *string       `json:"expiry,omitempty"`
+	Routes  *[]GroupRoute `json:"routes,omitempty"`
 }
 
 func findGroup(s *State, id string) *UserGroup {
@@ -64,6 +65,8 @@ func normalizeUserGroups(s *State) {
 
 func groupValue(p GroupPolicy, scope string) any {
 	switch scope {
+	case "devices":
+		return p.Devices
 	case "quota":
 		return p.Quota
 	case "rate":
@@ -97,6 +100,9 @@ func markGroupOverride(u *User, scope string) {
 }
 
 func validateGroupPolicy(p GroupPolicy) error {
+	if p.Devices != nil && (*p.Devices < 0 || *p.Devices > maxSelfServiceDevices) {
+		return errors.New("设备名额必须为 0–100；0 关闭自助管理")
+	}
 	if p.Quota != nil {
 		if p.Quota.Bytes < 0 {
 			return errors.New("分组配额不能为负数")
@@ -198,6 +204,9 @@ func captureGroupOverrides(s *State) {
 			continue
 		}
 		p := g.Policy
+		if p.Devices != nil && u.DeviceLimit != *p.Devices {
+			markGroupOverride(u, "devices")
+		}
 		if p.Quota != nil && (u.QuotaBytes != p.Quota.Bytes || normalizedQuotaMode(u.QuotaMode) != normalizedQuotaMode(p.Quota.Mode)) {
 			markGroupOverride(u, "quota")
 		}
@@ -255,6 +264,9 @@ func applyGroupPolicy(s *State, u *User, scopes []string) error {
 		for i := range u.Nodes {
 			u.Nodes[i].UploadMbps, u.Nodes[i].DownloadMbps = p.Rate.Upload, p.Rate.Download
 		}
+	}
+	if want("devices") && p.Devices != nil {
+		u.DeviceLimit = *p.Devices
 	}
 	if want("quota") && p.Quota != nil {
 		u.QuotaBytes, u.QuotaMode, u.QuotaAlertStage = p.Quota.Bytes, normalizedQuotaMode(p.Quota.Mode), 0
@@ -348,7 +360,7 @@ func userGroupVersion(s *State) string {
 		for _, n := range u.Nodes {
 			nodes = append(nodes, []any{n.Device, n.Name, n.Outbound, n.UUID, n.UploadMbps, n.DownloadMbps})
 		}
-		values = append(values, []any{u.Name, u.GroupID, u.GroupOverrides, u.QuotaBytes, u.QuotaMode, u.Expires, u.UploadMbps, u.DownloadMbps, nodes, devices})
+		values = append(values, []any{u.Name, u.GroupID, u.GroupOverrides, u.DeviceLimit, u.QuotaBytes, u.QuotaMode, u.Expires, u.UploadMbps, u.DownloadMbps, nodes, devices})
 	}
 	raw, _ := json.Marshal(values)
 	sum := sha256.Sum256(raw)

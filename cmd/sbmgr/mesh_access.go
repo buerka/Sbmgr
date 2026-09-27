@@ -198,7 +198,7 @@ func buildMeshAccess(s *State, member string, sequence uint64, now time.Time) me
 				needed = needed || n.Device == d.Name
 			}
 			if needed {
-				u.Devices = append(u.Devices, Device{Name: d.Name, Enabled: d.Enabled, CreatedAt: d.CreatedAt, IPPolicy: meshEntryIPPolicy(d.IPPolicy), Access: d.Access})
+				u.Devices = append(u.Devices, Device{Name: d.Name, Label: d.Label, Enabled: d.Enabled, CreatedAt: d.CreatedAt, IPPolicy: meshEntryIPPolicy(d.IPPolicy), Access: d.Access})
 			}
 		}
 		if expired(original, now) || overQuota(original) || burstHardBlocked(original, now) {
@@ -282,7 +282,7 @@ func (a *app) installMeshAccess(s *State, access *meshAccess) error {
 		if supplied.Portal != nil {
 			return errors.New("从机授权不接受面板登录凭据")
 		}
-		if supplied.GroupID != "" || len(supplied.GroupOverrides) != 0 {
+		if supplied.DeviceLimit != 0 || supplied.GroupID != "" || len(supplied.GroupOverrides) != 0 {
 			return errors.New("从机授权不接受分组管理元数据")
 		}
 		// Do not accept runtime histories, subscriptions, billing or remote

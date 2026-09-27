@@ -13,6 +13,7 @@ export interface AccessPolicy {
 }
 export interface Device {
   name: string;
+  label?: string;
   enabled: boolean;
   upload: number;
   download: number;
@@ -59,8 +60,9 @@ export interface Node {
   current_up: number;
   current_down: number;
 }
-export type GroupScope = "quota" | "rate" | "expiry" | "routes";
+export type GroupScope = "quota" | "rate" | "expiry" | "routes" | "devices";
 export interface GroupPolicy {
+  devices?: number;
   quota?: { bytes: number; mode: string };
   rate?: { upload: number; download: number };
   expiry?: string;
@@ -72,6 +74,7 @@ export interface UserGroup {
   policy: GroupPolicy;
 }
 export interface User {
+  device_limit?: number;
   group_id?: string;
   group_overrides?: GroupScope[];
   portal?: {
@@ -123,10 +126,13 @@ export interface User {
   }[];
 }
 export interface PortalSnapshot {
+  device_version: string;
+  pending: boolean;
   time: string;
   subscription_enabled: boolean;
   user: Pick<
     User,
+    | "device_limit"
     | "name"
     | "enabled"
     | "status"
@@ -157,7 +163,23 @@ export interface ClientEntry {
   reality_public_key?: string;
   short_id?: string;
 }
+export interface MachineTrafficRecord {
+  member: string;
+  period_start: string;
+  period_end: string;
+  upload_bytes: number;
+  download_bytes: number;
+  total_bytes: number;
+  covered_seconds: number;
+  period_seconds: number;
+  coverage_percent: number;
+  first_sample_at: string;
+  last_sample_at: string;
+  status: "unconfigured" | "collecting" | "complete" | "no_data" | "error";
+  note: string;
+}
 export interface Snapshot {
+  machine_traffic?: MachineTrafficRecord[];
   groups?: UserGroup[];
   group_version?: string;
   version: string;

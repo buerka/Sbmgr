@@ -3,6 +3,12 @@ import { bytes } from "../format";
 export const groupScopes: { key: GroupScope; label: string; detail: string }[] =
   [
     {
+      key: "devices",
+      label: "设备名额",
+      detail:
+        "每位用户独立分配；设备共用该用户流量，允许用户自行添加、命名和删除。",
+    },
+    {
       key: "quota",
       label: "流量配额",
       detail: "每位用户独立计算；附加流量和账期保持个人设置。",
@@ -30,6 +36,10 @@ export const groupName = (s: Snapshot, id?: string) =>
 export function groupSummary(p: GroupPolicy, key: GroupScope) {
   if (p[key] === undefined) return "未统一设置，保留个人当前配置";
   switch (key) {
+    case "devices":
+      return p.devices
+        ? `${p.devices} 台 / 人 · 可自助管理`
+        : "关闭自助设备管理";
     case "quota":
       return `${p.quota!.bytes ? bytes(p.quota!.bytes) : "不限流量"} / 人 · ${{ total: "双向合计", upload: "仅上传", download: "仅下载" }[p.quota!.mode] || p.quota!.mode}`;
     case "rate":

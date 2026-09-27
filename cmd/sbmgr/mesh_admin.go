@@ -118,6 +118,9 @@ func (a *app) meshCmd(args []string) error {
 				return errors.New("接入文件只能包含管理身份；线路通过主机单独应用")
 			}
 			s.MeshAgent.Identity = &MeshIdentity{Master: false}
+			// A standalone local billing window belongs to this host's
+			// former administrative view, not to the new master's policy.
+			s.MachineTraffic = nil
 		} else if args[0] == "init" {
 			if s.Mesh != nil || s.MeshAgent.Cluster != "" {
 				return errors.New("本机已配置主从身份")
@@ -132,6 +135,11 @@ func (a *app) meshCmd(args []string) error {
 			}
 			s.Mesh = &mesh.Topology{ID: *cluster, Master: *id, Revision: 1, Members: []mesh.Member{{ID: *id}}}
 			s.MeshAgent = MeshAgentState{Cluster: *cluster, Member: *id, Identity: &MeshIdentity{Master: true}}
+			for i := range s.MachineTraffic {
+				if s.MachineTraffic[i].Member == "local" {
+					s.MachineTraffic[i].Member = *id
+				}
+			}
 		} else {
 			if s.Mesh == nil {
 				return errors.New("此操作需要在主机上执行")
@@ -167,6 +175,9 @@ func (a *app) meshCmd(args []string) error {
 				}
 				if len(s.Mesh.Members) >= mesh.MaxMembers {
 					return errors.New("节点数已达上限")
+				}
+				if *id == "local" {
+					return errors.New("local 是单机流量历史保留标识，不能作为从机标识")
 				}
 				s.Mesh.Members = append(s.Mesh.Members, mesh.Member{ID: *id, SSHHost: *host, SSHPort: *port, SSHUser: *user, SSHKeyPath: *key, AppDir: *home})
 			case "route":
@@ -220,6 +231,7 @@ func (a *app) meshCmd(args []string) error {
 					return errors.New("节点不存在")
 				}
 				s.Mesh.Members = slices.DeleteFunc(s.Mesh.Members, func(m mesh.Member) bool { return m.ID == *id })
+				s.MachineTraffic = slices.DeleteFunc(s.MachineTraffic, func(p MachineTrafficPeriod) bool { return p.Member == *id })
 			default:
 				return errors.New("未知主从操作")
 			}

@@ -18,6 +18,7 @@ import { DeviceDelivery } from "../components/DeviceDelivery";
 import { bytes, dateTime, rate } from "../format";
 import { optionLabels } from "../components/formModel";
 import { Account } from "./Account";
+import { MyDevices } from "./MyDevices";
 import "./user-workspace.css";
 
 function MyStatus({ data }: { data: PortalSnapshot }) {
@@ -76,7 +77,10 @@ function MyStatus({ data }: { data: PortalSnapshot }) {
             {u.nodes.map((n, index) => (
               <TableRow key={`${n.device}/${n.name}/${index}`}>
                 <TableCell className="font-medium">{n.name}</TableCell>
-                <TableCell>{n.device}</TableCell>
+                <TableCell>
+                  {u.devices.find((d) => d.name === n.device)?.label ||
+                    n.device}
+                </TableCell>
                 <TableCell>
                   <Badge kind={n.available ? "success" : "warning"}>
                     {n.available ? "可使用" : "暂不可用"}
@@ -192,6 +196,7 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
         >
           {[
             ["/me", "我的状态"],
+            ["/me/devices", "我的设备"],
             ["/me/subscriptions", "我的订阅"],
             ["/me/account", "密码设置"],
           ].map(([to, label]) => (
@@ -216,6 +221,16 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
         <Routes>
           <Route path="/me/account" element={<Account />} />
           <Route
+            path="/me/devices"
+            element={
+              data ? (
+                <MyDevices data={data} refresh={refresh} />
+              ) : (
+                <Empty title="正在读取设备…" />
+              )
+            }
+          />
+          <Route
             path="/me"
             element={
               data ? (
@@ -238,6 +253,7 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
                     user={data.user}
                     readOnly
                     enabled={data.subscription_enabled}
+                    selfService={{ version: data.device_version, refresh }}
                   />
                 </>
               ) : (

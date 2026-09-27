@@ -1,3 +1,4 @@
+import { ResetSubscriptionLink } from "./ResetSubscriptionLink";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
@@ -22,10 +23,12 @@ export function DeviceDelivery({
   user,
   readOnly = false,
   enabled,
+  selfService,
 }: {
   user?: DeliveryUser;
   readOnly?: boolean;
   enabled?: boolean;
+  selfService?: { version: string; refresh: () => Promise<void> };
 }) {
   const adminSubscriptionEnabled = useAppSelector(
     (s) => s.admin.snapshot?.subscription.enabled,
@@ -86,7 +89,7 @@ export function DeviceDelivery({
                   </Link>
                 </TableCell>
               )}
-              <TableCell>{d.name}</TableCell>
+              <TableCell>{d.label || d.name}</TableCell>
               <TableCell>
                 <Badge kind={d.deliverable ? "success" : "default"}>
                   {d.deliverable
@@ -161,6 +164,13 @@ export function DeviceDelivery({
                     <Icon name="download" />
                     YAML
                   </Button>
+                  {readOnly && selfService && (
+                    <ResetSubscriptionLink
+                      device={d}
+                      version={selfService.version}
+                      refresh={selfService.refresh}
+                    />
+                  )}
                   {!readOnly && (
                     <ActionMenu
                       compact

@@ -10,6 +10,7 @@ import {
 } from "../components/common";
 import { Button } from "../components/ui/button";
 import { Icon } from "../components/Icons";
+import { MachineTraffic } from "../components/MachineTraffic";
 import { bytes, rate } from "../format";
 import { useAppSelector } from "../store";
 export function Overview() {
@@ -51,6 +52,7 @@ export function Overview() {
           icon="routes"
         />
       </div>
+      <MachineTraffic snapshot={s} />
       <Panel
         title="用户概览"
         description="当前的管理对象"
