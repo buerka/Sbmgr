@@ -1381,7 +1381,7 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 		}
 	}
 	alertOccurrences := map[string]int{}
-	for _, alert := range state.Alerts {
+	for alertOrdinal, alert := range state.Alerts {
 		identity, err := sqliteAlertIdentity(alert)
 		if err != nil {
 			return err
@@ -1395,14 +1395,15 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 		if _, err := tx.Exec(`INSERT INTO alerts(
 			stable_key, ordinal, at, user_name, kind, message, acknowledged, notified_at, notify_attempts,
 			last_notify_attempt, notify_error
-		) VALUES(?, COALESCE((SELECT MAX(ordinal) + 1 FROM alerts), 0), ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(stable_key) DO UPDATE SET acknowledged = excluded.acknowledged, notified_at = excluded.notified_at,
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(stable_key) DO UPDATE SET ordinal = excluded.ordinal,
+			acknowledged = excluded.acknowledged, notified_at = excluded.notified_at,
 			notify_attempts = excluded.notify_attempts,
 			last_notify_attempt = excluded.last_notify_attempt, notify_error = excluded.notify_error
-		WHERE alerts.acknowledged IS NOT excluded.acknowledged
+		WHERE alerts.ordinal IS NOT excluded.ordinal OR alerts.acknowledged IS NOT excluded.acknowledged
 			OR alerts.notified_at IS NOT excluded.notified_at OR alerts.notify_attempts IS NOT excluded.notify_attempts
 			OR alerts.last_notify_attempt IS NOT excluded.last_notify_attempt OR alerts.notify_error IS NOT excluded.notify_error`,
-			stableKey, alert.At, alert.User, alert.Kind, alert.Message,
+			stableKey, alertOrdinal, alert.At, alert.User, alert.Kind, alert.Message,
 			boolInt(alert.Acknowledged), alert.NotifiedAt, alert.NotifyAttempts, alert.LastNotifyAttempt, alert.NotifyError); err != nil {
 			return err
 		}
@@ -1446,42 +1447,42 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 			}
 		}
 		trafficOccurrences := map[string]int{}
-		for _, sample := range user.TrafficSamples {
+		for sampleOrdinal, sample := range user.TrafficSamples {
 			stableKey := sqliteSequenceKey(sample.At, trafficOccurrences)
 			if _, err := tx.Exec(`INSERT INTO keep_traffic_samples(user_id, stable_key) VALUES(?, ?)`, userID, stableKey); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`INSERT INTO traffic_samples(user_id, stable_key, ordinal, at, bytes)
-				VALUES(?, ?, COALESCE((SELECT MAX(ordinal) + 1 FROM traffic_samples WHERE user_id = ?), 0), ?, ?)
-				ON CONFLICT(user_id, stable_key) DO UPDATE SET at = excluded.at, bytes = excluded.bytes
-				WHERE traffic_samples.at IS NOT excluded.at OR traffic_samples.bytes IS NOT excluded.bytes`,
-				userID, stableKey, userID, sample.At, sample.Bytes); err != nil {
+				VALUES(?, ?, ?, ?, ?)
+				ON CONFLICT(user_id, stable_key) DO UPDATE SET ordinal = excluded.ordinal, at = excluded.at, bytes = excluded.bytes
+				WHERE traffic_samples.ordinal IS NOT excluded.ordinal OR traffic_samples.at IS NOT excluded.at OR traffic_samples.bytes IS NOT excluded.bytes`,
+				userID, stableKey, sampleOrdinal, sample.At, sample.Bytes); err != nil {
 				return err
 			}
 		}
 		usageOccurrences := map[string]int{}
-		for _, point := range user.UsageHistory {
+		for usageOrdinal, point := range user.UsageHistory {
 			stableKey := sqliteSequenceKey(point.At, usageOccurrences)
 			if _, err := tx.Exec(`INSERT INTO keep_usage_history(user_id, stable_key) VALUES(?, ?)`, userID, stableKey); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`INSERT INTO usage_history(
 				user_id, stable_key, ordinal, at, upload_bytes, download_bytes, upload_mbps, download_mbps
-			) VALUES(?, ?, COALESCE((SELECT MAX(ordinal) + 1 FROM usage_history WHERE user_id = ?), 0), ?, ?, ?, ?, ?)
-			ON CONFLICT(user_id, stable_key) DO UPDATE SET at = excluded.at,
+			) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(user_id, stable_key) DO UPDATE SET ordinal = excluded.ordinal, at = excluded.at,
 				upload_bytes = excluded.upload_bytes, download_bytes = excluded.download_bytes,
 				upload_mbps = excluded.upload_mbps, download_mbps = excluded.download_mbps
-			WHERE usage_history.at IS NOT excluded.at
+			WHERE usage_history.ordinal IS NOT excluded.ordinal OR usage_history.at IS NOT excluded.at
 				OR usage_history.upload_bytes IS NOT excluded.upload_bytes
 				OR usage_history.download_bytes IS NOT excluded.download_bytes
 				OR usage_history.upload_mbps IS NOT excluded.upload_mbps
-				OR usage_history.download_mbps IS NOT excluded.download_mbps`, userID, stableKey, userID, point.At, point.UploadBytes, point.DownloadBytes,
+				OR usage_history.download_mbps IS NOT excluded.download_mbps`, userID, stableKey, usageOrdinal, point.At, point.UploadBytes, point.DownloadBytes,
 				point.UploadMbps, point.DownloadMbps); err != nil {
 				return err
 			}
 		}
 		billingOccurrences := map[string]int{}
-		for _, record := range user.BillingHistory {
+		for billingOrdinal, record := range user.BillingHistory {
 			identity := record.StartedAt + "\x00" + record.EndedAt
 			stableKey := sqliteSequenceKey(identity, billingOccurrences)
 			if _, err := tx.Exec(`INSERT INTO keep_billing_history(user_id, stable_key) VALUES(?, ?)`, userID, stableKey); err != nil {
@@ -1489,15 +1490,15 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 			}
 			if _, err := tx.Exec(`INSERT INTO billing_history(
 				user_id, stable_key, ordinal, started_at, ended_at, upload_bytes, download_bytes, quota_bytes
-			) VALUES(?, ?, COALESCE((SELECT MAX(ordinal) + 1 FROM billing_history WHERE user_id = ?), 0), ?, ?, ?, ?, ?)
-			ON CONFLICT(user_id, stable_key) DO UPDATE SET started_at = excluded.started_at, ended_at = excluded.ended_at,
+			) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(user_id, stable_key) DO UPDATE SET ordinal = excluded.ordinal, started_at = excluded.started_at, ended_at = excluded.ended_at,
 				upload_bytes = excluded.upload_bytes, download_bytes = excluded.download_bytes,
 				quota_bytes = excluded.quota_bytes
-			WHERE billing_history.started_at IS NOT excluded.started_at
+			WHERE billing_history.ordinal IS NOT excluded.ordinal OR billing_history.started_at IS NOT excluded.started_at
 				OR billing_history.ended_at IS NOT excluded.ended_at
 				OR billing_history.upload_bytes IS NOT excluded.upload_bytes
 				OR billing_history.download_bytes IS NOT excluded.download_bytes
-				OR billing_history.quota_bytes IS NOT excluded.quota_bytes`, userID, stableKey, userID, record.StartedAt, record.EndedAt,
+				OR billing_history.quota_bytes IS NOT excluded.quota_bytes`, userID, stableKey, billingOrdinal, record.StartedAt, record.EndedAt,
 				record.UploadBytes, record.DownloadBytes, record.QuotaBytes); err != nil {
 				return err
 			}
