@@ -47,6 +47,7 @@ import {
 import { useTheme } from "./theme";
 import { cn } from "./lib/utils";
 import { Overview } from "./pages/Overview";
+import { MachineTrafficHistory } from "./pages/MachineTrafficHistory";
 import { Users } from "./pages/Users";
 import { Groups, GroupDetail } from "./pages/Groups";
 import { UserDetail } from "./pages/UserDetail";
@@ -609,6 +610,10 @@ export function App() {
           ) : (
             <Routes>
               <Route path="/overview" element={<Overview />} />
+              <Route
+                path="/ops/machine-traffic"
+                element={<MachineTrafficHistory />}
+              />
               <Route path="/users" element={<Users />} />
               <Route path="/users/:name" element={<UserDetail />} />
               <Route path="/groups" element={<Groups />} />

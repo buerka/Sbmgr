@@ -205,6 +205,13 @@ export interface ClientEntry {
 }
 export interface MachineTrafficRecord {
   member: string;
+  anchor_start?: string;
+  interval?: number;
+  unit?: "day" | "month" | "year";
+  future?: boolean;
+  next_reset?: string;
+  effective_start_at?: string;
+  effective_end_at?: string;
   period_start: string;
   period_end: string;
   upload_bytes: number;
@@ -215,8 +222,22 @@ export interface MachineTrafficRecord {
   coverage_percent: number;
   first_sample_at: string;
   last_sample_at: string;
-  status: "unconfigured" | "collecting" | "complete" | "no_data" | "error";
+  status:
+    | "unconfigured"
+    | "collecting"
+    | "complete"
+    | "no_data"
+    | "error"
+    | "settled"
+    | "future";
   note: string;
+}
+export interface MachineTrafficHistory {
+  member: string;
+  page: number;
+  page_size: number;
+  total: number;
+  periods: MachineTrafficRecord[];
 }
 export interface Snapshot {
   machine_traffic?: MachineTrafficRecord[];

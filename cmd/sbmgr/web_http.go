@@ -231,6 +231,32 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		b.mu.Unlock()
 		return webError(401, "请重新登录")
 	}
+	if q.Path == "/api/machine-traffic/history" && q.Method == "POST" {
+		defer b.mu.Unlock()
+		var input struct {
+			Member string `json:"member"`
+			Page   int    `json:"page"`
+		}
+		if err := webDecode(q.Body, &input); err != nil {
+			return webError(400, err.Error())
+		}
+		if input.Page == 0 {
+			input.Page = 1
+		}
+		var result machineTrafficHistoryResult
+		err := b.a.withStateLock(func() error {
+			s, err := loadState(b.a.statePath)
+			if err != nil {
+				return err
+			}
+			result, err = machineTrafficHistory(b.a.statePath, s, input.Member, input.Page, now)
+			return err
+		})
+		if err != nil {
+			return webError(400, err.Error())
+		}
+		return webJSON(200, result)
+	}
 	if q.Path == "/api/analytics" && q.Method == "POST" {
 		defer b.mu.Unlock()
 		var reply webReply

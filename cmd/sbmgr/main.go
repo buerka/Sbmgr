@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-const stateVersion = 19
+const stateVersion = 20
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -34,42 +34,43 @@ var (
 )
 
 type State struct {
-	Analytics         *ConnectionAnalyticsSettings `json:"analytics,omitempty"`
-	MachineTraffic    []MachineTrafficPeriod       `json:"machine_traffic,omitempty"`
-	UserGroups        []UserGroup                  `json:"user_groups,omitempty"`
-	connectionIndex   *connectionHeap
-	Version           int                          `json:"version"`
-	BaseConfig        string                       `json:"base_config"`
-	ConfigPath        string                       `json:"config_path"`
-	InboundTag        string                       `json:"inbound_tag"`
-	SingBoxBin        string                       `json:"sing_box_bin"`
-	Service           string                       `json:"service"`
-	StatsAPI          string                       `json:"stats_api,omitempty"`
-	Counters          map[string]int64             `json:"stats_counters,omitempty"`
-	JournalCursor     string                       `json:"journal_cursor,omitempty"`
-	PendingSources    map[string]PendingSource     `json:"pending_sources,omitempty"`
-	IPApplyPending    bool                         `json:"ip_apply_pending,omitempty"`
-	BurstApplyPending bool                         `json:"burst_apply_pending,omitempty"`
-	RateApplyPending  bool                         `json:"rate_apply_pending,omitempty"`
-	StatsApplyPending bool                         `json:"stats_apply_pending,omitempty"`
-	ActiveConnections map[string]ActiveConnection  `json:"active_connections,omitempty"`
-	Health            HealthSettings               `json:"health,omitempty"`
-	Backup            BackupSettings               `json:"backup,omitzero"`
-	OutboundHealth    map[string]OutboundHealth    `json:"outbound_health,omitempty"`
-	LastHealthCheck   string                       `json:"last_health_check,omitempty"`
-	Notifications     NotificationSettings         `json:"notifications,omitempty"`
-	Subscription      SubscriptionSettings         `json:"subscription,omitempty"`
-	Fleet             []FleetServer                `json:"fleet,omitempty"`
-	FleetStatus       map[string]FleetServerStatus `json:"fleet_status,omitempty"`
-	Mesh              *mesh.Topology               `json:"mesh,omitempty"`
-	MeshAgent         MeshAgentState               `json:"mesh_agent,omitempty"`
-	MeshRollout       *MeshRollout                 `json:"mesh_rollout,omitempty"`
-	MeshLease         *MeshLease                   `json:"mesh_lease,omitempty"`
-	MeshSyncSequence  uint64                       `json:"mesh_sync_sequence,omitempty"`
-	Alerts            []Alert                      `json:"alerts,omitempty"`
-	ReservedAuthUsers []string                     `json:"reserved_auth_users,omitempty"`
-	Client            ClientSettings               `json:"client"`
-	Users             []User                       `json:"users"`
+	Analytics             *ConnectionAnalyticsSettings `json:"analytics,omitempty"`
+	MachineTraffic        []MachineTrafficPeriod       `json:"machine_traffic,omitempty"`
+	MachineTrafficHistory []MachineTrafficPeriod       `json:"machine_traffic_history,omitempty"`
+	UserGroups            []UserGroup                  `json:"user_groups,omitempty"`
+	connectionIndex       *connectionHeap
+	Version               int                          `json:"version"`
+	BaseConfig            string                       `json:"base_config"`
+	ConfigPath            string                       `json:"config_path"`
+	InboundTag            string                       `json:"inbound_tag"`
+	SingBoxBin            string                       `json:"sing_box_bin"`
+	Service               string                       `json:"service"`
+	StatsAPI              string                       `json:"stats_api,omitempty"`
+	Counters              map[string]int64             `json:"stats_counters,omitempty"`
+	JournalCursor         string                       `json:"journal_cursor,omitempty"`
+	PendingSources        map[string]PendingSource     `json:"pending_sources,omitempty"`
+	IPApplyPending        bool                         `json:"ip_apply_pending,omitempty"`
+	BurstApplyPending     bool                         `json:"burst_apply_pending,omitempty"`
+	RateApplyPending      bool                         `json:"rate_apply_pending,omitempty"`
+	StatsApplyPending     bool                         `json:"stats_apply_pending,omitempty"`
+	ActiveConnections     map[string]ActiveConnection  `json:"active_connections,omitempty"`
+	Health                HealthSettings               `json:"health,omitempty"`
+	Backup                BackupSettings               `json:"backup,omitzero"`
+	OutboundHealth        map[string]OutboundHealth    `json:"outbound_health,omitempty"`
+	LastHealthCheck       string                       `json:"last_health_check,omitempty"`
+	Notifications         NotificationSettings         `json:"notifications,omitempty"`
+	Subscription          SubscriptionSettings         `json:"subscription,omitempty"`
+	Fleet                 []FleetServer                `json:"fleet,omitempty"`
+	FleetStatus           map[string]FleetServerStatus `json:"fleet_status,omitempty"`
+	Mesh                  *mesh.Topology               `json:"mesh,omitempty"`
+	MeshAgent             MeshAgentState               `json:"mesh_agent,omitempty"`
+	MeshRollout           *MeshRollout                 `json:"mesh_rollout,omitempty"`
+	MeshLease             *MeshLease                   `json:"mesh_lease,omitempty"`
+	MeshSyncSequence      uint64                       `json:"mesh_sync_sequence,omitempty"`
+	Alerts                []Alert                      `json:"alerts,omitempty"`
+	ReservedAuthUsers     []string                     `json:"reserved_auth_users,omitempty"`
+	Client                ClientSettings               `json:"client"`
+	Users                 []User                       `json:"users"`
 }
 
 type ClientSettings struct {
@@ -2261,6 +2262,11 @@ func migrateState(s *State) error {
 			// attributed to devices or domains by inference.
 			s.Analytics = nil
 			s.Version = 19
+		case 19:
+			if err := migrateMachineTrafficPeriods(s); err != nil {
+				return err
+			}
+			s.Version = 20
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}

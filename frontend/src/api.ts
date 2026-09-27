@@ -9,6 +9,7 @@ import type {
   RouteInventory,
   PortalSnapshot,
   AnalyticsSnapshot,
+  MachineTrafficHistory,
 } from "./types";
 
 const http = axios.create({
@@ -103,6 +104,12 @@ export const api = {
     },
     signal?: AbortSignal,
   ) => request<AnalyticsSnapshot>("/analytics", input, signal),
+  machineTrafficHistory: (member: string, page: number, signal?: AbortSignal) =>
+    request<MachineTrafficHistory>(
+      "/machine-traffic/history",
+      { member, page },
+      signal,
+    ),
   selfDevice: (input: {
     action: "add" | "rename" | "delete" | "rotate-link";
     device?: string;

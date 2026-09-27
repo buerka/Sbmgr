@@ -97,7 +97,7 @@ func webActions() []webAction {
 	add("backup.retention", "自动清理设置", "backup", "backup retention", "仅作用于本机，下次后台维护生效，无需应用配置。只清理到期的手动和每日状态备份，删除不可撤销；每类保留最新一份，恢复保护、迁移留存和配置备份不受影响。部分删除失败会记录错误，并在下一轮重试。", true, nil, f("days", "保留天数", "number", true))
 	add("backup.restore", "恢复备份", "backup", "backup restore", "状态已恢复；检查后应用配置。", true, []string{"name"}, source("name", "备份", "backups", true))
 	add("health.check", "检查出站健康", "ops", "health check", "出站健康检查完成。", false, nil)
-	add("machine.traffic_period", "机器续费周期", "machine", "", "只修改所选机器的统计日期，保存后立即显示；日期按主机本地时区，结束日包含当日。不会清除已采集数据，也不会改变用户流量配额。未采集的历史流量无法补算，保存失败时保留原周期，无需应用配置。", false, nil, source("member", "机器", "traffic-members", true), f("start", "周期开始日", "date", true), f("end", "周期结束日（含当日）", "date", true))
+	add("machine.traffic_period", "机器续费周期", "machine", "", "从开始日按天、月或年自动循环；月末按原始锚点夹取，不发生漂移。按主机本地时区计算，结束日含当日。修改规则会结算旧周期，已有采样及历史不清除；跨期采样不拆分，缺口标为未知。不会改变用户配额，无需应用配置。", false, nil, source("member", "机器", "traffic-members", true), f("start", "原始开始日", "date", true), f("interval", "每隔多少期（1—366）", "number", true), selectField("unit", "周期单位", "day", "month", "year"))
 	add("health.set", "健康检查设置", "ops", "health set", "健康设置已保存，后台下一轮生效。", false, nil, selectField("mode", "自动探测", "auto", "off"), f("interval", "间隔分钟", "number", false), f("timeout", "超时秒数", "number", false), f("failures", "告警失败次数", "number", false), f("targets", "探测目标 tag=host:port（逗号分隔）", "text", false))
 	for _, op := range []struct {
 		id, title, effect string
@@ -239,7 +239,11 @@ func (a *app) executeWebActionLocked(input webActionInput, args []string) error 
 		return errors.New("从机用户授权由主机统一管理")
 	}
 	if input.Action == "machine.traffic_period" {
-		return a.setMachineTrafficPeriod(input.Fields["member"], input.Fields["start"], input.Fields["end"])
+		interval, err := strconv.Atoi(input.Fields["interval"])
+		if err != nil {
+			return errors.New("机器账期间隔必须为整数")
+		}
+		return a.setMachineTrafficPeriod(input.Fields["member"], input.Fields["start"], input.Fields["unit"], interval)
 	}
 	if strings.HasPrefix(input.Action, "group.") {
 		var change groupChange

@@ -90,6 +90,15 @@ const groups: Record<string, [string, string[]][]> = {
     ["更新证书（可选）", ["tls-cert", "tls-key"]],
   ],
 };
+const machinePeriodHints: Record<string, string> = {
+  start: "例如每 1 个月换期，31 日开始时短月使用月末，之后仍按 31 日换期。",
+  interval: "填写 1–366，例如每 1 个月换期就填 1。",
+};
+const machinePeriodLabels: Record<string, string> = {
+  start: "开始日",
+  interval: "循环间隔",
+  unit: "周期单位",
+};
 function label(field: Field) {
   return field.label.replace(/[（(].*?[）)]/g, "").trim();
 }
@@ -140,6 +149,8 @@ export function ActionForm({
   embedded?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const machinePeriod = action.id === "machine.traffic_period";
+  const title = machinePeriod ? "机器续费周期" : action.title;
   const idPrefix = useId();
   const [scope, setScope] = useState(context),
     [initial, setInitial] = useState(() =>
@@ -294,6 +305,9 @@ export function ActionForm({
   function renderField(field: Field) {
     if (lockedField(field, context) || field.key === "clear-expire")
       return null;
+    const fieldLabel = machinePeriod
+      ? machinePeriodLabels[field.key] || label(field)
+      : label(field);
     const value = values[field.key] || "",
       modified = value !== (initial[field.key] || ""),
       id = `${idPrefix}-field-${field.key}`,
@@ -311,7 +325,10 @@ export function ActionForm({
               "down-mbps",
             ].includes(field.key)
           ? "留空继承默认分组；明确填写则使用个人配置。"
-          : hints[field.key] ||
+          : (action.id === "machine.traffic_period"
+              ? machinePeriodHints[field.key]
+              : undefined) ||
+            hints[field.key] ||
             (listFields.has(field.key)
               ? "多项用逗号分隔；清空即可移除。"
               : field.label.match(/[（(](.*?)[）)]/)?.[1]);
@@ -322,12 +339,12 @@ export function ActionForm({
     if (bool || field.type === "checkbox")
       return (
         <div className="form-row" key={field.key}>
-          <label htmlFor={id}>{label(field)}</label>
+          <label htmlFor={id}>{fieldLabel}</label>
           <div>
             <div className="flex items-center gap-3 h-9">
               <Switch
                 id={id}
-                aria-label={label(field)}
+                aria-label={fieldLabel}
                 checked={value === "true"}
                 disabled={busy}
                 onCheckedChange={(v) => setField(field, String(v))}
@@ -350,7 +367,7 @@ export function ActionForm({
     return (
       <div className="form-row" key={field.key}>
         <label htmlFor={id}>
-          {label(field)}
+          {fieldLabel}
           {field.required && (
             <span className="text-destructive ml-1" aria-hidden="true">
               *
@@ -361,7 +378,7 @@ export function ActionForm({
           {multi ? (
             <fieldset
               id={id}
-              aria-label={label(field)}
+              aria-label={fieldLabel}
               aria-describedby={helpId}
               className="multi-options"
               disabled={busy}
@@ -399,7 +416,7 @@ export function ActionForm({
             >
               <SelectTrigger
                 id={id}
-                aria-label={label(field)}
+                aria-label={fieldLabel}
                 aria-describedby={helper ? helpId : undefined}
                 className="w-full"
               >
@@ -499,17 +516,13 @@ export function ActionForm({
     <form
       onSubmit={submit}
       className="editor-form"
-      aria-label={action.title}
+      aria-label={title}
       aria-busy={busy}
     >
       <div className="editor-heading">
         <div className="flex items-start justify-between gap-4">
           <div>
-            {embedded ? (
-              <h2>{action.title}</h2>
-            ) : (
-              <DialogTitle>{action.title}</DialogTitle>
-            )}
+            {embedded ? <h2>{title}</h2> : <DialogTitle>{title}</DialogTitle>}
             {!embedded && (
               <DialogDescription className="mt-2">
                 {edit
@@ -555,10 +568,12 @@ export function ActionForm({
         <div className="effect-note">
           <Icon name={action.danger ? "warning" : "shield"} />
           <p>
-            {action.effect
-              .replace(/^已保存拓扑；/, "保存后，")
-              .replace(/^已保存；/, "保存后，")
-              .replace(/^设置已保存；/, "保存后，")}
+            {machinePeriod
+              ? "到期后自动换期；只重算机器本期显示，保留旧采样和历史，不改变用户配额。保存立即生效，无需应用配置；失败保留原设置。"
+              : action.effect
+                  .replace(/^已保存拓扑；/, "保存后，")
+                  .replace(/^已保存；/, "保存后，")
+                  .replace(/^设置已保存；/, "保存后，")}
           </p>
         </div>
         {ungrouped.length > 0 && (
@@ -649,13 +664,15 @@ export function ActionForm({
             {busy && <Icon name="loading" className="animate-spin" />}
             {busy
               ? "正在保存…"
-              : edit
-                ? "保存修改"
-                : action.danger
-                  ? "确认操作"
-                  : /\.(add|init|clone)$/.test(action.id)
-                    ? "创建"
-                    : "执行"}
+              : machinePeriod
+                ? "保存周期"
+                : edit
+                  ? "保存修改"
+                  : action.danger
+                    ? "确认操作"
+                    : /\.(add|init|clone)$/.test(action.id)
+                      ? "创建"
+                      : "执行"}
           </Button>
         </div>
       </div>

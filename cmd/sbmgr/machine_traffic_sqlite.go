@@ -241,53 +241,123 @@ func machineTrafficOverview(path string, s *State, now time.Time) ([]machineTraf
 	for _, member := range members {
 		queryMember := member
 		if legacyLocal && s.Mesh != nil && member == s.Mesh.Master {
-			// A standalone host can become the mesh master. Its original
-			// local intervals are still measurements of this same machine.
-			// The local sentinel is reserved from later slave admission.
 			queryMember = "local"
 		}
 		v := machineTrafficView{Member: member, Status: "unconfigured", Note: "请设置此机器的续费账期"}
 		for _, p := range s.MachineTraffic {
-			if p.Member == member {
-				v.PeriodStart, v.PeriodEnd = p.Start, p.End
-				start, end, err := machineTrafficBounds(p.Start, p.End)
+			if p.Member != member {
+				continue
+			}
+			anchor, err := machineTrafficAnchor(p.Start)
+			if err != nil {
+				return nil, err
+			}
+			if now.Before(anchor) || (p.EffectiveFromNS > 0 && now.UnixNano() < p.EffectiveFromNS) {
+				futureStart := anchor
+				if p.EffectiveFromNS > 0 && time.Unix(0, p.EffectiveFromNS).After(futureStart) {
+					futureStart = time.Unix(0, p.EffectiveFromNS)
+				}
+				index, err := machineTrafficIndex(p, futureStart)
 				if err != nil {
 					return nil, err
 				}
-				v.PeriodSeconds = int64(end.Sub(start).Seconds())
-				var first, last sql.NullInt64
-				var up, down, coveredNS sql.NullInt64
-				err = db.QueryRow(`SELECT SUM(upload_bytes),SUM(download_bytes),SUM(end_ns-start_ns),MIN(start_ns),MAX(end_ns)
-				 FROM machine_traffic_intervals WHERE member IN (?,?) AND start_ns>=? AND end_ns<=?`, member, queryMember, start.UnixNano(), end.UnixNano()).Scan(&up, &down, &coveredNS, &first, &last)
+				periodStart, err := machineTrafficBoundary(p, index)
 				if err != nil {
 					return nil, err
 				}
-				if up.Valid && down.Valid {
-					v.UploadBytes, v.DownloadBytes = up.Int64, down.Int64
-					v.TotalBytes = up.Int64 + down.Int64
-					v.CoveredSeconds = coveredNS.Int64 / int64(time.Second)
-					v.CoveragePercent = 100 * float64(coveredNS.Int64) / float64(end.Sub(start).Nanoseconds())
-					if v.CoveragePercent > 100 {
-						v.CoveragePercent = 100
-					}
-					v.FirstSampleAt = time.Unix(0, first.Int64).Format(time.RFC3339)
-					v.LastSampleAt = time.Unix(0, last.Int64).Format(time.RFC3339)
-					v.Status = "collecting"
-					v.Note = "仅统计实际采样覆盖的时间；未覆盖时间的流量未知"
-					if !now.Before(end) && v.CoveragePercent >= 99.99 {
-						v.Status = "complete"
-					} else if !now.Before(start) && now.Before(end) && now.Sub(time.Unix(0, last.Int64)) > 15*time.Minute {
-						v.Status = "error"
-						v.Note = "最近 15 分钟没有新采样；已显示的流量仅覆盖标出的时间，缺口未知"
-					}
-				} else {
-					v.Status = "no_data"
-					v.Note = "该账期尚无完整采样区间，历史流量未知"
+				next, err := machineTrafficBoundary(p, index+1)
+				if err != nil {
+					return nil, err
 				}
+				v = machineTrafficView{Member: member, AnchorStart: p.Start, Interval: p.Interval, Unit: p.Unit, PeriodStart: periodStart.Format("2006-01-02"), PeriodEnd: machineTrafficPreviousDate(next), Future: true, NextReset: futureStart.Format("2006-01-02"), Status: "future", Note: "规则尚未开始生效；此前采样不计入此规则"}
 				break
 			}
+			index, err := machineTrafficIndex(p, now)
+			if err != nil {
+				return nil, err
+			}
+			v, err = machineTrafficPeriodView(db, member, queryMember, p, index, now)
+			if err != nil {
+				return nil, err
+			}
+			break
 		}
 		views = append(views, v)
 	}
 	return views, nil
+}
+
+func machineTrafficPeriodView(db *sql.DB, member, queryMember string, p MachineTrafficPeriod, index int64, now time.Time) (machineTrafficView, error) {
+	start, err := machineTrafficBoundary(p, index)
+	if err != nil {
+		return machineTrafficView{}, err
+	}
+	end, err := machineTrafficBoundary(p, index+1)
+	if err != nil {
+		return machineTrafficView{}, err
+	}
+	v := machineTrafficView{Member: member, AnchorStart: p.Start, Interval: p.Interval, Unit: p.Unit, PeriodStart: start.Format("2006-01-02"), PeriodEnd: machineTrafficPreviousDate(end), NextReset: end.Format("2006-01-02"), Status: "no_data", Note: "该期尚无完整采样区间；未采集和跨期采样的流量未知"}
+	actualStart, actualEnd := start, end
+	if p.EffectiveFromNS > 0 {
+		change := time.Unix(0, p.EffectiveFromNS)
+		if change.After(actualStart) {
+			actualStart = change
+			v.EffectiveStartAt = change.Format(time.RFC3339)
+		}
+	}
+	if p.EffectiveUntilNS > 0 {
+		change := time.Unix(0, p.EffectiveUntilNS)
+		if change.Before(actualEnd) {
+			actualEnd = change
+			v.EffectiveEndAt = change.Format(time.RFC3339)
+			v.Status = "settled"
+		}
+	}
+	if !actualEnd.After(actualStart) {
+		return v, nil
+	}
+	spanSeconds := float64(actualEnd.Unix()-actualStart.Unix()) + float64(actualEnd.Nanosecond()-actualStart.Nanosecond())/float64(time.Second)
+	if spanSeconds <= 0 {
+		return v, nil
+	}
+	v.PeriodSeconds = int64(math.Ceil(spanSeconds))
+	queryEnd := int64(math.MaxInt64)
+	if actualEnd.Year() < 2262 || (actualEnd.Year() == 2262 && actualEnd.Before(time.Unix(0, math.MaxInt64))) {
+		queryEnd = actualEnd.UnixNano()
+	}
+	var first, last, up, down, coveredNS sql.NullInt64
+	err = db.QueryRow(`SELECT SUM(upload_bytes),SUM(download_bytes),SUM(end_ns-start_ns),MIN(start_ns),MAX(end_ns)
+	 FROM machine_traffic_intervals WHERE member IN (?,?) AND start_ns>=? AND end_ns<=?`, member, queryMember, actualStart.UnixNano(), queryEnd).Scan(&up, &down, &coveredNS, &first, &last)
+	if err != nil {
+		return machineTrafficView{}, err
+	}
+	if up.Valid && down.Valid {
+		if up.Int64 > math.MaxInt64-down.Int64 {
+			return machineTrafficView{}, errors.New("机器账期流量合计溢出")
+		}
+		v.UploadBytes, v.DownloadBytes, v.TotalBytes = up.Int64, down.Int64, up.Int64+down.Int64
+		v.CoveredSeconds = coveredNS.Int64 / int64(time.Second)
+		v.CoveragePercent = 100 * float64(coveredNS.Int64) / (spanSeconds * float64(time.Second))
+		if v.CoveragePercent > 100 {
+			v.CoveragePercent = 100
+		}
+		v.FirstSampleAt = time.Unix(0, first.Int64).Format(time.RFC3339)
+		v.LastSampleAt = time.Unix(0, last.Int64).Format(time.RFC3339)
+		v.Note = "只累计完整落在本期的采样区间；未覆盖及跨期区间流量未知"
+		if p.EffectiveUntilNS > 0 && actualEnd.Equal(time.Unix(0, p.EffectiveUntilNS)) {
+			v.Status = "settled"
+			v.Note = "规则变更时结算；仅累计变更前完整采样区间，边界流量未知"
+		} else if !now.Before(end) && v.CoveragePercent >= 99.99 {
+			v.Status = "complete"
+		} else {
+			v.Status = "collecting"
+		}
+		if v.Status == "collecting" && now.Before(actualEnd) && now.Sub(time.Unix(0, last.Int64)) > 15*time.Minute {
+			v.Status = "error"
+			v.Note = "最近 15 分钟没有新采样；缺口流量未知"
+		}
+	} else if v.Status == "settled" {
+		v.Note = "规则变更时结算；该期没有完整采样区间，流量未知"
+	}
+	return v, nil
 }

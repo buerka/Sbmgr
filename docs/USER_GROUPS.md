@@ -61,4 +61,4 @@ sbmgr admin group delete --file group-delete.json
 
 成员请求包含 `id`、`users` 和 `mode`。`mode` 为 `preserve`、`inherit` 或 `custom`；`custom` 使用 `overrides` 数组指定 `quota`、`rate`、`expiry`、`routes`、`devices` 中的个人覆盖项。删除只需要 `id`。更新规则需提供完整 `policy`：省略某项会关闭该项的统一管理。
 
-状态模型版本为 19，SQLite schema 为 9。分组与成员分别保存在结构化表中，使用稳定主键和增量写入；升级仍遵循原有迁移、备份与事务校验流程。
+状态模型版本为 20，SQLite schema 为 9。分组与成员分别保存在结构化表中，使用稳定主键和增量写入；升级仍遵循原有迁移、备份与事务校验流程。

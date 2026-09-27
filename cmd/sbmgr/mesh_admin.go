@@ -121,6 +121,7 @@ func (a *app) meshCmd(args []string) error {
 			// A standalone local billing window belongs to this host's
 			// former administrative view, not to the new master's policy.
 			s.MachineTraffic = nil
+			s.MachineTrafficHistory = nil
 		} else if args[0] == "init" {
 			if s.Mesh != nil || s.MeshAgent.Cluster != "" {
 				return errors.New("本机已配置主从身份")
@@ -138,6 +139,11 @@ func (a *app) meshCmd(args []string) error {
 			for i := range s.MachineTraffic {
 				if s.MachineTraffic[i].Member == "local" {
 					s.MachineTraffic[i].Member = *id
+				}
+			}
+			for i := range s.MachineTrafficHistory {
+				if s.MachineTrafficHistory[i].Member == "local" {
+					s.MachineTrafficHistory[i].Member = *id
 				}
 			}
 		} else {
@@ -232,6 +238,7 @@ func (a *app) meshCmd(args []string) error {
 				}
 				s.Mesh.Members = slices.DeleteFunc(s.Mesh.Members, func(m mesh.Member) bool { return m.ID == *id })
 				s.MachineTraffic = slices.DeleteFunc(s.MachineTraffic, func(p MachineTrafficPeriod) bool { return p.Member == *id })
+				s.MachineTrafficHistory = slices.DeleteFunc(s.MachineTrafficHistory, func(p MachineTrafficPeriod) bool { return p.Member == *id })
 			default:
 				return errors.New("未知主从操作")
 			}
