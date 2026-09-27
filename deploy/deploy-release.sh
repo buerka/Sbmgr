@@ -113,6 +113,33 @@ systemd_nonnegative_integer() {
     printf '%s\n' "$systemd_integer_value"
 }
 
+wait_for_sbmgr_exit() {
+    # A stopped unit can briefly leave its Web/subscription worker visible to
+    # pgrep while the parent reaps it. Keep the existing all-process guard,
+    # but allow that bounded exit window before taking any state snapshot.
+    sbmgr_exit_waits=0
+    while :; do
+        if pgrep -x sbmgr >/dev/null 2>&1; then
+            if [ "$sbmgr_exit_waits" -ge 10 ]; then
+                echo "检测到 systemd 之外仍有 sbmgr 进程；请停止其他前台服务或管理进程后重试部署" >&2
+                return 1
+            fi
+            sleep 1 || {
+                echo "等待 sbmgr 进程退出被中断" >&2
+                return 1
+            }
+            sbmgr_exit_waits=$((sbmgr_exit_waits + 1))
+        else
+            sbmgr_pgrep_status=$?
+            if [ "$sbmgr_pgrep_status" -eq 1 ]; then
+                return 0
+            fi
+            echo "无法检查残留 sbmgr 进程（pgrep 状态 $sbmgr_pgrep_status）" >&2
+            return 1
+        fi
+    done
+}
+
 wait_for_post_start_stability() {
     # Type=simple can be reported active before initialization failures surface.
     # Observe across more than two RestartSec=5s windows. No duration knobs are
@@ -580,10 +607,7 @@ command -v pgrep >/dev/null 2>&1 || {
     echo "缺少 pgrep，无法排除交互式旧 sbmgr 进程" >&2
     exit 1
 }
-if pgrep -x sbmgr >/dev/null 2>&1; then
-    echo "检测到 systemd 之外仍有 sbmgr 进程；请停止其他前台服务或管理进程后重试部署" >&2
-    exit 1
-fi
+wait_for_sbmgr_exit
 acquire_state_locks
 create_snapshot
 
