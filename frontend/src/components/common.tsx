@@ -28,6 +28,7 @@ import { openAction, useAppDispatch, useAppSelector } from "../store";
 import { bytes, rate } from "../format";
 import { cn } from "../lib/utils";
 import type { Context, User } from "../types";
+import { groupName } from "./groupModel";
 import { rememberActionTrigger } from "./actionFocus";
 const actionIcons: Record<string, IconName> = {
   "user.add": "add",
@@ -67,7 +68,7 @@ export function ActionButton({
         props.disabled ||
         !action ||
         job?.status === "running" ||
-        (snapshot?.role === "slave" && /^(user|device|node)\./.test(id))
+        (snapshot?.role === "slave" && /^(user|device|node|group)\./.test(id))
       }
       onClick={(event) => {
         rememberActionTrigger(event.currentTarget);
@@ -140,7 +141,7 @@ export function ActionMenu({
                   !action ||
                   job?.status === "running" ||
                   (snapshot?.role === "slave" &&
-                    /^(user|device|node)\./.test(item.id))
+                    /^(user|device|node|group)\./.test(item.id))
                 }
                 onSelect={() => {
                   openingDialog.current = true;
@@ -308,6 +309,7 @@ export function UserTable({
   sort?: "asc" | "desc";
   onSort?: () => void;
 }) {
+  const snapshot = useAppSelector((s) => s.admin.snapshot);
   const navigate = useNavigate();
   function openUser(event: MouseEvent<HTMLTableRowElement>, name: string) {
     if (event.defaultPrevented || event.button !== 0) return;
@@ -373,6 +375,11 @@ export function UserTable({
               >
                 {u.name}
               </Link>
+              {snapshot && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  {groupName(snapshot, u.group_id)}
+                </div>
+              )}
             </TableCell>
             {columns.map((col) => (
               <TableCell key={col}>

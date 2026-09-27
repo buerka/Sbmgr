@@ -316,10 +316,20 @@ export function ActionForm({
     const helper =
       edit && modified && field.type !== "secret-text"
         ? `原值：${display(initial[field.key] || "", field)}`
-        : hints[field.key] ||
-          (listFields.has(field.key)
-            ? "多项用逗号分隔；清空即可移除。"
-            : field.label.match(/[（(](.*?)[）)]/)?.[1]);
+        : action.id === "user.add" &&
+            [
+              "quota",
+              "quota-mode",
+              "expire",
+              "outbound",
+              "up-mbps",
+              "down-mbps",
+            ].includes(field.key)
+          ? "留空继承默认分组；明确填写则使用个人配置。"
+          : hints[field.key] ||
+            (listFields.has(field.key)
+              ? "多项用逗号分隔；清空即可移除。"
+              : field.label.match(/[（(](.*?)[）)]/)?.[1]);
     const bool =
       field.options?.length === 2 &&
       field.options.includes("true") &&

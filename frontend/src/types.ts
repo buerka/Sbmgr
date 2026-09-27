@@ -59,7 +59,21 @@ export interface Node {
   current_up: number;
   current_down: number;
 }
+export type GroupScope = "quota" | "rate" | "expiry" | "routes";
+export interface GroupPolicy {
+  quota?: { bytes: number; mode: string };
+  rate?: { upload: number; download: number };
+  expiry?: string;
+  routes?: { outbound: string; name: string }[];
+}
+export interface UserGroup {
+  id: string;
+  name: string;
+  policy: GroupPolicy;
+}
 export interface User {
+  group_id?: string;
+  group_overrides?: GroupScope[];
   portal?: {
     configured: boolean;
     enabled: boolean;
@@ -144,6 +158,8 @@ export interface ClientEntry {
   short_id?: string;
 }
 export interface Snapshot {
+  groups?: UserGroup[];
+  group_version?: string;
   version: string;
   time: string;
   role: "standalone" | "master" | "slave";

@@ -4,6 +4,8 @@
 
 用户持有配额和策略；设备持有订阅 token；设备节点持有身份、授权与 routing mark。共享入站认证后按 `auth_user` 路由，nftables/conntrack 按 mark 计量与限速。
 
+用户分组提供可选默认规则，覆盖配额、节点速率、到期日和线路授权。修改分组时，在同一锁和事务中更新未覆盖该项的成员；运行时仍使用用户与节点的实际字段，配额独立计量。个人编辑与分组规则不同的值在保存边界记录为覆盖项。旧用户迁入空规则的默认分组，原设置不变，见 [用户分组](USER_GROUPS.md)。
+
 ```text
 Web API / admin → 跨进程锁 → SQLite 迁移、校验、事务 → state.db
                               ↓
@@ -26,6 +28,7 @@ daemon → 计数器与日志 → 用量、账期、策略、待应用状态
 | CLI、模型、迁移、配置事务 | `cmd/sbmgr/main.go`：`loadState`、`validateState`、`saveState`、`renderConfig`、`applyState` |
 | SQLite、跨进程锁 | `state_sqlite.go`、`state_lock*.go`：`withStateLock` |
 | 用户、设备、模板、批量 | `device.go`、`user_template.go`、`batch.go` |
+| 分组继承、成员事务与持久化 | `user_groups.go`、`group_admin.go`、`group_sqlite.go`；前端 `Groups`、`UserGroupSettings` |
 | React / TypeScript / shadcn/ui 页面与状态 | `frontend/src/{pages,components}`、`api.ts`、`store.ts`、`theme.tsx`、`tokens.css` |
 | Web 认证、动作、静态资源与降权 | `web_{config,http,account,actions,routes,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
 | 普通用户登录、单次邀请与隔离 | `portal_state.go`、`web_portal.go`、`web_invite.go`；前端 `Portal`、`Activate`、`PortalAccess` |

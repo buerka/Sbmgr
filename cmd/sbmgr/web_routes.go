@@ -352,6 +352,7 @@ func (a *app) webAssignRoutes(input webActionInput) error {
 			}
 			names[strings.ToLower(name)] = true
 			n := Node{Name: name, Device: d.Name, UUID: newUUID(), Outbound: canonical, AuthUser: uniqueAuthUser(s, u.Name+":"+slug(d.Name)+":"+slug(name))}
+			inheritGroupNodeRate(s, u, &n)
 			// Include each new identity in the uniqueness check for the next one.
 			u.Nodes = append(u.Nodes, n)
 			kept = append(kept, n)

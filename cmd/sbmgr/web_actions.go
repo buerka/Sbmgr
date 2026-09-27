@@ -64,7 +64,7 @@ func webActions() []webAction {
 		}
 		specs = append(specs, webAction{ID: id, Title: title, Scope: scope, Effect: effect, Danger: danger, Fields: fields, command: strings.Fields(command), positions: positions})
 	}
-	add("user.add", "新建用户", "users", "user add", saved, false, []string{"user"}, f("user", "用户名", "text", true), quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("expire", "到期日（留空不限）", "date", false), f("node-name", "初始节点名称", "text", true), source("outbound", "初始线路", "outbounds", false), up, down)
+	add("user.add", "新建用户", "users", "user add", "加入默认分组。配额、限速、到期日和线路留空时继承分组规则；分组未设置时沿用不限配额、不限速、长期有效和默认直出。明确填写的项作为个人配置。"+saved, false, []string{"user"}, f("user", "用户名", "text", true), quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("expire", "到期日（留空继承）", "date", false), f("node-name", "初始节点名称", "text", true), source("outbound", "初始线路（留空继承）", "outbounds", false), up, down)
 	add("user.clone", "复制用户策略", "users", "user clone", saved, false, []string{"user"}, f("user", "新用户名", "text", true), source("from", "复制自", "users", true))
 	add("user.set", "配额与限速", "user", "user set", saved, false, []string{"user"}, user, quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("extra-quota", "本期附加流量（0 清除）", "text", false), f("expire", "到期日", "date", false), f("clear-expire", "清除到期日", "checkbox", false), up, down, selectField("billing-enabled", "自动账期", "true", "false"), f("billing-day", "账期日（1–28）", "number", false))
 	add("user.ip", "来源 IP 规则", "user", "user set", saved, false, []string{"user"}, user, selectField("ip-enabled", "启用规则", "true", "false"), selectField("ip-mode", "执行方式", "enforce", "monitor"), selectField("ip-binding", "绑定方式", "dynamic", "auto", "manual"), f("ip-max", "最多来源 IP 数", "number", false), f("ip-handover-seconds", "换绑宽限秒数", "number", false), f("ip-allowed", "固定 IP（逗号分隔）", "text", false), f("ip-temp", "临时替代 IP（逗号分隔）", "text", false), f("ip-temp-minutes", "临时 IP 有效分钟数", "number", false))
@@ -127,6 +127,9 @@ func webActions() []webAction {
 	add("fleet.check", "检查远端状态", "ops", "fleet check", "远端状态检查完成。", false, nil)
 	add("fleet.remove", "移除监控服务器", "fleet", "fleet remove", "已移除监控服务器。", true, []string{"name"}, f("name", "名称", "text", true))
 	add("mesh.entry", "设置客户端入口", "member", "", meshSaved, false, nil, source("id", "成员", "members", true), f("server", "客户端连接地址", "text", true), f("port", "端口", "number", true), f("server_name", "Reality servername", "text", true), f("reality_public_key", "Reality 公钥", "text", true), f("short_id", "Reality short-id", "text", false))
+	for _, op := range []string{"save", "members", "delete"} {
+		add("group."+op, "保存分组设置", "groups", "", "分组设置已保存；应用配置后更新运行策略。个人覆盖项不受分组规则修改影响，任一校验失败则全部取消。", true, nil, f("request", "分组操作", "text", true))
+	}
 	return specs
 }
 
@@ -234,6 +237,13 @@ func (a *app) executeWebActionLocked(input webActionInput, args []string) error 
 	}
 	if webSlaveMutation(s, input.Action) {
 		return errors.New("从机用户授权由主机统一管理")
+	}
+	if strings.HasPrefix(input.Action, "group.") {
+		var change groupChange
+		if webDecode([]byte(input.Fields["request"]), &change) != nil {
+			return errors.New("分组操作格式无效")
+		}
+		return a.groupChange(strings.TrimPrefix(input.Action, "group."), change, true)
 	}
 	if input.Action == "node.assign" {
 		return a.webAssignRoutes(input)

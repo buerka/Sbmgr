@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 5
+	sqliteSchemaVersion = 6
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -90,6 +90,9 @@ var sqliteSchema = append([]string{
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS devices_user_ordinal_idx ON devices(user_id, ordinal)`,
 	sqlitePortalSchema,
+	sqliteGroupSchema[0],
+	sqliteGroupSchema[1],
+	sqliteGroupSchema[2],
 	`CREATE INDEX IF NOT EXISTS devices_subscription_token_idx ON devices(subscription_token)`,
 	`CREATE TABLE IF NOT EXISTS nodes (
 		id INTEGER PRIMARY KEY,
@@ -665,6 +668,27 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 5
+		case 5:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for _, statement := range sqliteGroupSchema {
+				if _, err := tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec(`UPDATE metadata SET value = '6' WHERE key = 'schema_version'`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`PRAGMA user_version = 6`); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 6
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
@@ -943,7 +967,7 @@ func sqliteGlobalDocument(state *State) (string, error) {
 	for _, field := range []string{
 		"stats_counters", "journal_cursor", "pending_sources", "ip_apply_pending", "burst_apply_pending",
 		"rate_apply_pending", "stats_apply_pending", "active_connections", "outbound_health",
-		"last_health_check", "fleet_status", "alerts", "users",
+		"last_health_check", "fleet_status", "alerts", "users", "user_groups",
 	} {
 		delete(document, field)
 	}
@@ -961,6 +985,9 @@ func sqliteGlobalDocument(state *State) (string, error) {
 }
 
 func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) error {
+	if err := writeSQLiteGroups(tx, state); err != nil {
+		return err
+	}
 	if err := writeSQLiteMesh(tx, state); err != nil {
 		return err
 	}
@@ -1081,6 +1108,9 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 			return err
 		}
 		userIDs[user.Name] = userID
+		if err := writeSQLiteGroupMember(tx, userID, user); err != nil {
+			return err
+		}
 		if err := writeSQLitePortalAccount(tx, userID, user.Portal); err != nil {
 			return err
 		}
@@ -1183,6 +1213,9 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE name_key NOT IN (SELECT name_key FROM keep_users)`); err != nil {
+		return err
+	}
+	if err := pruneSQLiteGroups(tx, state); err != nil {
 		return err
 	}
 
@@ -1659,6 +1692,9 @@ func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
 		return nil, err
 	}
 
+	if err := readSQLiteGroups(tx, state, userIDs); err != nil {
+		return nil, err
+	}
 	if err := readSQLitePortalAccounts(tx, state, userIDs); err != nil {
 		return nil, err
 	}

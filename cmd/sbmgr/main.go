@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const stateVersion = 14
+const stateVersion = 15
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -33,6 +33,7 @@ var (
 )
 
 type State struct {
+	UserGroups        []UserGroup `json:"user_groups,omitempty"`
 	connectionIndex   *connectionHeap
 	Version           int                          `json:"version"`
 	BaseConfig        string                       `json:"base_config"`
@@ -78,8 +79,10 @@ type ClientSettings struct {
 }
 
 type User struct {
-	recentIndex map[string]int // transient write-side lookup, rebuilt after pruning
-	Portal      *PortalAccount `json:"portal,omitempty"`
+	GroupID        string         `json:"group_id,omitempty"`
+	GroupOverrides []string       `json:"group_overrides,omitempty"`
+	recentIndex    map[string]int // transient write-side lookup, rebuilt after pruning
+	Portal         *PortalAccount `json:"portal,omitempty"`
 
 	Name                string                  `json:"name"`
 	Enabled             bool                    `json:"enabled"`
@@ -384,7 +387,7 @@ func usage(w io.Writer) {
 	  sbmgr admin OPERATION    参数化管理，供自动化与恢复使用
 	    init / user / device / node / policy / proxy / mesh / subscription
 	    template / traffic / rate / sync / check / apply / backup / health / fleet
-	    batch / client / audit
+	    batch / client / audit / group
 	  sbmgr version     显示版本
 	  sbmgr version --verbose  显示版本与 Git commit
 	  sbmgr help        显示本帮助
@@ -407,6 +410,8 @@ func (a *app) adminCmd(args []string) error {
 		return a.auditCmd(args[1:])
 	case "init":
 		return a.withStateLock(func() error { return a.initCmd(args[1:]) })
+	case "group":
+		return a.groupCmd(args[1:])
 	case "user":
 		return a.userCmd(args[1:])
 	case "node":
@@ -944,6 +949,23 @@ func (a *app) userCmdLocked(args []string) error {
 		}
 		u.Nodes = append(u.Nodes, n)
 		s.Users = append(s.Users, u)
+		normalizeUserGroups(s)
+		created := &s.Users[len(s.Users)-1]
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "quota", "quota-mode":
+				markGroupOverride(created, "quota")
+			case "expire":
+				markGroupOverride(created, "expiry")
+			case "up-mbps", "down-mbps":
+				markGroupOverride(created, "rate")
+			case "outbound":
+				markGroupOverride(created, "routes")
+			}
+		})
+		if err := applyGroupPolicy(s, created, groupScopes); err != nil {
+			return err
+		}
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
@@ -1462,6 +1484,15 @@ func (a *app) nodeCmdLocked(args []string) error {
 		}
 		auth := uniqueAuthUser(s, u.Name+":"+slug(device.Name)+":"+slug(*name))
 		n := Node{Name: *name, Device: device.Name, AuthUser: auth, UUID: *uuid, Outbound: *outbound, UploadMbps: *upMbps, DownloadMbps: *downMbps}
+		inheritGroupNodeRate(s, u, &n)
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "up-mbps":
+				n.UploadMbps = *upMbps
+			case "down-mbps":
+				n.DownloadMbps = *downMbps
+			}
+		})
 		if nodeRateLimited(n) {
 			n.RateMark, err = allocateRateMark(s)
 			if err != nil {
@@ -2265,6 +2296,9 @@ func migrateState(s *State) error {
 				s.Users[i].Portal = nil
 			}
 			s.Version = 14
+		case 14:
+			normalizeUserGroups(s)
+			s.Version = 15
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}
@@ -2273,6 +2307,9 @@ func migrateState(s *State) error {
 }
 
 func validateState(s *State) error {
+	if err := validateUserGroups(s); err != nil {
+		return err
+	}
 	if err := validatePortalAccounts(s); err != nil {
 		return err
 	}
@@ -2438,6 +2475,8 @@ func normalizeLegacyNodeNames(s *State) {
 	}
 }
 func saveState(path string, s *State) error {
+	normalizeUserGroups(s)
+	captureGroupOverrides(s)
 	s.Version = stateVersion
 	boundConnectionTracking(s)
 	initializeBindingActivity(s, time.Now())

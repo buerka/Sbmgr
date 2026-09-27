@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import { Link, useBlocker, useParams } from "react-router-dom";
+import { useCallback, useLayoutEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   ActionButton,
@@ -10,27 +10,23 @@ import {
   Panel,
 } from "../components/common";
 import { ActionForm } from "../components/ActionEditor";
+import { UserGroupSettings } from "../components/UserGroupSettings";
+import { groupName } from "../components/groupModel";
 import { PortalAccess } from "../components/PortalAccess";
 import { DeviceDelivery } from "../components/DeviceDelivery";
-import { Button } from "../components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "../components/ui/dialog";
+
 import { Progress } from "../components/ui/feedback";
 import { TableCell, TableRow } from "../components/ui/table";
 import { Icon, type IconName } from "../components/Icons";
 import { optionLabels } from "../components/formModel";
-import { bytes, dateTime, rate } from "../format";
+import { bytes, dateTime, rate, userNodeSpeed } from "../format";
 import { setUserDraftDirty, useAppDispatch, useAppSelector } from "../store";
 import type { Snapshot, User } from "../types";
 import { memberName, nodeDisplayName } from "../components/routeModel";
 import "./user-workspace.css";
 
-const speed = (n?: number) => (n ? `${n} Mbps` : "不限");
+const speed = (n?: number) =>
+  n === undefined ? "各节点不同" : n ? `${n} Mbps` : "不限";
 const sections: {
   id: string;
   title: string;
@@ -38,6 +34,7 @@ const sections: {
   forms: string[];
 }[] = [
   { id: "basic", title: "基本设置", icon: "settings", forms: ["user.set"] },
+  { id: "group", title: "分组与继承", icon: "users", forms: ["user.group"] },
   { id: "devices", title: "设备与线路", icon: "routes", forms: [] },
   {
     id: "access",
@@ -125,19 +122,6 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
       dispatch(setUserDraftDirty(false));
     };
   }, [dirty, dispatch]);
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      dirty && currentLocation.pathname !== nextLocation.pathname,
-  );
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
   const context = { user: u.name },
     quota = u.quota + u.extra_quota;
   return (
@@ -159,7 +143,8 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
               </Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              {u.devices.length} 台设备 · {u.nodes.length} 个授权节点 ·{" "}
+              {groupName(s, u.group_id)} · {u.devices.length} 台设备 ·{" "}
+              {u.nodes.length} 个授权节点 ·{" "}
               {u.expires ? `有效至 ${u.expires}` : "长期有效"}
             </p>
           </div>
@@ -187,8 +172,8 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
         </div>
         <div>
           <p>速度上限</p>
-          <strong>{speed(u.down_mbps)}</strong>
-          <small>上传 {speed(u.up_mbps)}</small>
+          <strong>{speed(userNodeSpeed(u, "down"))}</strong>
+          <small>上传 {speed(userNodeSpeed(u, "up"))}</small>
         </div>
         <div>
           <p>计费方式</p>
@@ -216,6 +201,13 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
           ))}
         </Tabs.List>
         <Tabs.Content
+          value="group"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          <UserGroupSettings user={u} snapshot={s} onDirty={reportDirty} />
+        </Tabs.Content>
+        <Tabs.Content
           value="login"
           className="tab-content workspace-tab"
           forceMount
@@ -234,7 +226,7 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
           <div className="workspace-intro">
             <h2>基本设置</h2>
             <p>
-              管理此用户的配额、账期、有效期和速率。表单已填入当前值，各部分单独保存。
+              管理此用户的配额、账期、有效期和速率。修改后的值若与分组规则不同，会自动成为个人覆盖；可在「分组与继承」中切回继承。
             </p>
           </div>
           <UserSetting
@@ -529,33 +521,6 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
           </Panel>
         </Tabs.Content>
       </Tabs.Root>
-      <Dialog
-        open={blocker.state === "blocked"}
-        onOpenChange={(open) => {
-          if (!open && blocker.state === "blocked") blocker.reset();
-        }}
-      >
-        <DialogContent>
-          <DialogTitle>离开用户配置？</DialogTitle>
-          <DialogDescription>
-            还有未保存的修改。切换标签不会丢失输入，离开此用户会放弃这些修改。
-          </DialogDescription>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => blocker.state === "blocked" && blocker.reset()}
-            >
-              继续编辑
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => blocker.state === "blocked" && blocker.proceed()}
-            >
-              放弃修改并离开
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -34,6 +34,7 @@ go build -trimpath -o sbmgr ./cmd/sbmgr
 | --- | --- |
 | 接手代码 | [仓库约束](AGENTS.md) → [架构与代码入口](docs/ARCHITECTURE.md) → [开发验证](docs/DEVELOPMENT.md) |
 | 日常操作 | [用户指南](docs/USER_GUIDE.md) · [策略参考](docs/POLICIES.md) |
+| 分组统一规则与个人覆盖 | [用户分组](docs/USER_GROUPS.md) |
 | 订阅交付与服务 | [订阅服务](docs/SUBSCRIPTIONS.md) |
 | 节点接入、线路编排 | [主从管理](docs/MESH.md) |
 | 初始化、部署、备份、巡检 | [运维指南](docs/OPERATIONS.md) |

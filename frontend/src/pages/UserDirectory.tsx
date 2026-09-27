@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { groupsOf } from "../components/groupModel";
 import {
   ActionButton,
   ActionMenu,
@@ -29,7 +31,9 @@ import {
 } from "../components/ui/select";
 import { useAppSelector } from "../store";
 export function Users() {
-  const users = useAppSelector((s) => s.admin.snapshot)!.users;
+  const snapshot = useAppSelector((s) => s.admin.snapshot)!;
+  const users = snapshot.users;
+  const [groupFilter, setGroupFilter] = useState("all");
   const [search, setSearch] = useState(""),
     [filter, setFilter] = useState("all"),
     [sort, setSort] = useState<"asc" | "desc">("asc"),
@@ -43,6 +47,7 @@ export function Users() {
     .filter(
       (u) =>
         u.name.toLowerCase().includes(search.trim().toLowerCase()) &&
+        (groupFilter === "all" || (u.group_id || "default") === groupFilter) &&
         (filter === "all" ||
           (filter === "enabled"
             ? u.status === "已启用"
@@ -55,7 +60,7 @@ export function Users() {
     );
   const pages = Math.max(1, Math.ceil(visible.length / size)),
     safePage = Math.min(page, pages - 1),
-    filtered = !!search || filter !== "all";
+    filtered = !!search || filter !== "all" || groupFilter !== "all";
   return (
     <>
       <PageHeader
@@ -63,6 +68,9 @@ export function Users() {
         description="点击用户所在的整行，进入统一配置页管理用量、设备、线路与访问权限。"
         actions={
           <>
+            <Button variant="outline" asChild>
+              <Link to="/groups">管理分组</Link>
+            </Button>
             <ActionMenu
               label="更多操作"
               items={[{ id: "user.clone" }, { id: "user.batch" }]}
@@ -95,6 +103,25 @@ export function Users() {
             </button>
           )}
         </div>
+        <Select
+          value={groupFilter}
+          onValueChange={(value) => {
+            setGroupFilter(value);
+            setPage(0);
+          }}
+        >
+          <SelectTrigger aria-label="用户分组筛选">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部分组</SelectItem>
+            {groupsOf(snapshot).map((g) => (
+              <SelectItem key={g.id} value={g.id}>
+                {g.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -144,6 +171,7 @@ export function Users() {
             onClick={() => {
               setSearch("");
               setFilter("all");
+              setGroupFilter("all");
               setPage(0);
             }}
           >

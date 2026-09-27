@@ -1,4 +1,4 @@
-import { inputSize } from "../format";
+import { inputSize, userNodeSpeed } from "../format";
 import type { Action, Context, Field, Snapshot } from "../types";
 export const patchActions = new Set([
   "user.set",
@@ -45,8 +45,8 @@ export function initialFields(
       "quota-mode": u.quota_mode,
       "extra-quota": inputSize(u.extra_quota),
       expire: u.expires,
-      "up-mbps": num(u.up_mbps),
-      "down-mbps": num(u.down_mbps),
+      "up-mbps": userNodeSpeed(u, "up")?.toString() ?? "",
+      "down-mbps": userNodeSpeed(u, "down")?.toString() ?? "",
       "billing-enabled": String(Boolean(u.billing?.enabled)),
       "billing-day": num(u.billing?.cycle_day, 1),
     };
@@ -164,11 +164,11 @@ export function initialFields(
   }
   if (action.id === "user.add")
     fields = {
-      quota: "0",
-      "quota-mode": "total",
+      quota: "",
+      "quota-mode": "",
       "node-name": "默认节点",
-      "up-mbps": "0",
-      "down-mbps": "0",
+      "up-mbps": "",
+      "down-mbps": "",
     };
   return { ...context, ...fields };
 }

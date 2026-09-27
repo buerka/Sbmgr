@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useStore } from "react-redux";
 import {
   Link,
   Navigate,
   Route,
   Routes,
+  useBlocker,
   useLocation,
   useNavigate,
 } from "react-router-dom";
@@ -18,6 +20,7 @@ import {
   signedOut,
   useAppDispatch,
   useAppSelector,
+  type RootState,
 } from "./store";
 import { ActionDialog } from "./components/ActionDialog";
 import { ActionButton, Badge } from "./components/common";
@@ -45,6 +48,7 @@ import { useTheme } from "./theme";
 import { cn } from "./lib/utils";
 import { Overview } from "./pages/Overview";
 import { Users } from "./pages/Users";
+import { Groups, GroupDetail } from "./pages/Groups";
 import { UserDetail } from "./pages/UserDetail";
 import { RoutesPage } from "./pages/Routes";
 import { Subscriptions } from "./pages/Subscriptions";
@@ -56,6 +60,7 @@ import { Activate } from "./pages/Activate";
 const navigation: [string, string, IconName][] = [
   ["/overview", "运行总览", "home"],
   ["/users", "用户管理", "users"],
+  ["/groups", "用户分组", "users"],
   ["/routes", "线路管理", "routes"],
   ["/subscriptions", "订阅交付", "link"],
   ["/ops", "系统运维", "settings"],
@@ -291,6 +296,7 @@ function NavigationSearch({
   );
 }
 export function App() {
+  const liveStore = useStore<RootState>();
   const {
       status,
       snapshot,
@@ -309,6 +315,20 @@ export function App() {
     [mobileOpen, setMobileOpen] = useState(false),
     [searchOpen, setSearchOpen] = useState(false),
     [logoutConfirm, setLogoutConfirm] = useState(false);
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      liveStore.getState().admin.userDraftDirty &&
+      currentLocation.pathname !== nextLocation.pathname,
+  );
+  useEffect(() => {
+    if (!userDraftDirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [userDraftDirty]);
   const current = navigation.find(([path]) =>
     location.pathname.startsWith(path),
   );
@@ -414,9 +434,9 @@ export function App() {
       <Brand />
       <nav aria-label="主要导航">
         <p className="nav-group-label">工作空间</p>
-        {navigation.map(([path, label, icon], index) => (
+        {navigation.map(([path, label, icon]) => (
           <div key={path}>
-            {index === 4 && <p className="nav-group-label mt-7">系统</p>}
+            {path === "/ops" && <p className="nav-group-label mt-7">系统</p>}
             <Link
               title={collapsed ? label : undefined}
               to={path}
@@ -591,6 +611,8 @@ export function App() {
               <Route path="/overview" element={<Overview />} />
               <Route path="/users" element={<Users />} />
               <Route path="/users/:name" element={<UserDetail />} />
+              <Route path="/groups" element={<Groups />} />
+              <Route path="/groups/:id" element={<GroupDetail />} />
               <Route path="/routes" element={<RoutesPage />} />
               <Route path="/subscriptions" element={<Subscriptions />} />
               <Route path="/ops" element={<Operations />} />
@@ -612,11 +634,38 @@ export function App() {
       </div>
       <NavigationSearch open={searchOpen} onOpenChange={setSearchOpen} />
       <ActionDialog />
+      <Dialog
+        open={blocker.state === "blocked"}
+        onOpenChange={(open) => {
+          if (!open && blocker.state === "blocked") blocker.reset();
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>离开当前配置？</DialogTitle>
+          <DialogDescription>
+            还有未保存的修改。切换标签不会丢失输入，离开此页会放弃这些修改。
+          </DialogDescription>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => blocker.state === "blocked" && blocker.reset()}
+            >
+              继续编辑
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => blocker.state === "blocked" && blocker.proceed()}
+            >
+              放弃修改并离开
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={logoutConfirm} onOpenChange={setLogoutConfirm}>
         <DialogContent>
           <DialogTitle>放弃修改并退出？</DialogTitle>
           <DialogDescription>
-            用户配置还有未保存的修改，退出后这些输入会丢失。
+            当前配置还有未保存的修改，退出后这些输入会丢失。
           </DialogDescription>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setLogoutConfirm(false)}>
