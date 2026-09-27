@@ -32,6 +32,7 @@ Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 →
 | SQLite、跨进程锁 | `state_sqlite.go`、`state_lock*.go`：`withStateLock` |
 | 用户、设备、模板、批量 | `device.go`、`user_template.go`、`batch.go` |
 | 自助设备、订阅重置 | `device_self_service.go`、`device_self_service_sqlite.go`、`web_portal_devices.go`；前端 `MyDevices`、`ResetSubscriptionLink` |
+| 个人网站屏蔽 | `site_blocks*.go`、`web_portal_site_blocks.go`；前端 `MySiteBlocks`、`AnalyticsDashboard` |
 | 分组继承、成员事务与持久化 | `user_groups.go`、`group_admin.go`、`group_sqlite.go`；前端 `Groups`、`UserGroupSettings` |
 | React / TypeScript / shadcn/ui 页面与状态 | `frontend/src/{pages,components}`、`api.ts`、`store.ts`、`theme.tsx`、`tokens.css` |
 | Web 认证、动作、静态资源与降权 | `web_{config,http,account,actions,routes,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
@@ -48,7 +49,7 @@ Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 →
 | 拓扑校验与协议编译 | `internal/mesh/{model,transport,config}.go` |
 | 备份、审计、巡检、健康 | `backup.go`、`audit.go`、`fleet.go`、`health.go` |
 
-除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 20、SQLite schema 为 9；版本常量分别在 `main.go:stateVersion` 和 `state_sqlite.go:sqliteSchemaVersion`，两者各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
+除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 21、SQLite schema 为 10；版本常量分别在 `main.go:stateVersion` 和 `state_sqlite.go:sqliteSchemaVersion`，两者各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
 
 ## 多机与协议
 

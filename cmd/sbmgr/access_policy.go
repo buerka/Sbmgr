@@ -110,6 +110,9 @@ func accessRestrictionRules(s *State, now time.Time) []any {
 			}
 		}
 		rules = appendAccessPolicyRules(rules, authUsers, u.Access)
+		if len(authUsers) > 0 && len(u.PersonalBlockedDomains) > 0 {
+			rules = append(rules, map[string]any{"auth_user": authUsers, "domain_suffix": u.PersonalBlockedDomains, "action": "reject", "method": "drop"})
+		}
 	}
 	return rules
 }

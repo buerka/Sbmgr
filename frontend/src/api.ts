@@ -10,6 +10,7 @@ import type {
   RouteInventory,
   PortalSnapshot,
   AnalyticsSnapshot,
+  SiteBlocksSnapshot,
   MachineTrafficHistory,
 } from "./types";
 
@@ -101,6 +102,12 @@ export const api = {
   acceptInvite: (token: string, password: string) =>
     request<{ message: string }>("/invite/accept", { token, password }),
   me: () => request<PortalSnapshot>("/me"),
+  siteBlocks: () => request<SiteBlocksSnapshot>("/me/site-blocks"),
+  updateSiteBlocks: (input: {
+    action: "add" | "remove";
+    domain: string;
+    expected: string;
+  }) => request<SiteBlocksSnapshot>("/me/site-blocks", input),
   analytics: (
     input: {
       user?: string;

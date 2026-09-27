@@ -3,11 +3,19 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { bytes, dateTime } from "../format";
 import type { AnalyticsSnapshot } from "../types";
+import type { SiteBlocksSnapshot } from "../types";
 import { DataTable, Empty, Metric, Panel } from "./common";
 import { Icon } from "./Icons";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Alert } from "./ui/feedback";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "./ui/dialog";
 import { TableCell, TableRow } from "./ui/table";
 import {
   Select,
@@ -20,6 +28,18 @@ import {
 type Days = 1 | 7 | 30;
 type Sort = "traffic" | "connections";
 const ALL = "__all__";
+
+function blockableDomain(value: string) {
+  const domain = value.trim().toLowerCase();
+  if (domain.includes(":") || /^\d+\.\d+\.\d+\.\d+$/.test(domain)) return false;
+  return (
+    domain.length <= 253 &&
+    domain.includes(".") &&
+    domain
+      .split(".")
+      .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+  );
+}
 
 function Trend({ rows }: { rows: AnalyticsSnapshot["series"] }) {
   const max = Math.max(1, ...rows.map((row) => row.upload + row.download));
@@ -112,6 +132,86 @@ export function AnalyticsDashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [blocks, setBlocks] = useState<SiteBlocksSnapshot | null>(null);
+  const [blockTarget, setBlockTarget] = useState<string | null>(null);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const [blockError, setBlockError] = useState("");
+  const [blockNotice, setBlockNotice] = useState("");
+
+  useEffect(() => {
+    if (user) return;
+    let active = true;
+    void api
+      .siteBlocks()
+      .then((reply) => {
+        if (active) {
+          setBlocks(reply);
+          setBlockError("");
+        }
+      })
+      .catch(() => {
+        if (active)
+          setBlockError("无法读取个人屏蔽列表，请在「网站屏蔽」页面重试。");
+      });
+    return () => {
+      active = false;
+    };
+  }, [user, refreshKey]);
+
+  async function addBlock() {
+    if (!blockTarget || !blocks || blockBusy) return;
+    setBlockBusy(true);
+    setBlockError("");
+    try {
+      const reply = await api.updateSiteBlocks({
+        action: "add",
+        domain: blockTarget,
+        expected: blocks.version,
+      });
+      setBlocks(reply);
+      setBlockNotice(reply.message || "已保存，规则将由后台自动应用。");
+      setBlockTarget(null);
+    } catch (reason) {
+      setBlockError(
+        reason instanceof Error ? reason.message : "添加失败，请刷新后重试。",
+      );
+      try {
+        setBlocks(await api.siteBlocks());
+      } catch {
+        /* Keep the existing list for context. */
+      }
+    } finally {
+      setBlockBusy(false);
+    }
+  }
+
+  function blockAction(domain: string) {
+    if (user) return null;
+    if (!blockableDomain(domain))
+      return (
+        <span className="text-xs text-muted-foreground">目标 IP 不能屏蔽</span>
+      );
+    const target = domain.toLowerCase();
+    const saved = blocks?.domains.some(
+      (blocked) => target === blocked || target.endsWith(`.${blocked}`),
+    );
+    return saved ? (
+      <span className="text-xs text-muted-foreground">已屏蔽</span>
+    ) : (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={!blocks || blockBusy || blocks.domains.length >= blocks.limit}
+        onClick={() => {
+          setBlockError("");
+          setBlockTarget(domain);
+        }}
+        aria-label={`屏蔽网站 ${domain}`}
+      >
+        屏蔽网站
+      </Button>
+    );
+  }
 
   function chooseDevice(value: string) {
     const next = new URLSearchParams(params);
@@ -190,6 +290,13 @@ export function AnalyticsDashboard({
           刷新
         </Button>
       </div>
+      {blockNotice && (
+        <Alert kind="success">
+          {blockNotice}{" "}
+          规则针对账号下所有设备，后台应用后生效；各入口完成时间可能不同。
+        </Alert>
+      )}
+      {blockError && <Alert kind="error">{blockError}</Alert>}
       <div className="flex flex-wrap gap-3 items-end">
         <div className="space-y-1 min-w-40">
           <label className="text-sm" htmlFor="analytics-device">
@@ -410,6 +517,7 @@ export function AnalyticsDashboard({
                     "合计",
                     "连接次数",
                     "最近连接",
+                    ...(!user ? ["操作"] : []),
                   ]}
                 >
                   {data.domains.map((item) => (
@@ -426,6 +534,9 @@ export function AnalyticsDashboard({
                       <TableCell>
                         {item.last_seen ? dateTime(item.last_seen) : "—"}
                       </TableCell>
+                      {!user && (
+                        <TableCell>{blockAction(item.domain)}</TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </DataTable>
@@ -482,6 +593,7 @@ export function AnalyticsDashboard({
                   "上传",
                   "下载",
                   "状态",
+                  ...(!user ? ["操作"] : []),
                 ]}
               >
                 {data.recent.map((item, index) => (
@@ -505,6 +617,7 @@ export function AnalyticsDashboard({
                           ? "连接中"
                           : "状态未知"}
                     </TableCell>
+                    {!user && <TableCell>{blockAction(item.domain)}</TableCell>}
                   </TableRow>
                 ))}
               </DataTable>
@@ -514,6 +627,34 @@ export function AnalyticsDashboard({
           </details>
         </>
       )}
+      <Dialog
+        open={blockTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !blockBusy) setBlockTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>屏蔽网站</DialogTitle>
+          <DialogDescription>
+            确认屏蔽「{blockTarget}
+            」及其子域名？这会限制你账号下所有设备经本服务代理访问该域名，不按
+            HTTPS
+            页面路径屏蔽，也不控制客户端直连。保存后后台自动应用，各入口完成时间可能不同。
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={blockBusy}
+              onClick={() => setBlockTarget(null)}
+            >
+              取消
+            </Button>
+            <Button disabled={blockBusy} onClick={() => void addBlock()}>
+              确认屏蔽
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 9
+	sqliteSchemaVersion = 10
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -74,6 +74,7 @@ var sqliteSchema = append([]string{
 		access_json TEXT NOT NULL CHECK (json_valid(access_json) AND json_type(access_json) = 'object')
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS users_ordinal_idx ON users(ordinal)`,
+	sqlitePersonalSiteBlocksSchema,
 	`CREATE TABLE IF NOT EXISTS devices (
 		id INTEGER PRIMARY KEY,
 		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -754,6 +755,25 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 9
+		case 9:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			if _, err := tx.Exec(sqlitePersonalSiteBlocksSchema); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("UPDATE metadata SET value = '10' WHERE key = 'schema_version'"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("PRAGMA user_version = 10"); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 10
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
@@ -1173,6 +1193,9 @@ func writeSQLiteState(tx *sql.Tx, state *State, stateHash, controlHash string) e
 			return err
 		}
 		userIDs[user.Name] = userID
+		if err := writeSQLitePersonalSiteBlocks(tx, userID, user.PersonalBlockedDomains); err != nil {
+			return err
+		}
 		if err := writeSQLiteDeviceLimit(tx, userID, user.DeviceLimit); err != nil {
 			return err
 		}
@@ -1768,6 +1791,9 @@ func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
 		return nil, err
 	}
 	if err := readSQLitePortalAccounts(tx, state, userIDs); err != nil {
+		return nil, err
+	}
+	if err := readSQLitePersonalSiteBlocks(tx, state, userIDs); err != nil {
 		return nil, err
 	}
 	deviceIDs := map[int64]sqliteDeviceLocation{}

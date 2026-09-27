@@ -146,6 +146,10 @@ func (b *webBackend) lookupPortalLocked(q webRequest, session webSession, now ti
 			result = webDeliveryFromState(s, q.Body, u.Name)
 		case q.Path == "/api/me/devices" && q.Method == "POST":
 			result = b.changePortalDeviceLocked(a, s, u, q, now)
+		case q.Path == "/api/me/site-blocks" && q.Method == "GET":
+			result = portalSiteBlocksReply(u, configurationPending(s) || runtimeApplyPending(s), "")
+		case q.Path == "/api/me/site-blocks" && q.Method == "POST":
+			result = b.changePortalSiteBlocksLocked(a, s, u, q)
 		case q.Path == "/api/me/password" && q.Method == "POST":
 			result = b.changePortalPasswordLocked(a, s, u, q, now)
 		default:

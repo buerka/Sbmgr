@@ -37,6 +37,7 @@ func cloneUserFromTemplate(s *State, sourceName, newName string, now time.Time) 
 
 	cloned.Name = newName
 	cloned.Portal = nil
+	cloned.PersonalBlockedDomains = nil
 	cloned.Enabled = true
 	cloned.Upload, cloned.Download = 0, 0
 	cloned.RateMark = 0

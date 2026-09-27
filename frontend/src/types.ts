@@ -196,6 +196,13 @@ export interface AnalyticsSnapshot {
     status: string;
   }[];
 }
+export interface SiteBlocksSnapshot {
+  domains: string[];
+  version: string;
+  pending: boolean;
+  limit: number;
+  message?: string;
+}
 export interface ClientEntry {
   server: string;
   port: number;

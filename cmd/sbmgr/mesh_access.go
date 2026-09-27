@@ -177,7 +177,8 @@ func buildMeshAccess(s *State, member string, sequence uint64, now time.Time) me
 		u := User{Name: original.Name, Enabled: original.Enabled, QuotaMode: original.QuotaMode, Expires: original.Expires,
 			UploadMbps: original.UploadMbps, DownloadMbps: original.DownloadMbps, RateMark: original.RateMark,
 			Throttle: original.Throttle, Burst: original.Burst, Access: original.Access,
-			BlockedUntil: original.BlockedUntil, BlockReason: original.BlockReason, DisabledReason: original.DisabledReason}
+			PersonalBlockedDomains: append([]string(nil), original.PersonalBlockedDomains...),
+			BlockedUntil:           original.BlockedUntil, BlockReason: original.BlockReason, DisabledReason: original.DisabledReason}
 		for _, n := range original.Nodes {
 			r, ok := meshRouteInfo(s, n.Outbound)
 			if !ok || r.Entry != member {

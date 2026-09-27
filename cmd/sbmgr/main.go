@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-const stateVersion = 20
+const stateVersion = 21
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -89,36 +89,37 @@ type User struct {
 	recentIndex    map[string]int // transient write-side lookup, rebuilt after pruning
 	Portal         *PortalAccount `json:"portal,omitempty"`
 
-	Name                string                  `json:"name"`
-	Enabled             bool                    `json:"enabled"`
-	QuotaBytes          int64                   `json:"quota_bytes"`
-	QuotaMode           string                  `json:"quota_mode"`
-	ExtraQuotaBytes     int64                   `json:"extra_quota_bytes,omitempty"`
-	Expires             string                  `json:"expires,omitempty"`
-	Upload              int64                   `json:"upload_bytes"`
-	Download            int64                   `json:"download_bytes"`
-	UploadMbps          float64                 `json:"upload_mbps,omitempty"`
-	DownloadMbps        float64                 `json:"download_mbps,omitempty"`
-	RateMark            uint32                  `json:"rate_mark,omitempty"`
-	Throttle            ThrottlePolicy          `json:"throttle,omitempty"`
-	Burst               BurstPolicy             `json:"burst_protection,omitempty"`
-	IPPolicy            IPPolicy                `json:"ip_policy,omitempty"`
-	SourceIPs           map[string]SourceIPStat `json:"source_ips,omitempty"`
-	Devices             []Device                `json:"devices,omitempty"`
-	TrafficSamples      []TrafficSample         `json:"traffic_samples,omitempty"`
-	UsageHistory        []UsagePoint            `json:"usage_history,omitempty"`
-	CurrentUploadMbps   float64                 `json:"current_upload_mbps,omitempty"`
-	CurrentDownloadMbps float64                 `json:"current_download_mbps,omitempty"`
-	BlockedUntil        string                  `json:"blocked_until,omitempty"`
-	BlockReason         string                  `json:"block_reason,omitempty"`
-	DisabledReason      string                  `json:"disabled_reason,omitempty"`
-	Billing             BillingPolicy           `json:"billing,omitempty"`
-	BillingHistory      []BillingRecord         `json:"billing_history,omitempty"`
-	QuotaAlertStage     int                     `json:"quota_alert_stage,omitempty"`
-	ExpiryAlertStage    int                     `json:"expiry_alert_stage,omitempty"`
-	Access              AccessPolicy            `json:"access_policy,omitempty"`
-	RecentAccesses      []RecentAccess          `json:"recent_accesses,omitempty"`
-	Nodes               []Node                  `json:"nodes"`
+	Name                   string                  `json:"name"`
+	Enabled                bool                    `json:"enabled"`
+	QuotaBytes             int64                   `json:"quota_bytes"`
+	QuotaMode              string                  `json:"quota_mode"`
+	ExtraQuotaBytes        int64                   `json:"extra_quota_bytes,omitempty"`
+	Expires                string                  `json:"expires,omitempty"`
+	Upload                 int64                   `json:"upload_bytes"`
+	Download               int64                   `json:"download_bytes"`
+	UploadMbps             float64                 `json:"upload_mbps,omitempty"`
+	DownloadMbps           float64                 `json:"download_mbps,omitempty"`
+	RateMark               uint32                  `json:"rate_mark,omitempty"`
+	Throttle               ThrottlePolicy          `json:"throttle,omitempty"`
+	Burst                  BurstPolicy             `json:"burst_protection,omitempty"`
+	IPPolicy               IPPolicy                `json:"ip_policy,omitempty"`
+	SourceIPs              map[string]SourceIPStat `json:"source_ips,omitempty"`
+	Devices                []Device                `json:"devices,omitempty"`
+	TrafficSamples         []TrafficSample         `json:"traffic_samples,omitempty"`
+	UsageHistory           []UsagePoint            `json:"usage_history,omitempty"`
+	CurrentUploadMbps      float64                 `json:"current_upload_mbps,omitempty"`
+	CurrentDownloadMbps    float64                 `json:"current_download_mbps,omitempty"`
+	BlockedUntil           string                  `json:"blocked_until,omitempty"`
+	BlockReason            string                  `json:"block_reason,omitempty"`
+	DisabledReason         string                  `json:"disabled_reason,omitempty"`
+	Billing                BillingPolicy           `json:"billing,omitempty"`
+	BillingHistory         []BillingRecord         `json:"billing_history,omitempty"`
+	QuotaAlertStage        int                     `json:"quota_alert_stage,omitempty"`
+	ExpiryAlertStage       int                     `json:"expiry_alert_stage,omitempty"`
+	Access                 AccessPolicy            `json:"access_policy,omitempty"`
+	PersonalBlockedDomains []string                `json:"personal_blocked_domains,omitempty"`
+	RecentAccesses         []RecentAccess          `json:"recent_accesses,omitempty"`
+	Nodes                  []Node                  `json:"nodes"`
 }
 
 type Node struct {
@@ -2267,6 +2268,9 @@ func migrateState(s *State) error {
 				return err
 			}
 			s.Version = 20
+		case 20:
+			// Personal site blocks start empty and never inherit admin policy.
+			s.Version = 21
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}
@@ -2376,6 +2380,9 @@ func validateState(s *State) error {
 		}
 		if err := validateAccessPolicy(u.Access); err != nil {
 			return fmt.Errorf("用户 %s: %w", u.Name, err)
+		}
+		if err := validatePersonalSiteBlocks(u.PersonalBlockedDomains); err != nil {
+			return fmt.Errorf("用户个人网站限制无效: %w", err)
 		}
 		if err := validateRecentAccesses(u); err != nil {
 			return fmt.Errorf("用户 %s: %w", u.Name, err)

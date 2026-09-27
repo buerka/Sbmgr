@@ -26,6 +26,7 @@ import { bytes, dateTime, rate } from "../format";
 import { optionLabels } from "../components/formModel";
 import { Account } from "./Account";
 import { MyDevices } from "./MyDevices";
+import { MySiteBlocks } from "./MySiteBlocks";
 import { AnalyticsDashboard } from "../components/AnalyticsDashboard";
 import "./user-workspace.css";
 
@@ -214,6 +215,7 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
             ["/me", "我的状态"],
             ["/me/devices", "我的设备"],
             ["/me/analytics", "数据看板"],
+            ["/me/site-blocks", "网站屏蔽"],
             ["/me/subscriptions", "我的订阅"],
             ["/me/account", "密码设置"],
           ].map(([to, label]) => (
@@ -237,6 +239,7 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
         {notice && <Alert kind={notice.severity}>{notice.message}</Alert>}
         <Routes>
           <Route path="/me/account" element={<Account />} />
+          <Route path="/me/site-blocks" element={<MySiteBlocks />} />
           <Route
             path="/me/analytics"
             element={<AnalyticsDashboard devices={data?.user.devices || []} />}
