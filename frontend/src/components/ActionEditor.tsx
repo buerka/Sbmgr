@@ -54,10 +54,7 @@ const hints: Record<string, string> = {
   expire: "留空为长期有效，清空已有日期会移除到期限制。",
   "billing-day": "每月 1–28 日，按已配置的账期时区重置用量。",
   "device-limit":
-    "默认 0 关闭自助管理。设置为 1–100 后，用户可管理名额内的设备。已有和停用设备占用名额，降低名额不删除设备；不解除动态单活等访问规则。",
-  "ip-max": "动态单活只能为 1；固定名单和自动学习可设置多个。",
-  "ip-handover-seconds": "新来源替换旧来源之前的等待时间，单位为秒。",
-  "ip-temp-minutes": "显示当前剩余分钟数；修改此值将从保存时重新计时。",
+    "默认 0 关闭自助管理。设置为 1–100 后，用户可管理名额内的设备。已有和停用设备占用名额，降低名额不删除设备；访问和并发规则继续有效。",
   "burst-limit": "窗口内累计流量达到该值时触发保护，如 2G。",
   "tier1-speed": "触发第一档后保留的原速率百分比。",
   "tier2-speed": "触发第二档后保留的原速率百分比。",
@@ -70,20 +67,6 @@ const groups: Record<string, [string, string[]][]> = {
     ["流量与计费", ["quota", "quota-mode", "extra-quota"]],
     ["有效期与账期", ["expire", "billing-enabled", "billing-day"]],
     ["速度上限", ["up-mbps", "down-mbps"]],
-  ],
-  "user.ip": [
-    [
-      "来源控制",
-      [
-        "ip-enabled",
-        "ip-mode",
-        "ip-binding",
-        "ip-max",
-        "ip-handover-seconds",
-        "ip-allowed",
-      ],
-    ],
-    ["临时放行", ["ip-temp", "ip-temp-minutes"]],
   ],
   "user.burst": [
     ["检测条件", ["burst-enabled", "burst-window", "burst-limit"]],

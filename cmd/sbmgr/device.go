@@ -2,10 +2,8 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -224,94 +222,6 @@ func (a *app) deviceCmdLocked(args []string) error {
 			return err
 		}
 		fmt.Fprintf(a.out, "已为用户 %s 添加设备 %s，并生成 %d 个独立 UUID\n", u.Name, *name, len(nodesForDevice(*u, *name)))
-		return nil
-	case "set":
-		fs := a.newFlagSet("device set")
-		ipEnabled := fs.String("ip-enabled", "", "来源 IP 规则开关: true/false")
-		ipMode := fs.String("ip-mode", "", "来源 IP 模式: enforce/monitor")
-		ipBinding := fs.String("ip-binding", "", "绑定方式: dynamic/auto/manual")
-		ipMax := fs.Int("ip-max", 0, "最多允许的来源 IP 数量")
-		ipHandoverSeconds := fs.Int("ip-handover-seconds", 0, "动态单活换绑宽限秒数")
-		ipAllowed := fs.String("ip-allowed", "", "固定允许 IP，逗号分隔")
-		ipTemp := fs.String("ip-temp", "", "临时替代 IP，逗号分隔；留空清除")
-		ipTempMinutes := fs.Int("ip-temp-minutes", 0, "临时 IP 有效分钟数")
-		if len(args) < 3 {
-			return errors.New("用法: sbmgr admin device set USER DEVICE [IP 规则参数]")
-		}
-		if err := fs.Parse(args[3:]); err != nil {
-			return err
-		}
-		if fs.NArg() != 0 {
-			return errors.New("用法: sbmgr admin device set USER DEVICE [IP 规则参数]")
-		}
-		device := findDevice(u, args[2])
-		if device == nil {
-			return fmt.Errorf("设备 %q 不存在", args[2])
-		}
-		oldPolicy := normalizedIPPolicy(device.IPPolicy)
-		policy := oldPolicy
-		changed := false
-		tempSet, tempMinutesSet := false, false
-		var parseErr error
-		fs.Visit(func(f *flag.Flag) {
-			changed = true
-			switch f.Name {
-			case "ip-enabled":
-				policy.Enabled, parseErr = strconv.ParseBool(*ipEnabled)
-			case "ip-mode":
-				policy.Mode = strings.ToLower(strings.TrimSpace(*ipMode))
-			case "ip-binding":
-				policy.Binding = strings.ToLower(strings.TrimSpace(*ipBinding))
-			case "ip-max":
-				policy.MaxIPs = *ipMax
-			case "ip-handover-seconds":
-				policy.HandoverSeconds = *ipHandoverSeconds
-			case "ip-allowed":
-				policy.BoundIPs, parseErr = parseIPList(*ipAllowed)
-			case "ip-temp":
-				tempSet = true
-				policy.TemporaryIPs, parseErr = parseIPList(*ipTemp)
-			case "ip-temp-minutes":
-				tempMinutesSet = true
-			}
-		})
-		if parseErr != nil {
-			return parseErr
-		}
-		if !changed {
-			return errors.New("没有指定要修改的设备规则")
-		}
-		if tempSet {
-			if len(policy.TemporaryIPs) == 0 {
-				policy.TemporaryUntil = ""
-			} else {
-				if *ipTempMinutes <= 0 {
-					return errors.New("设置临时 IP 时，临时分钟数必须大于 0")
-				}
-				policy.TemporaryUntil = time.Now().Add(time.Duration(*ipTempMinutes) * time.Minute).Format(time.RFC3339Nano)
-			}
-		} else if tempMinutesSet {
-			if len(policy.TemporaryIPs) == 0 || *ipTempMinutes <= 0 {
-				return errors.New("延长临时 IP 时必须已有临时 IP，且分钟数大于 0")
-			}
-			policy.TemporaryUntil = time.Now().Add(time.Duration(*ipTempMinutes) * time.Minute).Format(time.RFC3339Nano)
-		}
-		if policy.Enabled && policy.Binding == "dynamic" && len(policy.BoundIPs) == 0 && len(policy.TemporaryIPs) == 0 {
-			if active := activeSourceIPs(s, u.Name, device.Name); len(active) == 1 {
-				policy.BoundIPs = active
-			}
-		}
-		if err := validateIPPolicy(policy); err != nil {
-			return err
-		}
-		device.IPPolicy = policy
-		if ipPolicyRuleSignature(oldPolicy, time.Now()) != ipPolicyRuleSignature(policy, time.Now()) {
-			s.IPApplyPending = true
-		}
-		if err := saveState(a.statePath, s); err != nil {
-			return err
-		}
-		fmt.Fprintf(a.out, "已更新设备 %s/%s 的来源 IP 规则，后台下个维护周期自动应用\n", u.Name, device.Name)
 		return nil
 	case "enable", "disable":
 		if len(args) != 3 {

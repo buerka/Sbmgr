@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 8
+	sqliteSchemaVersion = 9
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -257,7 +257,7 @@ var sqliteSchema = append([]string{
 		PRIMARY KEY(node_id, target)
 	) STRICT`,
 	`CREATE INDEX IF NOT EXISTS node_destinations_count_idx ON node_destinations(node_id, count DESC)`,
-}, append(sqliteMeshSchema, sqliteMachineTrafficSchema...)...)
+}, append(append(sqliteMeshSchema, sqliteMachineTrafficSchema...), sqliteAnalyticsSchema...)...)
 
 func isSQLiteStatePath(path string) bool {
 	return !strings.EqualFold(filepath.Ext(strings.TrimSpace(path)), ".json")
@@ -733,6 +733,27 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 8
+		case 8:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for _, statement := range sqliteAnalyticsSchema {
+				if _, err := tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec("UPDATE metadata SET value = '9' WHERE key = 'schema_version'"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("PRAGMA user_version = 9"); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 9
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}

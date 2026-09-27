@@ -68,7 +68,6 @@ func webActions() []webAction {
 	add("user.clone", "复制用户策略", "users", "user clone", saved, false, []string{"user"}, f("user", "新用户名", "text", true), source("from", "复制自", "users", true))
 	add("user.set", "配额与限速", "user", "user set", saved, false, []string{"user"}, user, quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("extra-quota", "本期附加流量（0 清除）", "text", false), f("expire", "到期日", "date", false), f("clear-expire", "清除到期日", "checkbox", false), up, down, selectField("billing-enabled", "自动账期", "true", "false"), f("billing-day", "账期日（1–28）", "number", false))
 	add("user.devices", "自助设备名额", "user", "user set", "保存后名额即时生效。0 关闭自助管理；1–100 为设备总名额，包含已有和停用设备。减少名额不删除设备，超额时停止新增；各设备共用用户流量。", false, []string{"user"}, user, f("device-limit", "设备总名额（0 关闭自助管理）", "number", true))
-	add("user.ip", "来源 IP 规则", "user", "user set", saved, false, []string{"user"}, user, selectField("ip-enabled", "启用规则", "true", "false"), selectField("ip-mode", "执行方式", "enforce", "monitor"), selectField("ip-binding", "绑定方式", "dynamic", "auto", "manual"), f("ip-max", "最多来源 IP 数", "number", false), f("ip-handover-seconds", "换绑宽限秒数", "number", false), f("ip-allowed", "固定 IP（逗号分隔）", "text", false), f("ip-temp", "临时替代 IP（逗号分隔）", "text", false), f("ip-temp-minutes", "临时 IP 有效分钟数", "number", false))
 	add("user.burst", "异常流量保护", "user", "user set", saved, false, []string{"user"}, user, selectField("burst-enabled", "启用保护", "true", "false"), f("burst-window", "滑动窗口（分钟）", "number", false), f("burst-limit", "窗口流量阈值（如 2G）", "text", false), f("burst-block", "封禁分钟数", "number", false), selectField("burst-action", "处理方式", "soft", "hard"), f("burst-soft-up-kbps", "软封上传 Kbps", "number", false), f("burst-soft-down-kbps", "软封下载 Kbps", "number", false))
 	add("user.throttle", "阶梯限速", "user", "user set", saved, false, []string{"user"}, user, selectField("tiered", "启用阶梯限速", "true", "false"), f("tier1-usage", "第一档用量百分比", "number", false), f("tier1-speed", "第一档保留速度百分比", "number", false), f("tier2-usage", "第二档用量百分比", "number", false), f("tier2-speed", "第二档保留速度百分比", "number", false))
 	for _, op := range []struct {
@@ -92,7 +91,6 @@ func webActions() []webAction {
 		}
 		add("device."+op.id, op.title, "device", "device "+op.id, effect, op.danger, []string{"user", "device"}, user, device)
 	}
-	add("device.ip", "设备来源规则", "device", "device set", saved, false, []string{"user", "device"}, user, device, selectField("ip-enabled", "启用规则", "true", "false"), selectField("ip-mode", "执行方式", "enforce", "monitor"), selectField("ip-binding", "绑定方式", "dynamic", "auto", "manual"), f("ip-max", "最多来源 IP 数", "number", false), f("ip-allowed", "固定 IP（逗号分隔）", "text", false))
 	add("config.apply", "应用配置", "ops", "apply --restart", "配置已校验并应用。失败时保留或恢复原运行配置。", true, nil)
 	add("config.check", "校验配置", "ops", "check", "配置校验通过。", false, nil)
 	add("backup.create", "创建备份", "ops", "backup create", "已创建一致性状态备份。", false, nil)
@@ -200,7 +198,7 @@ func compileWebAction(input webActionInput) ([]string, webAction, error) {
 			if f.Key == "quota" || f.Key == "extra-quota" || f.Key == "burst-limit" {
 				value = normalizeQuotaInput(value)
 			}
-			if value == "-" && (f.Key == "allow-domains" || f.Key == "block-domains" || f.Key == "block-ports" || f.Key == "ip-allowed" || f.Key == "ip-temp" || (input.Action == "user.batch" && f.Key == "expire")) {
+			if value == "-" && (f.Key == "allow-domains" || f.Key == "block-domains" || f.Key == "block-ports" || (input.Action == "user.batch" && f.Key == "expire")) {
 				value = ""
 			}
 			args = append(args, "--"+f.Key+"="+value)

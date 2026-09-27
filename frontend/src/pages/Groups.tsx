@@ -386,8 +386,7 @@ function GroupWorkspace({ g, s }: { g: UserGroup; s: Snapshot }) {
                             为设备总名额，包含已有和停用设备。减少名额不删除已有设备，超额期间不能新增。保存后名额立即生效。
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            设备共用用户配额；动态单活、来源 IP
-                            和并发规则继续有效。用户只能复制自己已有设备的线路与限制。
+                            设备共用用户配额；访问和并发规则继续有效。用户只能复制自己已有设备的线路与限制。
                           </p>
                         </div>
                       )}

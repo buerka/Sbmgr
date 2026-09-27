@@ -176,7 +176,7 @@ func buildMeshAccess(s *State, member string, sequence uint64, now time.Time) me
 	for _, original := range s.Users {
 		u := User{Name: original.Name, Enabled: original.Enabled, QuotaMode: original.QuotaMode, Expires: original.Expires,
 			UploadMbps: original.UploadMbps, DownloadMbps: original.DownloadMbps, RateMark: original.RateMark,
-			Throttle: original.Throttle, Burst: original.Burst, IPPolicy: meshEntryIPPolicy(original.IPPolicy), Access: original.Access,
+			Throttle: original.Throttle, Burst: original.Burst, Access: original.Access,
 			BlockedUntil: original.BlockedUntil, BlockReason: original.BlockReason, DisabledReason: original.DisabledReason}
 		for _, n := range original.Nodes {
 			r, ok := meshRouteInfo(s, n.Outbound)
@@ -198,7 +198,7 @@ func buildMeshAccess(s *State, member string, sequence uint64, now time.Time) me
 				needed = needed || n.Device == d.Name
 			}
 			if needed {
-				u.Devices = append(u.Devices, Device{Name: d.Name, Label: d.Label, Enabled: d.Enabled, CreatedAt: d.CreatedAt, IPPolicy: meshEntryIPPolicy(d.IPPolicy), Access: d.Access})
+				u.Devices = append(u.Devices, Device{Name: d.Name, Label: d.Label, Enabled: d.Enabled, CreatedAt: d.CreatedAt, Access: d.Access})
 			}
 		}
 		if expired(original, now) || overQuota(original) || burstHardBlocked(original, now) {
@@ -218,30 +218,14 @@ func buildMeshAccess(s *State, member string, sequence uint64, now time.Time) me
 	return result
 }
 
-func meshEntryIPPolicy(p IPPolicy) IPPolicy {
-	p.BoundLastSeen = nil
-	if p.Binding != "manual" {
-		p.BoundIPs = nil
-	}
-	return p
-}
-
-func meshPolicyKey(ip IPPolicy, access AccessPolicy, burst BurstPolicy) string {
+func meshPolicyKey(access AccessPolicy, burst BurstPolicy) string {
 	access.ConnectionBlockedUntil, access.LastConnectionAlert = "", ""
 	raw, _ := json.Marshal(struct {
-		IP     IPPolicy
 		Access AccessPolicy
 		Burst  BurstPolicy
-	}{meshEntryIPPolicy(ip), access, burst})
+	}{access, burst})
 	digest := sha256.Sum256(raw)
 	return hex.EncodeToString(digest[:])
-}
-
-func preserveMeshIPRuntime(next *IPPolicy, previous IPPolicy) {
-	if next.Binding != "manual" {
-		next.BoundIPs = previous.BoundIPs
-	}
-	next.BoundLastSeen = previous.BoundLastSeen
 }
 
 func laterMeshBlock(a, b string) string {
@@ -297,10 +281,10 @@ func (a *app) installMeshAccess(s *State, access *meshAccess) error {
 		supplied.GroupID = prior.GroupID
 		supplied.GroupOverrides = append([]string(nil), prior.GroupOverrides...)
 		policyID := supplied.Name + "/"
-		policyKey := meshPolicyKey(supplied.IPPolicy, supplied.Access, supplied.Burst)
+		supplied.IPPolicy = IPPolicy{} // Ignore grants from older masters.
+		policyKey := meshPolicyKey(supplied.Access, supplied.Burst)
 		next.MeshLease.Policies[policyID] = policyKey
 		if s.MeshLease != nil && s.MeshLease.Policies[policyID] == policyKey {
-			preserveMeshIPRuntime(&supplied.IPPolicy, prior.IPPolicy)
 			supplied.Access.ConnectionBlockedUntil = laterMeshBlock(supplied.Access.ConnectionBlockedUntil, prior.Access.ConnectionBlockedUntil)
 			if laterMeshBlock(supplied.BlockedUntil, prior.BlockedUntil) == prior.BlockedUntil {
 				supplied.BlockedUntil, supplied.BlockReason = prior.BlockedUntil, prior.BlockReason
@@ -316,10 +300,10 @@ func (a *app) installMeshAccess(s *State, access *meshAccess) error {
 			}
 			device := &supplied.Devices[i]
 			id := supplied.Name + "/" + device.Name
-			key := meshPolicyKey(device.IPPolicy, device.Access, BurstPolicy{})
+			device.IPPolicy = IPPolicy{}
+			key := meshPolicyKey(device.Access, BurstPolicy{})
 			next.MeshLease.Policies[id] = key
 			if d := findDevicePtr(prior, device.Name); d != nil && s.MeshLease != nil && s.MeshLease.Policies[id] == key {
-				preserveMeshIPRuntime(&device.IPPolicy, d.IPPolicy)
 				device.Access.ConnectionBlockedUntil = laterMeshBlock(device.Access.ConnectionBlockedUntil, d.Access.ConnectionBlockedUntil)
 			}
 		}

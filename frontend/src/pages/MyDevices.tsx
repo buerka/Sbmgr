@@ -114,7 +114,7 @@ export function MyDevices({
               ? `还可添加 ${Math.max(0, limit - u.devices.length)} 台，停用设备也占用名额。`
               : "管理员尚未开放自助管理，现有设备与订阅不受影响。"}
           </p>
-          <p>名额不是同时在线数量，原有来源 IP 和并发限制仍然有效。</p>
+          <p>名额不是同时在线数量，访问和并发规则仍然有效。</p>
         </div>
       </div>
       {notice && <Alert className="mb-5">{notice}</Alert>}
@@ -167,6 +167,14 @@ export function MyDevices({
                 )}
               </div>
               <div className="flex flex-wrap gap-2 border-t pt-4">
+                <Button variant="outline" asChild>
+                  <Link
+                    to={`/me/analytics?device=${encodeURIComponent(d.name)}`}
+                  >
+                    查看数据
+                    <Icon name="next" />
+                  </Link>
+                </Button>
                 <Button variant="outline" asChild>
                   <Link to="/me/subscriptions">
                     获取订阅
@@ -282,7 +290,7 @@ export function MyDevices({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  新设备共用你的流量池，限速及来源限制继续有效。
+                  新设备共用你的流量池，限速及访问规则继续有效。
                 </p>
               </div>
             )}

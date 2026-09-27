@@ -231,6 +231,22 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		b.mu.Unlock()
 		return webError(401, "请重新登录")
 	}
+	if q.Path == "/api/analytics" && q.Method == "POST" {
+		defer b.mu.Unlock()
+		var reply webReply
+		err := b.a.withStateLock(func() error {
+			s, err := loadState(b.a.statePath)
+			if err != nil {
+				return err
+			}
+			reply = b.a.analyticsReply(s, nil, q.Body)
+			return nil
+		})
+		if err != nil {
+			return webError(503, "分析数据暂不可用")
+		}
+		return reply
+	}
 	if q.Path == "/api/session" && q.Method == "GET" {
 		b.mu.Unlock()
 		return webJSON(200, map[string]string{"csrf": session.CSRF, "username": c.Username, "role": "admin"})

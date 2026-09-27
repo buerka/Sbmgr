@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   ActionButton,
@@ -14,8 +14,10 @@ import { UserGroupSettings } from "../components/UserGroupSettings";
 import { groupName } from "../components/groupModel";
 import { PortalAccess } from "../components/PortalAccess";
 import { DeviceDelivery } from "../components/DeviceDelivery";
+import { AnalyticsDashboard } from "../components/AnalyticsDashboard";
 
 import { Progress } from "../components/ui/feedback";
+import { Button } from "../components/ui/button";
 import { TableCell, TableRow } from "../components/ui/table";
 import { Icon, type IconName } from "../components/Icons";
 import { optionLabels } from "../components/formModel";
@@ -45,7 +47,7 @@ const sections: {
     id: "access",
     title: "访问控制",
     icon: "shield",
-    forms: ["user.ip", "user.access"],
+    forms: ["user.access"],
   },
   {
     id: "protection",
@@ -54,6 +56,7 @@ const sections: {
     forms: ["user.burst", "user.throttle"],
   },
   { id: "delivery", title: "订阅交付", icon: "link", forms: [] },
+  { id: "analytics", title: "数据看板", icon: "health", forms: [] },
   { id: "activity", title: "用量与记录", icon: "health", forms: [] },
   { id: "login", title: "面板登录", icon: "shield", forms: ["portal.account"] },
 ];
@@ -113,6 +116,7 @@ export function UserDetail() {
 
 function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
   const dispatch = useAppDispatch();
+  const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState("basic");
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const dirty = Object.values(drafts).some(Boolean);
@@ -324,12 +328,20 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                     <ActionButton id="node.assign" context={dc}>
                       分配线路
                     </ActionButton>
-                    <ActionButton id="device.ip" context={dc}>
-                      来源规则
-                    </ActionButton>
                     <ActionButton id="device.access" context={dc}>
                       访问规则
                     </ActionButton>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setTab("analytics");
+                        const next = new URLSearchParams(params);
+                        next.set("device", d.name);
+                        setParams(next);
+                      }}
+                    >
+                      查看数据
+                    </Button>
                     <ActionMenu
                       label="设备设置"
                       items={[
@@ -412,6 +424,15 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
           })}
         </Tabs.Content>
         <Tabs.Content
+          value="analytics"
+          className="tab-content workspace-tab"
+          forceMount
+        >
+          {tab === "analytics" && (
+            <AnalyticsDashboard user={u.name} devices={u.devices} />
+          )}
+        </Tabs.Content>
+        <Tabs.Content
           value="access"
           className="tab-content workspace-tab"
           forceMount
@@ -419,17 +440,10 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
           <div className="workspace-intro">
             <h2>访问控制</h2>
             <p>
-              设置整个用户的来源
-              IP、域名、端口和并发规则。设备自己的规则在「设备与线路」中设置。
+              设置整个用户的域名、端口和并发规则。设备自己的访问规则在「设备与线路」中设置。
             </p>
           </div>
           <div className="workspace-form-stack">
-            <UserSetting
-              id="user.ip"
-              user={u}
-              snapshot={s}
-              onDirty={reportDirty}
-            />
             <UserSetting
               id="user.access"
               user={u}

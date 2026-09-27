@@ -20,17 +20,6 @@ export interface Device {
   deliverable: boolean;
   assignment_version?: string;
   access?: AccessPolicy;
-  ip_policy?: IPPolicy;
-}
-export interface IPPolicy {
-  enabled?: boolean;
-  mode?: string;
-  binding?: string;
-  max_ips?: number;
-  handover_seconds?: number;
-  bound_ips?: string[];
-  temporary_ips?: string[];
-  temporary_until?: string;
 }
 export interface BurstPolicy {
   enabled?: boolean;
@@ -106,7 +95,6 @@ export interface User {
     time_zone?: string;
     next_reset?: string;
   };
-  ip_policy?: IPPolicy;
   burst?: BurstPolicy;
   throttle?: ThrottlePolicy;
   connections: {
@@ -155,6 +143,58 @@ export interface PortalSnapshot {
       "name" | "device" | "upload" | "download" | "current_up" | "current_down"
     > & { available: boolean })[];
   };
+}
+export interface AnalyticsSnapshot {
+  user: string;
+  device: string;
+  days: 1 | 7 | 30;
+  from: string;
+  to: string;
+  coverage: {
+    status: "collecting" | "partial" | "unavailable";
+    first_seen: string;
+    last_seen: string;
+    gaps: number;
+    note: string;
+  };
+  totals: {
+    upload: number;
+    download: number;
+    connections: number;
+    domains: number;
+  };
+  devices: {
+    name: string;
+    label: string;
+    upload: number;
+    download: number;
+    connections: number;
+    last_seen: string;
+  }[];
+  series: {
+    date: string;
+    upload: number;
+    download: number;
+    connections: number;
+  }[];
+  domains: {
+    domain: string;
+    upload: number;
+    download: number;
+    connections: number;
+    last_seen: string;
+  }[];
+  pagination: { page: number; page_size: number; total: number };
+  recent: {
+    domain: string;
+    device: string;
+    label: string;
+    started_at: string;
+    closed_at: string;
+    upload: number;
+    download: number;
+    status: string;
+  }[];
 }
 export interface ClientEntry {
   server: string;

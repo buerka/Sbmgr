@@ -140,6 +140,8 @@ func (b *webBackend) lookupPortalLocked(q webRequest, session webSession, now ti
 			result.Logout = true
 		case q.Path == "/api/me" && q.Method == "GET":
 			result = webJSON(200, portalSnapshot(s, u, now))
+		case q.Path == "/api/analytics" && q.Method == "POST":
+			result = a.analyticsReply(s, u, q.Body)
 		case q.Path == "/api/delivery" && q.Method == "POST":
 			result = webDeliveryFromState(s, q.Body, u.Name)
 		case q.Path == "/api/me/devices" && q.Method == "POST":

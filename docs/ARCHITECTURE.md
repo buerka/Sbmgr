@@ -40,14 +40,15 @@ Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 →
 | 后台统计与网络维护 | `daemon.go`、`stats.go`、`usage.go`、`network_maintenance.go`、`machine_traffic*.go` |
 | 限速、共享 WG 接入 | `rate.go`、`counter_keys.go`、`wireguard_bridge.go` |
 | 账期、配额、处罚 | `billing.go`、`quota.go`、`burst.go`、`policy_recovery.go` |
-| 来源、访问、连接 | `ip_policy.go`、`access_policy.go`、`connection_tracking.go` |
+| 访问、连接与来源地址观测 | `access_policy.go`、`connection_tracking.go` |
+| 网站流量采集与查询 | `analytics*.go`；前端 `AnalyticsDashboard` |
 | 出站、端点、客户端入口 | `outbound_*.go`、`proxy_admin.go`、`client_endpoint.go` |
 | 订阅隔离与生命周期 | `subscription_{backend,http,ipc,worker_linux,supervisor}.go` |
 | 主从命令、存储、下发、入口授权 | `mesh_{admin,state,sqlite,routes,coordinator,agent,runtime,access}.go` |
 | 拓扑校验与协议编译 | `internal/mesh/{model,transport,config}.go` |
 | 备份、审计、巡检、健康 | `backup.go`、`audit.go`、`fleet.go`、`health.go` |
 
-除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 17、SQLite schema 为 8；版本常量分别在 `main.go:stateVersion` 和 `state_sqlite.go:sqliteSchemaVersion`，两者各自迁移，不按软件版本推断。
+除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 19、SQLite schema 为 9；版本常量分别在 `main.go:stateVersion` 和 `state_sqlite.go:sqliteSchemaVersion`，两者各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
 
 ## 多机与协议
 

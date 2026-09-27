@@ -51,7 +51,7 @@ func cloneUserFromTemplate(s *State, sourceName, newName string, now time.Time) 
 	cloned.QuotaAlertStage, cloned.ExpiryAlertStage = 0, 0
 	cloned.Access.LastConnectionAlert = ""
 	cloned.Access.ConnectionBlockedUntil = ""
-	resetTemplateIPRuntime(&cloned.IPPolicy)
+	cloned.IPPolicy = IPPolicy{}
 
 	usedAuth := map[string]bool{}
 	for _, auth := range s.ReservedAuthUsers {
@@ -85,7 +85,7 @@ func cloneUserFromTemplate(s *State, sourceName, newName string, now time.Time) 
 		device.SubscriptionToken = newSubscriptionToken()
 		device.Access.LastConnectionAlert = ""
 		device.Access.ConnectionBlockedUntil = ""
-		resetTemplateIPRuntime(&device.IPPolicy)
+		device.IPPolicy = IPPolicy{}
 	}
 	for index := range cloned.Nodes {
 		node := &cloned.Nodes[index]
@@ -99,15 +99,4 @@ func cloneUserFromTemplate(s *State, sourceName, newName string, now time.Time) 
 		node.RateUpdatedAt = ""
 	}
 	return cloned, nil
-}
-
-func resetTemplateIPRuntime(policy *IPPolicy) {
-	if policy == nil {
-		return
-	}
-	policy.TemporaryIPs, policy.TemporaryUntil = nil, ""
-	policy.BoundLastSeen = nil
-	if normalizedIPPolicy(*policy).Binding != "manual" {
-		policy.BoundIPs = nil
-	}
 }

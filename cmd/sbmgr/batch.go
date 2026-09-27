@@ -16,7 +16,7 @@ const (
 	batchUserSettings batchOperationKind = iota
 	batchNodeRates
 	batchBurstPolicy
-	batchIPPolicy
+	batchIPPolicy // retired wire value 3; keep access policy at value 4
 	batchAccessPolicy
 )
 
@@ -51,17 +51,6 @@ type batchBurstPolicyPatch struct {
 	SoftDownloadKbps *float64
 }
 
-type batchIPPolicyPatch struct {
-	Enabled          *bool
-	Mode             *string
-	Binding          *string
-	MaxIPs           *int
-	HandoverSeconds  *int
-	BoundIPs         *[]string
-	TemporaryIPs     *[]string
-	TemporaryMinutes *int
-}
-
 type batchAccessPolicyPatch struct {
 	AllowedDomains   *[]string
 	BlockedDomains   *[]string
@@ -76,7 +65,6 @@ type batchOperation struct {
 	User   batchUserSettingsPatch
 	Node   batchNodeRatesPatch
 	Burst  batchBurstPolicyPatch
-	IP     batchIPPolicyPatch
 	Access batchAccessPolicyPatch
 }
 
@@ -112,6 +100,9 @@ func (a *app) batchUsers(op batchOperation) error {
 // applyBatchOperation validates and applies the complete operation to a deep
 // copy. The caller's state is never changed when one selected user fails.
 func applyBatchOperation(source *State, op batchOperation, now time.Time) (*State, batchResult, error) {
+	if op.Kind == batchIPPolicy {
+		return nil, batchResult{}, errors.New("来源 IP 批量策略已移除")
+	}
 	if source == nil {
 		return nil, batchResult{}, errors.New("状态为空")
 	}
@@ -161,8 +152,6 @@ func applyBatchToUser(s *State, u *User, op batchOperation, now time.Time) (int,
 		return applyBatchNodeRates(s, u, op.Node)
 	case batchBurstPolicy:
 		return 0, applyBatchBurst(u, op.Burst)
-	case batchIPPolicy:
-		return 0, applyBatchIP(s, u, op.IP, now)
 	case batchAccessPolicy:
 		return 0, applyBatchAccess(u, op.Access)
 	default:
@@ -351,61 +340,6 @@ func applyBatchBurst(u *User, patch batchBurstPolicyPatch) error {
 	return nil
 }
 
-func applyBatchIP(s *State, u *User, patch batchIPPolicyPatch, now time.Time) error {
-	oldPolicy := normalizedIPPolicy(u.IPPolicy)
-	policy := oldPolicy
-	if patch.Enabled != nil {
-		policy.Enabled = *patch.Enabled
-	}
-	if patch.Mode != nil {
-		policy.Mode = *patch.Mode
-	}
-	if patch.Binding != nil {
-		policy.Binding = *patch.Binding
-		if policy.Binding == "dynamic" && patch.MaxIPs == nil {
-			policy.MaxIPs = 1
-		}
-	}
-	if patch.MaxIPs != nil {
-		policy.MaxIPs = *patch.MaxIPs
-	}
-	if patch.HandoverSeconds != nil {
-		policy.HandoverSeconds = *patch.HandoverSeconds
-	}
-	if patch.BoundIPs != nil {
-		policy.BoundIPs = append([]string(nil), (*patch.BoundIPs)...)
-	}
-	if patch.TemporaryIPs != nil {
-		policy.TemporaryIPs = append([]string(nil), (*patch.TemporaryIPs)...)
-		if len(policy.TemporaryIPs) == 0 {
-			policy.TemporaryUntil = ""
-		} else {
-			if patch.TemporaryMinutes == nil || *patch.TemporaryMinutes <= 0 {
-				return errors.New("替换临时 IP 时必须同时填写大于 0 的有效分钟数")
-			}
-			policy.TemporaryUntil = now.Add(time.Duration(*patch.TemporaryMinutes) * time.Minute).Format(time.RFC3339Nano)
-		}
-	} else if patch.TemporaryMinutes != nil {
-		if len(policy.TemporaryIPs) == 0 || *patch.TemporaryMinutes <= 0 {
-			return errors.New("延长临时 IP 时必须已有临时 IP，且分钟数大于 0")
-		}
-		policy.TemporaryUntil = now.Add(time.Duration(*patch.TemporaryMinutes) * time.Minute).Format(time.RFC3339Nano)
-	}
-	if policy.Enabled && policy.Binding == "dynamic" && len(policy.BoundIPs) == 0 && len(policy.TemporaryIPs) == 0 {
-		if active := activeSourceIPs(s, u.Name, ""); len(active) == 1 {
-			policy.BoundIPs = active
-		}
-	}
-	if err := validateIPPolicy(policy); err != nil {
-		return err
-	}
-	u.IPPolicy = policy
-	if ipPolicyRuleSignature(oldPolicy, now) != ipPolicyRuleSignature(policy, now) {
-		s.IPApplyPending = true
-	}
-	return nil
-}
-
 func applyBatchAccess(u *User, patch batchAccessPolicyPatch) error {
 	policy := normalizedAccessPolicy(u.Access)
 	if patch.AllowedDomains != nil {
@@ -440,9 +374,6 @@ func batchOperationHasChanges(op batchOperation) bool {
 	case batchBurstPolicy:
 		p := op.Burst
 		return p.Enabled != nil || p.Action != nil || p.WindowMinutes != nil || p.LimitBytes != nil || p.BlockMinutes != nil || p.SoftUploadKbps != nil || p.SoftDownloadKbps != nil
-	case batchIPPolicy:
-		p := op.IP
-		return p.Enabled != nil || p.Mode != nil || p.Binding != nil || p.MaxIPs != nil || p.HandoverSeconds != nil || p.BoundIPs != nil || p.TemporaryIPs != nil || p.TemporaryMinutes != nil
 	case batchAccessPolicy:
 		p := op.Access
 		return p.AllowedDomains != nil || p.BlockedDomains != nil || p.BlockedPorts != nil || p.MaxConnections != nil || p.ConnectionAction != nil
@@ -460,7 +391,7 @@ func batchOperationName(kind batchOperationKind) string {
 	case batchBurstPolicy:
 		return "burst"
 	case batchIPPolicy:
-		return "ip-policy"
+		return "retired-ip-policy"
 	case batchAccessPolicy:
 		return "access-policy"
 	default:

@@ -1,5 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import {
+  Link,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 import { api } from "../api";
 import { signedOut, useAppDispatch, useAppSelector } from "../store";
 import type { PortalSnapshot } from "../types";
@@ -19,6 +26,7 @@ import { bytes, dateTime, rate } from "../format";
 import { optionLabels } from "../components/formModel";
 import { Account } from "./Account";
 import { MyDevices } from "./MyDevices";
+import { AnalyticsDashboard } from "../components/AnalyticsDashboard";
 import "./user-workspace.css";
 
 function MyStatus({ data }: { data: PortalSnapshot }) {
@@ -110,6 +118,7 @@ function MyStatus({ data }: { data: PortalSnapshot }) {
 }
 
 export function Portal({ themeControl }: { themeControl: ReactNode }) {
+  const location = useLocation();
   const session = useAppSelector((s) => s.admin.session),
     notice = useAppSelector((s) => s.admin.notice),
     dispatch = useAppDispatch();
@@ -197,6 +206,7 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
           {[
             ["/me", "我的状态"],
             ["/me/devices", "我的设备"],
+            ["/me/analytics", "数据看板"],
             ["/me/subscriptions", "我的订阅"],
             ["/me/account", "密码设置"],
           ].map(([to, label]) => (
@@ -220,6 +230,10 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
         {notice && <Alert kind={notice.severity}>{notice.message}</Alert>}
         <Routes>
           <Route path="/me/account" element={<Account />} />
+          <Route
+            path="/me/analytics"
+            element={<AnalyticsDashboard devices={data?.user.devices || []} />}
+          />
           <Route
             path="/me/devices"
             element={
@@ -264,9 +278,11 @@ export function Portal({ themeControl }: { themeControl: ReactNode }) {
           <Route path="*" element={<Navigate to="/me" replace />} />
         </Routes>
         <p className="text-xs text-muted-foreground mt-6">
-          {data
-            ? `最近更新 ${dateTime(data.time)} · 每 10 秒刷新`
-            : "正在连接服务"}
+          {location.pathname === "/me/analytics"
+            ? "网站统计按需读取；点击看板中的「刷新」获取最新采集结果。"
+            : data
+              ? `最近更新 ${dateTime(data.time)} · 每 10 秒刷新`
+              : "正在连接服务"}
         </p>
       </main>
     </div>

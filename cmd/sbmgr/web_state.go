@@ -21,7 +21,7 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		nodes := []any{}
 		for _, d := range u.Devices {
 			up, down := deviceTraffic(u, d.Name)
-			devices = append(devices, map[string]any{"name": d.Name, "label": deviceDisplayName(d), "enabled": d.Enabled, "upload": up, "download": down, "ip_policy": d.IPPolicy, "access": d.Access, "assignment_version": webAssignmentVersion(s, &u, d.Name), "deliverable": subscriptionDeviceAvailable(u, d, now) == nil})
+			devices = append(devices, map[string]any{"name": d.Name, "label": deviceDisplayName(d), "enabled": d.Enabled, "upload": up, "download": down, "access": d.Access, "assignment_version": webAssignmentVersion(s, &u, d.Name), "deliverable": subscriptionDeviceAvailable(u, d, now) == nil})
 		}
 		for _, n := range u.Nodes {
 			entry := "本机"
@@ -39,7 +39,7 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		for _, c := range firstWebItems(activeConnectionsForUser(s, u.Name), 50) {
 			connections = append(connections, map[string]string{"device": c.Device, "node": c.Node, "source": c.SourceIP, "target": c.Target, "since": c.StartedAt})
 		}
-		users = append(users, map[string]any{"name": u.Name, "device_limit": u.DeviceLimit, "group_id": u.GroupID, "group_overrides": u.GroupOverrides, "portal": portalAccountView(&u), "enabled": u.Enabled, "status": userStatus(u), "quota": u.QuotaBytes, "extra_quota": u.ExtraQuotaBytes, "quota_mode": u.QuotaMode, "used": measuredUsage(u), "upload": u.Upload, "download": u.Download, "expires": u.Expires, "current_up": u.CurrentUploadMbps, "current_down": u.CurrentDownloadMbps, "devices": devices, "nodes": nodes, "connections": connections, "accesses": firstWebItems(u.RecentAccesses, 100), "history": lastWebItems(u.UsageHistory, 120), "access": u.Access, "up_mbps": u.UploadMbps, "down_mbps": u.DownloadMbps, "ip_policy": u.IPPolicy, "burst": u.Burst, "throttle": u.Throttle, "billing": u.Billing})
+		users = append(users, map[string]any{"name": u.Name, "device_limit": u.DeviceLimit, "group_id": u.GroupID, "group_overrides": u.GroupOverrides, "portal": portalAccountView(&u), "enabled": u.Enabled, "status": userStatus(u), "quota": u.QuotaBytes, "extra_quota": u.ExtraQuotaBytes, "quota_mode": u.QuotaMode, "used": measuredUsage(u), "upload": u.Upload, "download": u.Download, "expires": u.Expires, "current_up": u.CurrentUploadMbps, "current_down": u.CurrentDownloadMbps, "devices": devices, "nodes": nodes, "connections": connections, "accesses": firstWebItems(u.RecentAccesses, 100), "history": lastWebItems(u.UsageHistory, 120), "access": u.Access, "up_mbps": u.UploadMbps, "down_mbps": u.DownloadMbps, "burst": u.Burst, "throttle": u.Throttle, "billing": u.Billing})
 	}
 	routes := []any{}
 	members := []any{}

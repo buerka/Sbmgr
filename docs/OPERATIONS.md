@@ -65,6 +65,8 @@ sbmgr admin backup retention --days 0  # 关闭按时间清理
 
 新校验可能拒绝旧名称、token、封禁时间或配置路径别名，须先影子预检，不能手改 SQLite 绕过哈希。旧程序未必能读新 schema；软件回退须重建目标 tag，并使用部署前匹配的一致性状态快照。
 
+网站数据看板需使用支持连接关闭事件与实际上传、下载字节的 sing-box API。升级代理内核并验证本机回环事件接口后，可运行 `sbmgr admin analytics configure --enabled true --listen 127.0.0.1:9191` 启用采集。看板仅展示启用后的已采集区间，升级前和采集中断时的历史网站流量无法补录；覆盖状态会提示缺口。禁用采集不会把未知流量显示为零。
+
 ## 诊断与巡检
 
 `systemctl status sbmgr sing-box` 查看服务，`journalctl -u sbmgr` 查看维护/应用错误；成功人工操作见 `audit.jsonl`。出口健康检查只证明端口可达，验收仍需实际协议请求。

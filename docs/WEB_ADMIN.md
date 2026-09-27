@@ -84,6 +84,7 @@ ssh -N -L 9090:127.0.0.1:9090 root@<SERVER>
 
 - 左侧导航管理用户、线路、订阅与运维；右上角可切换浅色、深色或跟随系统。`Ctrl/⌘ K` 搜索页面和用户。
 - 用户表格支持状态筛选、名称排序、列显隐和分页；点击用户行任意位置，按标签页统一配置设备、策略、登录权限并查看连接记录。
+- 用户详情「数据看板」与普通用户「数据看板」读取同一类只读统计：按设备和近 1/7/30 日筛选，按网站流量或连接次数排序并分页。只汇总已采集连接的实际字节，页面显示采集起点、缺口与不可用状态；目标仅含域名或 IP，不显示 HTTPS 路径。普通用户只可查询本人，权限由特权后端校验。
 - 总览的「机器流量」按主机和从机分别展示物理网卡上传、下载、合计及采样覆盖范围。管理员逐机设置续费周期，按主机本地日期计算且包含结束日。采样前的历史流量无法补录；机器总流量含非代理流量，与用户配额分别统计。
 - 用户表格和设备详情均有「分配线路」入口。先选设备，再勾选已连接、已应用的线路；当前授权自动勾选，提交前显示新增与撤销项。一次保存全部选择，保留节点的名称、身份、限速和用量；其他设备不变。并发修改会拒绝旧表单，失败不部分保存。订阅随保存更新，运行入口仍需应用配置。
 - 「线路与服务器 → 线路画布」按入口展示已保存线路与该服务器上的落地。从入口圆点拖到落地，或点击圆点再选落地，即可建立线路；保存后应用拓扑，再分配给用户。画布不会为连接增加另一台中转。读取失败时已有线路仍可查看；多跳线路沿用详情中的高级编辑。服务器登记及基础出站在「服务器与落地」页签维护。
@@ -101,11 +102,12 @@ sbmgr admin user set alice --quota 100G
 sbmgr admin policy user alice --block-ports 25,445 --max-connections 100
 sbmgr admin batch --users alice,bob --quota 200G --enabled=true
 sbmgr admin client set --server relay.example --port 443
+sbmgr admin analytics configure --enabled true --listen 127.0.0.1:9191
 sbmgr admin audit --limit 100
 sbmgr admin apply --restart
 ```
 
-完整批量能力可使用 `admin batch --file /absolute/path/batch.json`。`Kind` 为 0 用户设置、1 节点限速、2 异常流量、3 来源 IP、4 访问策略；字段省略保持原值，显式零值/空列表清除。结构见 `batchOperation` 及各 patch 类型。例如：
+完整批量能力可使用 `admin batch --file /absolute/path/batch.json`。`Kind` 为 0 用户设置、1 节点限速、2 异常流量、4 访问策略；旧 Kind 3 来源 IP 操作已移除，Kind 4 编号保持不变。字段省略保持原值，显式零值/空列表清除。结构见 `batchOperation` 及各 patch 类型。例如：
 
 ```json
 {"Kind":4,"Users":["alice","bob"],"Access":{"BlockedPorts":[25,445],"MaxConnections":100,"ConnectionAction":"alert"}}

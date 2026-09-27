@@ -10,13 +10,14 @@ import (
 )
 
 type meshRequest struct {
-	Protocol    int         `json:"protocol"`
-	Cluster     string      `json:"cluster"`
-	Member      string      `json:"member"`
-	Operation   string      `json:"operation"`
-	Transaction string      `json:"transaction,omitempty"`
-	Plan        *mesh.Plan  `json:"plan,omitempty"`
-	Access      *meshAccess `json:"access,omitempty"`
+	Protocol       int         `json:"protocol"`
+	Cluster        string      `json:"cluster"`
+	Member         string      `json:"member"`
+	Operation      string      `json:"operation"`
+	Transaction    string      `json:"transaction,omitempty"`
+	Plan           *mesh.Plan  `json:"plan,omitempty"`
+	Access         *meshAccess `json:"access,omitempty"`
+	AnalyticsAfter int64       `json:"analytics_after,omitempty"`
 }
 
 type meshResponse struct {
@@ -29,6 +30,7 @@ type meshResponse struct {
 	Usage          []meshUsage            `json:"usage,omitempty"`
 	Exits          []webExit              `json:"exits,omitempty"`
 	MachineTraffic *machineTrafficReading `json:"machine_traffic,omitempty"`
+	Analytics      *analyticsPage         `json:"analytics,omitempty"`
 }
 
 func decodeMeshJSON(reader io.Reader, target any) error {
@@ -76,7 +78,7 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 			response.Revision = j.Active.Revision
 		}
 		response.Phase, response.Transaction = j.Phase, j.Transaction
-		if r.Operation == "usage" || r.Operation == "access" || r.Operation == "machine_traffic" {
+		if r.Operation == "usage" || r.Operation == "access" || r.Operation == "machine_traffic" || r.Operation == "analytics" {
 			if s.Mesh != nil || r.Plan != nil || r.Transaction != "" {
 				return errors.New("入口同步请求角色或参数无效")
 			}
@@ -93,6 +95,17 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 				}
 				response.MachineTraffic, err = localMachineTrafficReading(a.statePath)
 				return err
+			}
+			if r.Operation == "analytics" {
+				if r.Access != nil || r.AnalyticsAfter < 0 {
+					return errors.New("分析查询参数无效")
+				}
+				page, err := analyticsReadEvents(a.statePath, analyticsLocalMember(s), r.AnalyticsAfter)
+				if err != nil {
+					return err
+				}
+				response.Analytics = &page
+				return nil
 			}
 			return a.installMeshAccess(s, r.Access)
 		}

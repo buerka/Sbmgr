@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -48,6 +47,7 @@ func (a *app) daemonCmd(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	a.startDaemonSubscription(ctx)
+	a.startDaemonAnalytics(ctx)
 	if err := a.startDaemonWeb(ctx); err != nil {
 		fmt.Fprintf(a.err, "Web 管理未启动，后台维护继续；修复配置后重启服务: %v\n", err)
 	}
@@ -101,7 +101,7 @@ func (a *app) daemonCmd(args []string) error {
 }
 
 // realtimeCycle refreshes nft byte counters, current Mbps, access records and
-// dynamic source-IP handovers between normal maintenance runs. Both paths use
+// source-address observations between normal maintenance runs. Both paths use
 // the same state lock, so a sample cannot race an interactive edit or the
 // minute maintenance cycle.
 func (a *app) realtimeCycle() error {
@@ -116,11 +116,6 @@ func (a *app) realtimeCycleLocked() error {
 	now := time.Now()
 	useNftCounters := s.StatsAPI == ""
 	useStatsAPI := !useNftCounters
-	hasDynamicIP := hasEnforcedDynamicIPPolicy(s, now)
-	before, err := ipRestrictionSetSignature(s, now)
-	if err != nil {
-		return err
-	}
 	stages := currentThrottleStages(s)
 	changed := false
 	nftSampled := false
@@ -169,23 +164,12 @@ func (a *app) realtimeCycleLocked() error {
 			changed = changed || nftChanged
 		}
 	}
-	if useNftCounters || hasDynamicIP {
-		if _, accessChanged, err := syncAccessStats(s); err != nil {
-			cycleErrors = append(cycleErrors, fmt.Errorf("同步实时访问: %w", err))
-		} else {
-			changed = changed || accessChanged
-		}
+	if _, accessChanged, err := syncAccessStats(s); err != nil {
+		cycleErrors = append(cycleErrors, fmt.Errorf("同步实时访问: %w", err))
+	} else {
+		changed = changed || accessChanged
 	}
-	after, err := ipRestrictionSetSignature(s, now)
-	if err != nil {
-		return err
-	}
-	ruleChanged := before != after
 	tierChanged := queueThrottleStageApply(stages, s)
-	if ruleChanged {
-		s.IPApplyPending = true
-		changed = true
-	}
 	if tierChanged {
 		changed = true
 	}
@@ -205,29 +189,27 @@ func (a *app) realtimeCycleLocked() error {
 		// this sample and prevents the minute cycle from charging it again.
 		a.lastStatsSample = statsSampleAt
 	}
-	if ruleChanged || eligibilityChanged {
-		// The learned binding is already durable. If applying fails, pending
-		// flags remain set and the normal maintenance cycle retries them.
+	if eligibilityChanged {
+		// Eligibility changes are durable; a failed apply remains pending.
 		if err := applyState(s, false, true, a.out); err != nil {
-			return errors.Join(errors.Join(cycleErrors...), fmt.Errorf("应用实时资格或动态 IP 变更: %w", err))
+			return errors.Join(errors.Join(cycleErrors...), fmt.Errorf("应用实时资格变更: %w", err))
 		}
-		s.IPApplyPending = false
 		s.BurstApplyPending = false
 		s.RateApplyPending = false  // applyState also installed current nft rates.
 		s.StatsApplyPending = false // the full configuration includes eligibility changes too.
 		// A successful restart terminates every old transport.  Keeping their
-		// journal snapshots would fabricate a competing IP during the next switch.
+		// journal snapshots would fabricate active connections.
 		s.ActiveConnections = nil
 		s.PendingSources = nil
 		if err := saveState(a.statePath, s); err != nil {
-			return errors.Join(errors.Join(cycleErrors...), fmt.Errorf("确认动态 IP 换绑: %w", err))
+			return errors.Join(errors.Join(cycleErrors...), fmt.Errorf("确认实时资格变更: %w", err))
 		}
 		return errors.Join(cycleErrors...)
 	}
 	if !tierChanged {
 		return errors.Join(cycleErrors...)
 	}
-	if s.StatsApplyPending || s.IPApplyPending || s.BurstApplyPending {
+	if s.StatsApplyPending || s.BurstApplyPending {
 		// A failed full apply takes precedence over a rate-only refresh. Removing
 		// the disabled user's nft rules while its old inbound remains live would
 		// weaken enforcement. The normal cycle retries the full transaction.
@@ -277,17 +259,9 @@ func queueThrottleStageApply(before map[string]int, s *State) bool {
 	return true
 }
 
-func ipRestrictionSetSignature(s *State, now time.Time) (string, error) {
-	rules, err := json.Marshal(ipRestrictionRules(s, now))
-	if err != nil {
-		return "", fmt.Errorf("计算来源 IP 规则签名: %w", err)
-	}
-	return string(rules), nil
-}
-
 func (a *app) daemonCycle() error {
 	cycleErr := a.withStateLock(a.daemonCycleLocked)
-	return errors.Join(cycleErr, a.networkMaintenance(), a.meshSyncAccess(), a.meshLeaseCycle(), a.machineTrafficCycle())
+	return errors.Join(cycleErr, a.networkMaintenance(), a.meshSyncAccess(), a.meshLeaseCycle(), a.machineTrafficCycle(), a.analyticsMeshCycle())
 }
 
 func (a *app) daemonCycleLocked() error {
@@ -381,9 +355,6 @@ func (a *app) daemonCycleLocked() error {
 	}
 	connectionStateChanged, connectionConfigChanged := evaluateConnectionPolicies(s, time.Now())
 	stateChanged = stateChanged || connectionStateChanged
-	if expireTemporaryIPPolicies(s, time.Now()) {
-		stateChanged = true
-	}
 	burstStateChanged, burstConfigChanged, burstHardDisconnect, burstAlerts := evaluateBurstPolicies(s, time.Now())
 	stateChanged = stateChanged || burstStateChanged
 	if burstConfigChanged {
@@ -426,8 +397,8 @@ func (a *app) daemonCycleLocked() error {
 		return errors.Join(cycleErrors...)
 	}
 	burstPending := s.BurstApplyPending
-	if billingChanged || connectionConfigChanged || burstConfigChanged || burstConfigurationPending(s) || burstPending || s.IPApplyPending || s.StatsApplyPending {
-		restart := billingChanged || connectionConfigChanged || burstHardDisconnect || s.IPApplyPending || s.StatsApplyPending || (burstPending && hasHardBurstBlock(s, time.Now()))
+	if billingChanged || connectionConfigChanged || burstConfigChanged || burstConfigurationPending(s) || burstPending || s.StatsApplyPending {
+		restart := billingChanged || connectionConfigChanged || burstHardDisconnect || s.StatsApplyPending || (burstPending && hasHardBurstBlock(s, time.Now()))
 		if err := applyState(s, false, restart, a.out); err != nil {
 			cycleErrors = append(cycleErrors, fmt.Errorf("应用自动保护状态: %w", err))
 		} else {
@@ -435,13 +406,9 @@ func (a *app) daemonCycleLocked() error {
 			if restart {
 				// Every tracked transport was terminated by the service restart.
 				// Retaining these snapshots would create phantom concurrency and
-				// dynamic-IP conflicts until their normal display TTL elapsed.
+				// stale connection counts until their normal display TTL elapsed.
 				s.ActiveConnections = nil
 				s.PendingSources = nil
-				pendingChanged = true
-			}
-			if s.IPApplyPending {
-				s.IPApplyPending = false
 				pendingChanged = true
 			}
 			if s.BurstApplyPending {

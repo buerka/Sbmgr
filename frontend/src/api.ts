@@ -8,6 +8,7 @@ import type {
   Snapshot,
   RouteInventory,
   PortalSnapshot,
+  AnalyticsSnapshot,
 } from "./types";
 
 const http = axios.create({
@@ -91,6 +92,17 @@ export const api = {
   acceptInvite: (token: string, password: string) =>
     request<{ message: string }>("/invite/accept", { token, password }),
   me: () => request<PortalSnapshot>("/me"),
+  analytics: (
+    input: {
+      user?: string;
+      device?: string;
+      days: 1 | 7 | 30;
+      page?: number;
+      search?: string;
+      sort?: "traffic" | "connections";
+    },
+    signal?: AbortSignal,
+  ) => request<AnalyticsSnapshot>("/analytics", input, signal),
   selfDevice: (input: {
     action: "add" | "rename" | "delete" | "rotate-link";
     device?: string;

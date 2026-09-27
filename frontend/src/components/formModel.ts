@@ -4,8 +4,6 @@ export const patchActions = new Set([
   "user.set",
   "user.devices",
   "node.set",
-  "user.ip",
-  "device.ip",
   "user.burst",
   "user.throttle",
   "user.access",
@@ -21,8 +19,6 @@ export const listFields = new Set([
   "allow-domains",
   "block-domains",
   "block-ports",
-  "ip-allowed",
-  "ip-temp",
   "targets",
 ]);
 const num = (value: number | undefined, fallback = 0) =>
@@ -59,29 +55,6 @@ export function initialFields(
       "up-mbps": num(n.up_mbps),
       "down-mbps": num(n.down_mbps),
     };
-  if (action.id === "user.ip" || action.id === "device.ip") {
-    const p = (action.id === "device.ip" ? d : u)?.ip_policy;
-    fields = {
-      "ip-enabled": String(Boolean(p?.enabled)),
-      "ip-mode": p?.mode || "enforce",
-      "ip-binding": p?.binding || "dynamic",
-      "ip-max": num(p?.max_ips, 1),
-      "ip-handover-seconds": num(p?.handover_seconds, 60),
-      "ip-allowed": (p?.bound_ips || []).join(","),
-      "ip-temp": (p?.temporary_ips || []).join(","),
-      "ip-temp-minutes": p?.temporary_until
-        ? String(
-            Math.max(
-              0,
-              Math.ceil(
-                (Date.parse(p.temporary_until) - Date.parse(state.time)) /
-                  60000,
-              ),
-            ),
-          )
-        : "",
-    };
-  }
   if (action.id === "user.burst" && u) {
     const p = u.burst || {};
     fields = {
@@ -181,11 +154,6 @@ export const optionLabels: Record<string, string> = {
   total: "双向合计",
   upload: "仅上传",
   download: "仅下载",
-  enforce: "执行限制",
-  monitor: "仅观察",
-  dynamic: "动态单活",
-  auto: "自动学习",
-  manual: "固定名单",
   soft: "限速保护",
   hard: "临时断开",
   alert: "仅告警",
@@ -305,7 +273,5 @@ export function collectFields(
     )
       fields[f.key] = value;
   }
-  if (action.id === "user.ip" && fields["ip-temp"] && fields["ip-temp"] !== "-")
-    fields["ip-temp-minutes"] = values["ip-temp-minutes"] || "";
   return fields;
 }

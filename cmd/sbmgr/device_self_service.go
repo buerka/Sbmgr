@@ -92,13 +92,7 @@ func newPersonalDevice(s *State, u *User, name, sourceName string, now time.Time
 			return errors.New("设备名称已存在")
 		}
 	}
-	d := Device{Name: name, Enabled: true, CreatedAt: now.Format(time.RFC3339), SubscriptionToken: newSubscriptionToken(), IPPolicy: source.IPPolicy, Access: source.Access}
-	// New hardware gets a new learned binding. Fixed administrator restrictions
-	// and temporary allowlists are retained; user-wide controls still apply.
-	d.IPPolicy.BoundLastSeen = nil
-	if d.IPPolicy.Binding != "manual" {
-		d.IPPolicy.BoundIPs = nil
-	}
+	d := Device{Name: name, Enabled: true, CreatedAt: now.Format(time.RFC3339), SubscriptionToken: newSubscriptionToken(), Access: source.Access}
 	d.Access.ConnectionBlockedUntil, d.Access.LastConnectionAlert = "", ""
 	sources := nodesForDevice(*u, source.Name)
 	u.Devices = append(u.Devices, d)

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sbmgr/internal/mesh"
 	"sort"
@@ -23,7 +24,7 @@ import (
 	"time"
 )
 
-const stateVersion = 17
+const stateVersion = 19
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -33,8 +34,9 @@ var (
 )
 
 type State struct {
-	MachineTraffic    []MachineTrafficPeriod `json:"machine_traffic,omitempty"`
-	UserGroups        []UserGroup            `json:"user_groups,omitempty"`
+	Analytics         *ConnectionAnalyticsSettings `json:"analytics,omitempty"`
+	MachineTraffic    []MachineTrafficPeriod       `json:"machine_traffic,omitempty"`
+	UserGroups        []UserGroup                  `json:"user_groups,omitempty"`
 	connectionIndex   *connectionHeap
 	Version           int                          `json:"version"`
 	BaseConfig        string                       `json:"base_config"`
@@ -391,6 +393,7 @@ func usage(w io.Writer) {
 	    init / user / device / node / policy / proxy / mesh / subscription
 	    template / traffic / rate / sync / check / apply / backup / health / fleet
 	    batch / client / audit / group
+	    analytics
 	  sbmgr version     显示版本
 	  sbmgr version --verbose  显示版本与 Git commit
 	  sbmgr help        显示本帮助
@@ -407,6 +410,8 @@ func (a *app) adminCmd(args []string) error {
 	switch args[0] {
 	case "batch":
 		return a.batchCmd(args[1:])
+	case "analytics":
+		return a.analyticsCmd(args[1:])
 	case "client":
 		return a.clientCmd(args[1:])
 	case "audit":
@@ -940,8 +945,7 @@ func (a *app) userCmdLocked(args []string) error {
 		}
 		u := User{
 			Name: name, Enabled: true, QuotaBytes: q, QuotaMode: normalizedQuotaMode(*quotaMode), Expires: *expire,
-			IPPolicy: IPPolicy{Enabled: true, Mode: "enforce", Binding: "dynamic", MaxIPs: 1, HandoverSeconds: defaultIPPolicyHandoverSeconds},
-			Devices:  []Device{{Name: defaultDeviceName, Enabled: true, CreatedAt: time.Now().Format(time.RFC3339)}},
+			Devices: []Device{{Name: defaultDeviceName, Enabled: true, CreatedAt: time.Now().Format(time.RFC3339)}},
 		}
 		n := Node{Name: *nodeName, Device: defaultDeviceName, AuthUser: uniqueAuthUser(s, name), UUID: newUUID(), Outbound: *outbound, UploadMbps: *upMbps, DownloadMbps: *downMbps}
 		if nodeRateLimited(n) {
@@ -1019,14 +1023,6 @@ func (a *app) userCmdLocked(args []string) error {
 		burstAction := fs.String("burst-action", "", "封禁类型: soft/hard")
 		burstSoftUp := fs.Float64("burst-soft-up-kbps", 0, "软封禁上传 Kbps")
 		burstSoftDown := fs.Float64("burst-soft-down-kbps", 0, "软封禁下载 Kbps")
-		ipEnabled := fs.String("ip-enabled", "", "来源 IP 规则开关: true/false")
-		ipMode := fs.String("ip-mode", "", "来源 IP 模式: enforce/monitor")
-		ipBinding := fs.String("ip-binding", "", "绑定方式: dynamic/auto/manual")
-		ipMax := fs.Int("ip-max", 0, "最多允许的来源 IP 数量")
-		ipHandoverSeconds := fs.Int("ip-handover-seconds", 0, "动态单活换绑宽限秒数")
-		ipAllowed := fs.String("ip-allowed", "", "固定允许 IP，逗号分隔")
-		ipTemp := fs.String("ip-temp", "", "临时替代 IP，逗号分隔；留空清除")
-		ipTempMinutes := fs.Int("ip-temp-minutes", 0, "临时 IP 有效分钟数")
 		billingEnabled := fs.String("billing-enabled", "", "按月自动清零开关: true/false")
 		billingDay := fs.Int("billing-day", 0, "每月账期日 1-28")
 		if len(args) < 2 {
@@ -1050,7 +1046,7 @@ func (a *app) userCmdLocked(args []string) error {
 			u.DeviceLimit = *deviceLimit
 		}
 		hadBurstBlock := u.BlockedUntil != ""
-		quotaSet, quotaModeSet, extraQuotaSet, expireSet, upSet, downSet, throttleSet, burstSet, ipSet, billingSet := false, false, false, false, false, false, false, false, false, false
+		quotaSet, quotaModeSet, extraQuotaSet, expireSet, upSet, downSet, throttleSet, burstSet, billingSet := false, false, false, false, false, false, false, false, false
 		fs.Visit(func(f *flag.Flag) {
 			switch f.Name {
 			case "quota":
@@ -1071,8 +1067,6 @@ func (a *app) userCmdLocked(args []string) error {
 				throttleSet = true
 			case "burst-enabled", "burst-window", "burst-limit", "burst-block", "burst-action", "burst-soft-up-kbps", "burst-soft-down-kbps":
 				burstSet = true
-			case "ip-enabled", "ip-mode", "ip-binding", "ip-max", "ip-handover-seconds", "ip-allowed", "ip-temp", "ip-temp-minutes":
-				ipSet = true
 			case "billing-enabled", "billing-day":
 				billingSet = true
 			}
@@ -1202,67 +1196,6 @@ func (a *app) userCmdLocked(args []string) error {
 				s.BurstApplyPending = true
 			}
 		}
-		if ipSet {
-			oldPolicy := normalizedIPPolicy(u.IPPolicy)
-			policy := oldPolicy
-			if *ipEnabled != "" {
-				enabled, err := strconv.ParseBool(*ipEnabled)
-				if err != nil {
-					return errors.New("--ip-enabled 必须是 true 或 false")
-				}
-				policy.Enabled = enabled
-			}
-			tempSet, tempMinutesSet := false, false
-			fs.Visit(func(f *flag.Flag) {
-				switch f.Name {
-				case "ip-mode":
-					policy.Mode = strings.ToLower(strings.TrimSpace(*ipMode))
-				case "ip-binding":
-					policy.Binding = strings.ToLower(strings.TrimSpace(*ipBinding))
-				case "ip-max":
-					policy.MaxIPs = *ipMax
-				case "ip-handover-seconds":
-					policy.HandoverSeconds = *ipHandoverSeconds
-				case "ip-allowed":
-					policy.BoundIPs, err = parseIPList(*ipAllowed)
-				case "ip-temp":
-					tempSet = true
-					policy.TemporaryIPs, err = parseIPList(*ipTemp)
-				case "ip-temp-minutes":
-					tempMinutesSet = true
-				}
-			})
-			if err != nil {
-				return err
-			}
-			if tempSet {
-				if len(policy.TemporaryIPs) == 0 {
-					policy.TemporaryUntil = ""
-				} else {
-					if *ipTempMinutes <= 0 {
-						return errors.New("设置临时 IP 时，临时分钟数必须大于 0")
-					}
-					policy.TemporaryUntil = time.Now().Add(time.Duration(*ipTempMinutes) * time.Minute).Format(time.RFC3339Nano)
-				}
-			} else if tempMinutesSet {
-				if len(policy.TemporaryIPs) == 0 || *ipTempMinutes <= 0 {
-					return errors.New("延长临时 IP 时必须已有临时 IP，且分钟数大于 0")
-				}
-				policy.TemporaryUntil = time.Now().Add(time.Duration(*ipTempMinutes) * time.Minute).Format(time.RFC3339Nano)
-			}
-			if policy.Enabled && policy.Binding == "dynamic" && len(policy.BoundIPs) == 0 && len(policy.TemporaryIPs) == 0 {
-				if active := activeSourceIPs(s, u.Name, ""); len(active) == 1 {
-					policy.BoundIPs = active
-				}
-			}
-			if err := validateIPPolicy(policy); err != nil {
-				return err
-			}
-			u.IPPolicy = policy
-			if ipPolicyRuleSignature(oldPolicy, time.Now()) != ipPolicyRuleSignature(policy, time.Now()) {
-				s.IPApplyPending = true
-			}
-		}
 		if billingSet {
 			policy := normalizedBilling(u.Billing)
 			if *billingEnabled != "" {
@@ -1291,20 +1224,17 @@ func (a *app) userCmdLocked(args []string) error {
 			}
 			u.Billing = policy
 		}
-		if !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !burstSet && !ipSet && !billingSet && !flagWasSet(fs, "device-limit") {
+		if !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !burstSet && !billingSet && !flagWasSet(fs, "device-limit") {
 			return errors.New("没有指定要修改的字段")
 		}
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
-		burstOnly := burstSet && !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !ipSet && !billingSet
-		ipOnly := ipSet && !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !burstSet && !billingSet
+		burstOnly := burstSet && !quotaSet && !quotaModeSet && !extraQuotaSet && !expireSet && !upSet && !downSet && !throttleSet && !billingSet
 		if flagWasSet(fs, "device-limit") && fs.NFlag() == 1 {
 			fmt.Fprintf(a.out, "已更新用户 %s 的自助设备名额，即时生效；现有设备保持不变\n", u.Name)
 		} else if burstOnly && !(hadBurstBlock && !u.Burst.Enabled) {
 			fmt.Fprintf(a.out, "已更新用户 %s 的异常流量保护，后台下个维护周期生效\n", u.Name)
-		} else if ipOnly {
-			fmt.Fprintf(a.out, "已更新用户 %s 的来源 IP 规则，后台下个维护周期自动应用\n", u.Name)
 		} else {
 			fmt.Fprintf(a.out, "已更新用户 %s（运行 admin apply 应用配置后生效）\n", u.Name)
 		}
@@ -1888,6 +1818,9 @@ func renderConfig(s *State) ([]byte, error) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, err
 	}
+	if err := addAnalyticsService(cfg, s.Analytics); err != nil {
+		return nil, err
+	}
 	inbounds, _ := cfg["inbounds"].([]any)
 	var target map[string]any
 	for _, item := range inbounds {
@@ -1915,8 +1848,7 @@ func renderConfig(s *State) ([]byte, error) {
 	}
 	baseUsers, _ := target["users"].([]any)
 	users := append([]any(nil), baseUsers...)
-	managedRules := ipRestrictionRules(s, time.Now())
-	managedRules = append(managedRules, accessRestrictionRules(s, time.Now())...)
+	managedRules := accessRestrictionRules(s, time.Now())
 	activeUsers := []User{}
 	now := time.Now()
 	for _, u := range s.Users {
@@ -2317,15 +2249,53 @@ func migrateState(s *State) error {
 		case 16:
 			// Machine traffic starts with a baseline; no historical usage is inferred.
 			s.Version = 17
+		case 17:
+			// Source-IP restrictions are retired. Preserve source observations and
+			// all identities, but replace old generated rules on the next apply.
+			clearLegacyIPPolicies(s)
+			s.IPApplyPending = false
+			s.StatsApplyPending = true
+			s.Version = 18
+		case 18:
+			// Connection analytics are opt-in; historical byte totals are not
+			// attributed to devices or domains by inference.
+			s.Analytics = nil
+			s.Version = 19
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}
 	}
+	if clearLegacyIPPolicies(s) {
+		s.StatsApplyPending = true
+	}
+	s.IPApplyPending = false
 	return nil
+}
+
+func clearLegacyIPPolicies(s *State) bool {
+	changed := false
+	for i := range s.Users {
+		u := &s.Users[i]
+		if !reflect.DeepEqual(u.IPPolicy, IPPolicy{}) {
+			u.IPPolicy = IPPolicy{}
+			changed = true
+		}
+		for j := range u.Devices {
+			d := &u.Devices[j]
+			if !reflect.DeepEqual(d.IPPolicy, IPPolicy{}) {
+				d.IPPolicy = IPPolicy{}
+				changed = true
+			}
+		}
+	}
+	return changed
 }
 
 func validateState(s *State) error {
 	if err := validateMachineTraffic(s); err != nil {
+		return err
+	}
+	if err := validateConnectionAnalyticsSettings(s.Analytics); err != nil {
 		return err
 	}
 	if err := validateDeviceSelfService(s); err != nil {
@@ -2413,9 +2383,6 @@ func validateState(s *State) error {
 		if err := validateBurst(normalizedBurst(u.Burst)); err != nil {
 			return fmt.Errorf("用户 %s: %w", u.Name, err)
 		}
-		if err := validateIPPolicy(normalizedIPPolicy(u.IPPolicy)); err != nil {
-			return fmt.Errorf("用户 %s: %w", u.Name, err)
-		}
 		deviceNames := map[string]bool{}
 		for _, device := range u.Devices {
 			if err := validateManagedName(device.Name); err != nil {
@@ -2433,9 +2400,6 @@ func validateState(s *State) error {
 				return fmt.Errorf("设备 %s/%s 与 %s 使用重复订阅 token", u.Name, device.Name, owner)
 			}
 			subscriptionTokens[device.SubscriptionToken] = u.Name + "/" + device.Name
-			if err := validateIPPolicy(normalizedIPPolicy(device.IPPolicy)); err != nil {
-				return fmt.Errorf("用户 %s 的设备 %s: %w", u.Name, device.Name, err)
-			}
 			if err := validateAccessPolicy(device.Access); err != nil {
 				return fmt.Errorf("用户 %s 的设备 %s: %w", u.Name, device.Name, err)
 			}
@@ -2501,9 +2465,12 @@ func normalizeLegacyNodeNames(s *State) {
 func saveState(path string, s *State) error {
 	normalizeUserGroups(s)
 	captureGroupOverrides(s)
+	if clearLegacyIPPolicies(s) {
+		s.StatsApplyPending = true
+	}
+	s.IPApplyPending = false
 	s.Version = stateVersion
 	boundConnectionTracking(s)
-	initializeBindingActivity(s, time.Now())
 	normalizeQuotaModes(s)
 	normalizeDeviceModel(s)
 	if _, err := ensureNodeMarks(s); err != nil {
