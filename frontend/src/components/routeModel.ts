@@ -51,6 +51,11 @@ function canonicalRouteName(name: string) {
   for (const [pattern, replacement] of legacyRouteNames) {
     if (pattern.test(value)) return replacement;
   }
+  const route = value.match(/^(.*?)\s+via\s+(\S+)$/i);
+  if (route) {
+    const entry = clientEntryNames[route[2].toLowerCase()];
+    if (entry) return `${clientDestination(route[1])} via ${entry}`;
+  }
   return value;
 }
 

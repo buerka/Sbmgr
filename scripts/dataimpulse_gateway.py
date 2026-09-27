@@ -22,9 +22,15 @@ import struct
 import time
 
 
+def unique_country(samples, country):
+    return (len(samples) == 3
+            and all(isinstance(s, dict) and s.get("country") == country and s.get("ip") for s in samples)
+            and len({s["ip"] for s in samples}) == 3)
+
+
 def unique_ghana(samples):
-    return (len(samples) == 3 and all(s and s.get("country") == "GH" for s in samples)
-            and len({s["ip"] for s in samples if s}) == 3)
+    """Retain the original GH helper for callers of the standalone module."""
+    return unique_country(samples, "GH")
 
 
 async def address(reader, kind):
@@ -43,7 +49,12 @@ async def address(reader, kind):
 class Gateway:
     def __init__(self, config):
         self.config = config
-        self.login = config["login"] + "__cr.gh;sessttl.120"
+        country = config.get("country", "GH")
+        if (not isinstance(country, str) or len(country) != 2
+                or any(not ("A" <= c <= "Z" or "a" <= c <= "z") for c in country)):
+            raise ValueError("country must be a two-letter ASCII code")
+        self.country = country.upper()
+        self.login = config["login"] + f"__cr.{self.country.lower()};sessttl.120"
         self.password = config["password"]
         self.local_password = config["local_password"]
         for value in (self.login, self.password, self.local_password):
@@ -56,7 +67,9 @@ class Gateway:
         self.connections = [set() for _ in range(3)]
         self.capacity = asyncio.Semaphore(256)
         self.next_port = 10003
-        self.state_path = Path(config.get("status_file", "/srv/dataimpulse-gateway/status.json"))
+        default_status = ("/srv/dataimpulse-gateway/status.json" if self.country == "GH"
+                          else f"/srv/dataimpulse-gateway/status-{self.country.lower()}.json")
+        self.state_path = Path(config.get("status_file", default_status))
 
     async def probe(self, port):
         def quoted(value):
@@ -72,10 +85,11 @@ class Gateway:
             if process.returncode:
                 return None
             sample = json.loads(raw)
-            if not ipaddress.ip_address(sample["ip"]).is_global or sample.get("country") != "GH":
+            ip = ipaddress.ip_address(sample["ip"])
+            if not ip.is_global or sample.get("country") != self.country:
                 return None
-            return {"port": port, "ip": sample["ip"], "country": "GH"}
-        except (TimeoutError, ValueError, KeyError):
+            return {"port": port, "ip": str(ip), "country": self.country}
+        except (TimeoutError, ValueError, TypeError, KeyError):
             if process.returncode is None:
                 process.kill()
                 await process.wait()
@@ -87,8 +101,8 @@ class Gateway:
                 for writer in tuple(self.connections[slot]):
                     writer.close()
         self.active = list(selected)
-        status = {"sampled_at": time.time(), "ttl_minutes": 120, "country": "GH",
-                  "ready": unique_ghana(selected), "reason": reason,
+        status = {"sampled_at": time.time(), "ttl_minutes": 120, "country": self.country,
+                  "ready": unique_country(selected, self.country), "reason": reason,
                   "sessions": selected, "guarantee": "distinct at successful probes; provider may rotate between probes"}
         temporary = self.state_path.with_name(self.state_path.name + ".tmp")
         fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -103,7 +117,7 @@ class Gateway:
         ports = [10000, 10001, 10002]
         while True:
             samples = await asyncio.gather(*(self.probe(p) for p in ports))
-            if not unique_ghana(samples):
+            if not unique_country(samples, self.country):
                 self.publish([None] * 3, "sample-unavailable-or-duplicate")
                 used = set()
                 for i, sample in enumerate(samples):
@@ -125,7 +139,7 @@ class Gateway:
                 # Re-sample selected sessions together, not only a series of
                 # historic candidates. Failed samples never count as unique.
                 samples = await asyncio.gather(*(self.probe(p) for p in ports))
-            if unique_ghana(samples):
+            if unique_country(samples, self.country):
                 self.publish(samples, "verified")
             else:
                 self.publish([None] * 3, "three-distinct-exits-unavailable")
