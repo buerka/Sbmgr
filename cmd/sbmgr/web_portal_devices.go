@@ -19,6 +19,11 @@ func (b *webBackend) changePortalDeviceLocked(a *app, s *State, u *User, q webRe
 	if s.MeshRollout != nil || s.MeshAgent.Transaction != "" || (s.Mesh != nil && (s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision)) {
 		return webError(409, "线路正在调整，请稍后重试")
 	}
+	if input.Action == "rotate-link" {
+		if err := requireDeviceCredentialRotationReady(s); err != nil {
+			return webError(409, err.Error())
+		}
+	}
 	if (input.Action == "add" || input.Action == "delete") && (configurationPending(s) || runtimeApplyPending(s)) {
 		return webError(409, "上一项配置仍在应用中，请稍后刷新；持续失败请联系管理员")
 	}
@@ -56,7 +61,7 @@ func (b *webBackend) changePortalDeviceLocked(a *app, s *State, u *User, q webRe
 		message = "设备已删除，订阅已失效；入口将自动撤销授权，通常一分钟内生效。已计入用户的用量保留。"
 	}
 	if input.Action == "rotate-link" {
-		message = "订阅链接已重置，旧链接立即失效。请重新复制链接或下载 TXT；已导入客户端的节点配置仍可使用。"
+		message = "设备订阅及连接凭据已重置，旧订阅立即失效；各入口正在等待自动应用，旧配置将在应用后失效。请重新获取并导入订阅。"
 	}
 	return webJSON(200, map[string]any{"message": message, "pending": next.StatsApplyPending})
 }

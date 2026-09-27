@@ -84,10 +84,10 @@ func webActions() []webAction {
 	for _, op := range []struct {
 		id, title string
 		danger    bool
-	}{{"enable", "启用设备", false}, {"disable", "禁用设备", true}, {"rotate", "重建设备身份", true}, {"rotate-link", "轮换订阅链接", true}, {"delete", "删除设备", true}} {
+	}{{"enable", "启用设备", false}, {"disable", "禁用设备", true}, {"rotate", "重建设备身份", true}, {"rotate-link", "重置订阅与连接凭据", true}, {"delete", "删除设备", true}} {
 		effect := saved
 		if op.id == "rotate-link" {
-			effect = "订阅已轮换，旧链接立即失效；请重新交付。"
+			effect = "新订阅和节点连接凭据已保存，旧链接立即失效；各入口待自动应用，旧客户端配置可能暂时仍可连接。请重新获取并导入订阅。"
 		}
 		add("device."+op.id, op.title, "device", "device "+op.id, effect, op.danger, []string{"user", "device"}, user, device)
 	}

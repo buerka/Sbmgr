@@ -179,6 +179,7 @@ export function DeviceDelivery({
                         {
                           id: "device.rotate-link",
                           context: { user: u.name, device: d.name },
+                          label: "重置订阅与连接配置",
                         },
                       ]}
                     />

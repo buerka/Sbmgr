@@ -316,9 +316,13 @@ func (a *app) installMeshAccess(s *State, access *meshAccess) error {
 				return errors.New("从机只能接收本机入口的用户节点")
 			}
 			for _, previous := range prior.Nodes {
-				if previous.AuthUser == n.AuthUser && previous.UUID == n.UUID {
+				// UUID rotation replaces the connection secret without replacing
+				// the managed node. Keep history only for the same owner/device/
+				// node and stable AuthUser; another identity must start fresh.
+				if previous.AuthUser == n.AuthUser && previous.Device == n.Device && previous.Name == n.Name {
 					n.Upload, n.Download = previous.Upload, previous.Download
 					n.Destinations = previous.Destinations
+					break
 				}
 			}
 		}

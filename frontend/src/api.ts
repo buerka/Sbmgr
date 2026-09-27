@@ -1,4 +1,5 @@
 import axios from "axios";
+import { deliveryFilename } from "./downloadFilename";
 import type {
   Action,
   ActionInput,
@@ -65,7 +66,14 @@ async function deliveryFile(context: Context, format: "link" | "yaml") {
       { ...context, format },
       { responseType: "blob" },
     );
-    return response.data;
+    const header = response.headers["content-disposition"];
+    return {
+      blob: response.data,
+      filename: deliveryFilename(
+        typeof header === "string" ? header : null,
+        format,
+      ),
+    };
   } catch (error) {
     if (axios.isAxiosError(error) && error.response?.status === 401)
       unauthenticated();
@@ -73,7 +81,7 @@ async function deliveryFile(context: Context, format: "link" | "yaml") {
   }
 }
 async function subscriptionLink(context: Context) {
-  const text = (await (await deliveryFile(context, "link")).text()).trim();
+  const text = (await (await deliveryFile(context, "link")).blob.text()).trim();
   try {
     const url = new URL(text);
     if (!/^https?:$/.test(url.protocol) || /\s/.test(text)) throw new Error();
@@ -171,12 +179,11 @@ export const api = {
     }
   },
   async delivery(context: Context, format: "link" | "yaml") {
-    const data = await deliveryFile(context, format);
-    const url = URL.createObjectURL(data);
+    const { blob, filename } = await deliveryFile(context, format);
+    const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download =
-      format === "yaml" ? "subscription.yaml" : "subscription.txt";
+    anchor.download = filename;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },

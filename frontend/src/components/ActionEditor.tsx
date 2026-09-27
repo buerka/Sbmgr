@@ -150,7 +150,12 @@ export function ActionForm({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const machinePeriod = action.id === "machine.traffic_period";
-  const title = machinePeriod ? "机器续费周期" : action.title;
+  const rotateLink = action.id === "device.rotate-link";
+  const title = machinePeriod
+    ? "机器续费周期"
+    : rotateLink
+      ? "重置订阅与连接配置"
+      : action.title;
   const idPrefix = useId();
   const [scope, setScope] = useState(context),
     [initial, setInitial] = useState(() =>
@@ -568,12 +573,14 @@ export function ActionForm({
         <div className="effect-note">
           <Icon name={action.danger ? "warning" : "shield"} />
           <p>
-            {machinePeriod
-              ? "到期后自动换期；只重算机器本期显示，保留旧采样和历史，不改变用户配额。保存立即生效，无需应用配置；失败保留原设置。"
-              : action.effect
-                  .replace(/^已保存拓扑；/, "保存后，")
-                  .replace(/^已保存；/, "保存后，")
-                  .replace(/^设置已保存；/, "保存后，")}
+            {rotateLink
+              ? "旧订阅地址保存后立即失效；旧客户端配置须待各入口自动应用后失效，期间可能暂时仍可连接。请重新获取并导入新订阅。"
+              : machinePeriod
+                ? "到期后自动换期；只重算机器本期显示，保留旧采样和历史，不改变用户配额。保存立即生效，无需应用配置；失败保留原设置。"
+                : action.effect
+                    .replace(/^已保存拓扑；/, "保存后，")
+                    .replace(/^已保存；/, "保存后，")
+                    .replace(/^设置已保存；/, "保存后，")}
           </p>
         </div>
         {ungrouped.length > 0 && (
@@ -666,13 +673,15 @@ export function ActionForm({
               ? "正在保存…"
               : machinePeriod
                 ? "保存周期"
-                : edit
-                  ? "保存修改"
-                  : action.danger
-                    ? "确认操作"
-                    : /\.(add|init|clone)$/.test(action.id)
-                      ? "创建"
-                      : "执行"}
+                : rotateLink
+                  ? "确认重置订阅"
+                  : edit
+                    ? "保存修改"
+                    : action.danger
+                      ? "确认操作"
+                      : /\.(add|init|clone)$/.test(action.id)
+                        ? "创建"
+                        : "执行"}
           </Button>
         </div>
       </div>

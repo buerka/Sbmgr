@@ -117,7 +117,9 @@ export function UserDetail() {
 function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
   const dispatch = useAppDispatch();
   const [params, setParams] = useSearchParams();
-  const [tab, setTab] = useState("basic");
+  const [tab, setTab] = useState(() =>
+    params.get("view") === "analytics" ? "analytics" : "basic",
+  );
   const [drafts, setDrafts] = useState<Record<string, boolean>>({});
   const dirty = Object.values(drafts).some(Boolean);
   const reportDirty = useCallback((id: string, value: boolean) => {
@@ -125,6 +127,25 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
       current[id] === value ? current : { ...current, [id]: value },
     );
   }, []);
+  function openAnalytics(device?: string) {
+    const next = new URLSearchParams(params);
+    next.set("view", "analytics");
+    if (device) next.set("device", device);
+    else next.delete("device");
+    setParams(next);
+    setTab("analytics");
+  }
+  function switchTab(value: string) {
+    setTab(value);
+    const next = new URLSearchParams(params);
+    if (value === "analytics") next.set("view", "analytics");
+    else {
+      next.delete("view");
+      next.delete("device");
+    }
+    if (value === "analytics" || params.has("view") || params.has("device"))
+      setParams(next);
+  }
   useLayoutEffect(() => {
     dispatch(setUserDraftDirty(dirty));
     return () => {
@@ -158,10 +179,15 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
             </p>
           </div>
         </div>
-        <p className="workspace-save-status" role="status">
-          <span className={dirty ? "draft-dot" : "saved-dot"} />
-          {dirty ? "有未保存的修改" : "当前设置已载入"}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" onClick={() => openAnalytics()}>
+            <Icon name="health" /> 网站流量明细
+          </Button>
+          <p className="workspace-save-status" role="status">
+            <span className={dirty ? "draft-dot" : "saved-dot"} />
+            {dirty ? "有未保存的修改" : "当前设置已载入"}
+          </p>
+        </div>
       </div>
       <div className="user-summary">
         <div>
@@ -194,7 +220,7 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
           </small>
         </div>
       </div>
-      <Tabs.Root value={tab} onValueChange={setTab}>
+      <Tabs.Root value={tab} onValueChange={switchTab}>
         <Tabs.List
           className="tab-list workspace-tabs"
           aria-label="用户配置分类"
@@ -333,14 +359,9 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                     </ActionButton>
                     <Button
                       variant="outline"
-                      onClick={() => {
-                        setTab("analytics");
-                        const next = new URLSearchParams(params);
-                        next.set("device", d.name);
-                        setParams(next);
-                      }}
+                      onClick={() => openAnalytics(d.name)}
                     >
-                      查看数据
+                      <Icon name="health" /> 查看网站流量
                     </Button>
                     <ActionMenu
                       label="设备设置"
@@ -350,7 +371,14 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                         "device.rotate-link",
                         "device.rotate",
                         "device.delete",
-                      ].map((id) => ({ id, context: dc }))}
+                      ].map((id) => ({
+                        id,
+                        context: dc,
+                        label:
+                          id === "device.rotate-link"
+                            ? "重置订阅与连接配置"
+                            : undefined,
+                      }))}
                     />
                   </div>
                 </div>
@@ -487,7 +515,7 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
             <h2>订阅交付</h2>
             <p>
               仅显示 {u.name} 的设备。可复制订阅链接、下载 TXT 或
-              YAML，也可轮换单台设备的订阅链接。
+              YAML，也可重置单台设备的订阅与连接配置。
             </p>
           </div>
           <DeviceDelivery user={u} />

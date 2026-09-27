@@ -37,7 +37,14 @@ export function ResetSubscriptionLink({
         expected,
       });
       setOpen(false);
-      dispatch(notify({ message: reply.message, severity: "success" }));
+      dispatch(
+        notify({
+          message: reply.pending
+            ? "旧订阅地址已失效，本机正在应用新配置。旧客户端配置须待各入口应用后失效；请重新获取并导入新订阅。"
+            : "旧订阅地址已失效。旧客户端配置须待各入口应用后失效；请重新获取并导入新订阅。",
+          severity: reply.pending ? "info" : "success",
+        }),
+      );
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "重置失败，请刷新后重试。");
@@ -56,7 +63,7 @@ export function ResetSubscriptionLink({
           setOpen(true);
         }}
       >
-        重置链接
+        重置订阅
       </Button>
       <Dialog
         open={open}
@@ -73,14 +80,13 @@ export function ResetSubscriptionLink({
             if (busy) e.preventDefault();
           }}
         >
-          <DialogTitle>重置订阅链接</DialogTitle>
+          <DialogTitle>重置订阅与连接配置</DialogTitle>
           <DialogDescription>
             将为「{device.label || device.name}
-            」生成新的订阅地址。旧链接立即失效，重置后请重新复制链接或下载
-            TXT，并更新客户端中的订阅地址。
+            」生成新的订阅地址和连接配置。旧订阅地址立即失效；请重新获取并导入新订阅。
           </DialogDescription>
           <Alert>
-            此操作只更换订阅链接，不更换节点身份。已经导入客户端的节点仍可使用；如果节点配置也已外泄，请联系管理员重建设备身份。
+            旧客户端配置须待各入口自动应用完成后失效。应用期间可能暂时仍能连接；各入口完成时间可能不同。
           </Alert>
           {error && <Alert kind="error">{error}</Alert>}
           <DialogFooter>
@@ -92,7 +98,7 @@ export function ResetSubscriptionLink({
               取消
             </Button>
             <Button disabled={busy} onClick={() => void reset()}>
-              {busy ? "正在重置…" : "确认重置链接"}
+              {busy ? "正在重置…" : "确认重置订阅"}
             </Button>
           </DialogFooter>
         </DialogContent>

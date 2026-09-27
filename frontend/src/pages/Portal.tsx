@@ -38,9 +38,16 @@ function MyStatus({ data }: { data: PortalSnapshot }) {
         title="我的代理状态"
         description="查看当前用量、配额和已分配线路。配额与权限如需调整，请联系管理员。"
         actions={
-          <Badge kind={u.status === "已启用" ? "success" : "warning"}>
-            {u.status}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild>
+              <Link to="/me/analytics">
+                <Icon name="health" /> 查看网站流量
+              </Link>
+            </Button>
+            <Badge kind={u.status === "已启用" ? "success" : "warning"}>
+              {u.status}
+            </Badge>
+          </div>
         }
       />
       <div className="user-summary">

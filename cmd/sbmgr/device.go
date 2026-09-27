@@ -262,15 +262,17 @@ func (a *app) deviceCmdLocked(args []string) error {
 		if len(args) != 3 {
 			return errors.New("用法: sbmgr admin device rotate-link USER DEVICE")
 		}
-		device := findDevice(u, args[2])
-		if device == nil {
-			return fmt.Errorf("设备 %q 不存在", args[2])
+		if err := requireDeviceCredentialRotationReady(s); err != nil {
+			return err
 		}
-		device.SubscriptionToken = newSubscriptionToken()
+		count, err := rotateDeviceCredentials(s, u, args[2])
+		if err != nil {
+			return err
+		}
 		if err := saveState(a.statePath, s); err != nil {
 			return err
 		}
-		fmt.Fprintf(a.out, "已轮换设备 %s/%s 的订阅 token，旧链接立即失效\n", u.Name, device.Name)
+		fmt.Fprintf(a.out, "已重置设备 %s/%s 的订阅及 %d 个节点连接凭据；旧链接立即失效，旧配置须待各入口自动应用后失效，请重新导入订阅\n", u.Name, args[2], count)
 		return nil
 	case "delete":
 		if len(args) != 3 {

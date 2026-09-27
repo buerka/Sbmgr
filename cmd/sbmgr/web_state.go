@@ -152,7 +152,8 @@ func webDeliveryFromState(s *State, body []byte, owner string) webReply {
 	}
 	var data []byte
 	var err error
-	mime, name := "text/plain; charset=utf-8", "subscription.txt"
+	now := time.Now()
+	mime, name := "text/plain; charset=utf-8", subscriptionDeliveryFilenameAt(*u, *d, now, ".txt")
 	switch input.Format {
 	case "link":
 		if !s.Subscription.Enabled || s.Subscription.BaseURL == "" {
@@ -162,7 +163,7 @@ func webDeliveryFromState(s *State, body []byte, owner string) webReply {
 	case "yaml":
 		data, err = renderMihomoDevice(s, *u, d.Name)
 		mime = "application/yaml"
-		name = "subscription.yaml"
+		name = subscriptionDeliveryFilenameAt(*u, *d, now, ".yaml")
 	default:
 		err = errors.New("unknown format")
 	}

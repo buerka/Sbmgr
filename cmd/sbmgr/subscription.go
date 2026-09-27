@@ -300,11 +300,11 @@ func subscriptionProfileHeadersAt(u User, device Device, now time.Time) (http.He
 	if err != nil {
 		return nil, err
 	}
-	title := subscriptionProfileTitle(u.Name, device.Name)
+	title := subscriptionProfileTitle(u.Name, deviceDisplayName(device))
 	headers.Set("Subscription-Userinfo", userinfo)
 	headers.Set("Profile-Update-Interval", "1")
 	headers.Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(title)))
-	filename := title + "-" + now.In(applicationLocation()).Format("20060102-150405") + ".yaml"
+	filename := subscriptionDeliveryFilenameAt(u, device, now, ".yaml")
 	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename})
 	if disposition == "" {
 		disposition = "attachment; filename=subscription-" + now.In(applicationLocation()).Format("20060102-150405") + ".yaml"
@@ -312,6 +312,10 @@ func subscriptionProfileHeadersAt(u User, device Device, now time.Time) (http.He
 	headers.Set("Content-Disposition", disposition)
 	headers.Set("Content-Type", "application/yaml; charset=utf-8")
 	return headers, nil
+}
+
+func subscriptionDeliveryFilenameAt(u User, device Device, now time.Time, extension string) string {
+	return subscriptionProfileTitle(u.Name, deviceDisplayName(device)) + "-" + now.In(applicationLocation()).Format("20060102-150405") + extension
 }
 
 func subscriptionDeviceAvailable(u User, device Device, now time.Time) error {

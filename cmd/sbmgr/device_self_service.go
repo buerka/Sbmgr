@@ -68,6 +68,55 @@ func portalDeviceVersion(u *User) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// A reset revokes both ways to retrieve and use an old device configuration.
+// Keep stable node keys and accounting; only delivery and connection secrets
+// change. The pending marker drives the daemon's checked config transaction.
+func rotateDeviceCredentials(s *State, u *User, deviceName string) (int, error) {
+	d := findDevice(u, deviceName)
+	if d == nil {
+		return 0, errors.New("设备不存在")
+	}
+	d.SubscriptionToken = newSubscriptionToken()
+	count := 0
+	for i := range u.Nodes {
+		if strings.EqualFold(u.Nodes[i].Device, d.Name) {
+			n := &u.Nodes[i]
+			oldIdentity := meshNodeIdentity(*n)
+			n.UUID = newUUID()
+			// Mesh usage baselines follow the new UUID so the first slave
+			// report cannot charge the same historical bytes a second time.
+			if s.Mesh != nil {
+				if route, ok := meshRouteInfo(s, n.Outbound); ok && route.Entry != s.Mesh.Master {
+					for _, direction := range []string{"upload", "download"} {
+						oldKey := "mesh:" + route.Entry + ":" + oldIdentity + ":" + direction
+						if value, exists := s.Counters[oldKey]; exists {
+							s.Counters["mesh:"+route.Entry+":"+meshNodeIdentity(*n)+":"+direction] = value
+							delete(s.Counters, oldKey)
+						}
+					}
+				}
+			}
+			count++
+		}
+	}
+	s.StatsApplyPending = true
+	return count, nil
+}
+
+func requireDeviceCredentialRotationReady(s *State) error {
+	if s.MeshRollout != nil || s.MeshAgent.Transaction != "" ||
+		(s.Mesh != nil && (s.MeshAgent.Active == nil || s.MeshAgent.Active.Revision != s.Mesh.Revision)) {
+		return errors.New("线路正在调整，请稍后重试")
+	}
+	if s.Mesh == nil && s.MeshAgent.Cluster != "" {
+		return errors.New("请在主机上重置设备连接凭据")
+	}
+	if configurationPending(s) || runtimeApplyPending(s) {
+		return errors.New("上一项配置仍在应用中，请稍后刷新；持续失败请联系管理员")
+	}
+	return nil
+}
+
 type portalDeviceInput struct {
 	Action   string `json:"action"`
 	Device   string `json:"device,omitempty"`
@@ -124,12 +173,8 @@ func changePersonalDevice(s *State, u *User, input portalDeviceInput, now time.T
 	}
 	switch input.Action {
 	case "rotate-link":
-		d := findDevice(u, input.Device)
-		if d == nil {
-			return errors.New("设备不存在")
-		}
-		d.SubscriptionToken = newSubscriptionToken()
-		return nil
+		_, err := rotateDeviceCredentials(s, u, input.Device)
+		return err
 	case "add":
 		if input.Device != "" {
 			return errors.New("新增设备请求格式不正确")

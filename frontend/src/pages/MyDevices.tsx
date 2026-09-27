@@ -92,8 +92,7 @@ export function MyDevices({
         description="给每台设备一份独立订阅，所有设备共用你的流量配额。"
         actions={
           <Button disabled={!canAdd || busy} onClick={() => open("add")}>
-            <Icon name="add" />
-            添加设备
+            <Icon name="add" /> 添加设备
           </Button>
         }
       />
@@ -120,7 +119,7 @@ export function MyDevices({
       {notice && <Alert className="mb-5">{notice}</Alert>}
       {data.pending && (
         <Alert className="mb-5">
-          服务正在应用配置。新增或撤销的入口授权通常一分钟内生效；持续未完成请联系管理员，失败时系统会保留待处理状态并重试。
+          本机配置仍待应用。新增、删除或重置订阅后的入口更新可能需要一些时间；远端入口还可能继续同步。若刚重置订阅，旧地址已立即失效，旧客户端配置须待各入口应用后失效。持续未完成请联系管理员。
         </Alert>
       )}
       {limit > 0 && u.devices.length >= limit && (
@@ -171,7 +170,7 @@ export function MyDevices({
                   <Link
                     to={`/me/analytics?device=${encodeURIComponent(d.name)}`}
                   >
-                    查看数据
+                    <Icon name="health" /> 查看网站流量
                     <Icon name="next" />
                   </Link>
                 </Button>

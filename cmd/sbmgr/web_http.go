@@ -13,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"path"
@@ -437,7 +438,11 @@ func newWebHTTPServerWithAssets(address, origin, basePath string, lookup webLook
 			}
 			w.Header().Set("Content-Type", response.Type)
 			if response.Filename != "" {
-				w.Header().Set("Content-Disposition", "attachment; filename=\""+response.Filename+"\"")
+				disposition := mime.FormatMediaType("attachment", map[string]string{"filename": response.Filename})
+				if disposition == "" {
+					disposition = "attachment; filename=subscription"
+				}
+				w.Header().Set("Content-Disposition", disposition)
 			}
 			w.WriteHeader(response.Status)
 			_, _ = w.Write(response.Body)
