@@ -282,12 +282,20 @@ func (a *app) installMeshAccess(s *State, access *meshAccess) error {
 		if supplied.Portal != nil {
 			return errors.New("从机授权不接受面板登录凭据")
 		}
+		if supplied.GroupID != "" || len(supplied.GroupOverrides) != 0 {
+			return errors.New("从机授权不接受分组管理元数据")
+		}
 		// Do not accept runtime histories, subscriptions, billing or remote
 		// file paths in an identity grant.
 		if supplied.Upload != 0 || supplied.Download != 0 || len(supplied.TrafficSamples) > 0 || len(supplied.UsageHistory) > 0 || len(supplied.RecentAccesses) > 0 || len(supplied.BillingHistory) > 0 || supplied.Billing.Enabled {
 			return errors.New("入口授权包含运行状态")
 		}
 		prior := old[supplied.Name]
+		// Grants contain resolved policies, not the master's group catalog.
+		// Retain local membership for existing users; new users receive the
+		// local default group before validating the materialized state.
+		supplied.GroupID = prior.GroupID
+		supplied.GroupOverrides = append([]string(nil), prior.GroupOverrides...)
 		policyID := supplied.Name + "/"
 		policyKey := meshPolicyKey(supplied.IPPolicy, supplied.Access, supplied.Burst)
 		next.MeshLease.Policies[policyID] = policyKey
@@ -339,6 +347,7 @@ func (a *app) installMeshAccess(s *State, access *meshAccess) error {
 		next.Users = append(next.Users, supplied)
 	}
 	normalizeDeviceModel(&next)
+	normalizeUserGroups(&next)
 	if err := validateState(&next); err != nil {
 		return errors.New("入口用户授权校验失败")
 	}
