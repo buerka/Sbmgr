@@ -34,6 +34,10 @@ sbmgr admin mesh route --id master-external --hops relay-a --exit external-socks
 
 已有 WG 服务可在“线路与服务器 → 添加出站 → 端点”导入 `wireguard` JSON，使用 `system: false` 并填写远端、地址和 peer 参数，再分配给设备、应用配置。共享端点经回环认证桥接保留独立计量/限速；内部端口从 48000 起避开配置中的监听，冲突按配置事务回滚。
 
+反向连接也可作为落地：远端主动连接本机的独立用户态 WG endpoint，并启用持续 keepalive，以便本机学习和维持 peer 的实际地址。本机端点使用 `system: false`、有效 `listen_port`，被动 peer 省略 `address`，配置公钥和合法 `allowed_ips`，其中至少包含一条 IPv4 或 IPv6 默认路由；远端负责将隧道中的连接转发到其出口。只允许隧道来源地址的普通中转入站不会因此成为可桥接落地。被动端点不会自动增加设备节点模板，最终配置仍须通过目标版本的 `sing-box check`。
+
+需要保持既有出站及 mesh 末跳 tag 时，用原 tag 的单成员 `selector` 引用独立 WG endpoint；`--exit` 仍引用该 selector，设备身份、节点名、线路授权和计量 mark 保持原值。共享端点经同一认证桥接转发，各用户保留独立标记。基础配置必须显式限制该 WG endpoint 新发起的入站连接，例如按其入站 tag 设置 `reject`，防止远端借本机默认出站转发或形成路由循环；正常已有连接的回复须在私有验收中确认不受影响。不得把端点的 `detour` 指回该 selector 或引用链中的其他成员。上述限制由部署方配置，程序不会自动添加反向入站规则。
+
 ## 接入与编排
 
 主机先按[运维指南](OPERATIONS.md)初始化。Web“线路与服务器”提供登记、入口设置、编排、同步和应用；接入文件的导出与加入保留为 CLI 自动化命令；示例路径须替换为实际绝对路径。

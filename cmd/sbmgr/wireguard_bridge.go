@@ -2,9 +2,11 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 )
 
 func wireGuardUserAssignable(endpoint map[string]any) bool {
@@ -21,13 +23,66 @@ func wireGuardUserAssignable(endpoint map[string]any) bool {
 	return false
 }
 
+// Passive exit peers are bridgeable without becoming automatically discovered
+// node templates. A default route distinguishes an exit from a transit listener.
+// sing-box check remains the authoritative protocol configuration validation.
+func wireGuardBridgeable(endpoint map[string]any) bool {
+	if wireGuardUserAssignable(endpoint) {
+		return true
+	}
+	if stringValue(endpoint["type"]) != "wireguard" || endpoint["system"] != false {
+		return false
+	}
+	port := 0
+	switch value := endpoint["listen_port"].(type) {
+	case int:
+		port = value
+	case float64:
+		if value < 1 || value > 65535 || value != float64(int(value)) {
+			return false
+		}
+		port = int(value)
+	}
+	if port < 1 || port > 65535 {
+		return false
+	}
+	peers, _ := endpoint["peers"].([]any)
+	for _, item := range peers {
+		peer, _ := item.(map[string]any)
+		if stringValue(peer["address"]) != "" {
+			continue
+		}
+		publicKey, err := base64.StdEncoding.DecodeString(stringValue(peer["public_key"]))
+		if err != nil || len(publicKey) != 32 {
+			continue
+		}
+		allowed, _ := peer["allowed_ips"].([]any)
+		if single, ok := peer["allowed_ips"].(string); ok {
+			allowed = []any{single}
+		}
+		valid, defaultRoute := len(allowed) > 0, false
+		for _, value := range allowed {
+			prefix, err := netip.ParsePrefix(stringValue(value))
+			if err != nil {
+				valid = false
+				break
+			}
+			defaultRoute = defaultRoute || prefix.Bits() == 0
+		}
+		if valid && defaultRoute {
+			return true
+		}
+	}
+	return false
+}
+
 // A WireGuard endpoint is shared state and must not be cloned with the same
 // peer identity per user. An authenticated loopback SOCKS bridge provides real
 // per-user sockets for routing_mark/nft accounting before entering that stack.
 // UDP-over-TCP also keeps UDP accounting on those per-user loopback sockets.
 func addWireGuardBridge(cfg map[string]any, endpoint map[string]any, usedTags map[string]bool) (map[string]any, error) {
-	if !wireGuardUserAssignable(endpoint) {
-		return nil, errors.New("仅已配置远端的用户态 WG 端点可分配给用户节点")
+	if !wireGuardBridgeable(endpoint) {
+		return nil, errors.New("WG 桥接需要已配置远端的用户态端点，或具有有效监听端口、peer 公钥及默认路由 allowed_ips 的被动用户态端点")
 	}
 	key := stringValue(endpoint["private_key"])
 	if key == "" {
