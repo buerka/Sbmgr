@@ -4,14 +4,28 @@ import (
 	"database/sql"
 	"errors"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const analyticsRetention = 30 * 24 * time.Hour
 const analyticsEventLimit = 10000
+const analyticsPruneInterval = 5 * time.Minute
+const analyticsPruneBatch = 1000
 
-var sqliteAnalyticsSchema = []string{
+// Retention must not scan every retained connection on each streaming batch.
+// Partial indexes also keep reconnect reconciliation proportional to live rows.
+var sqliteAnalyticsMaintenanceSchema = []string{
+	`CREATE INDEX IF NOT EXISTS analytics_connections_closed_idx ON analytics_connections(closed_ns) WHERE closed_ns>0`,
+	`CREATE INDEX IF NOT EXISTS analytics_connections_abandoned_idx ON analytics_connections(last_seen_ns) WHERE abandoned=1`,
+	`CREATE INDEX IF NOT EXISTS analytics_connections_active_idx ON analytics_connections(member,abandoned) WHERE closed_ns=0`,
+	`CREATE INDEX IF NOT EXISTS analytics_daily_retention_idx ON analytics_daily(day)`,
+	`CREATE INDEX IF NOT EXISTS analytics_events_retention_idx ON analytics_events(observed_ns)`,
+	`CREATE INDEX IF NOT EXISTS analytics_gap_retention_idx ON analytics_gap_events(at_ns)`,
+}
+
+var sqliteAnalyticsSchema = append([]string{
 	`CREATE TABLE IF NOT EXISTS analytics_connections (
  member TEXT NOT NULL, stream_id TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
  device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
@@ -44,7 +58,7 @@ var sqliteAnalyticsSchema = []string{
 	`CREATE TABLE IF NOT EXISTS analytics_remote_cursor (
  member TEXT PRIMARY KEY, epoch TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence>=0), last_sync_ns INTEGER NOT NULL,
  gaps INTEGER NOT NULL CHECK(gaps>=0)) STRICT`,
-}
+}, sqliteAnalyticsMaintenanceSchema...)
 
 type analyticsEvent struct {
 	Sequence     int64  `json:"sequence"`
@@ -158,7 +172,7 @@ func (a *app) ingestAnalytics(samples []ConnectionSample, reset bool) error {
 			}
 		}
 		if reset {
-			rows, err := tx.Query(`SELECT c.stream_id,n.uuid,c.domain,c.started_ns,c.upload_bytes,c.download_bytes FROM analytics_connections c JOIN nodes n ON n.id=c.node_id WHERE c.member=? AND c.abandoned=2`, member)
+			rows, err := tx.Query(`SELECT c.stream_id,n.uuid,c.domain,c.started_ns,c.upload_bytes,c.download_bytes FROM analytics_connections c JOIN nodes n ON n.id=c.node_id WHERE c.member=? AND c.closed_ns=0 AND c.abandoned=2`, member)
 			if err != nil {
 				return err
 			}
@@ -184,7 +198,7 @@ func (a *app) ingestAnalytics(samples []ConnectionSample, reset bool) error {
 					return err
 				}
 			}
-			if _, err := tx.Exec(`UPDATE analytics_connections SET abandoned=1 WHERE member=? AND abandoned=2`, member); err != nil {
+			if _, err := tx.Exec(`UPDATE analytics_connections SET abandoned=1 WHERE member=? AND closed_ns=0 AND abandoned=2`, member); err != nil {
 				return err
 			}
 		}
@@ -287,23 +301,52 @@ func analyticsUpsert(tx *sql.Tx, member string, userID, deviceID, nodeID int64, 
 }
 
 func analyticsPrune(tx *sql.Tx, now time.Time) error {
+	// Keep the replication queue bounded on every batch, independently of age
+	// cleanup. Its sequence is a primary key; this does not scan retained rows.
+	if _, err := tx.Exec(`DELETE FROM analytics_events WHERE sequence <= (SELECT coalesce(max(sequence),0)-? FROM analytics_events)`, analyticsEventLimit); err != nil {
+		return err
+	}
+	var lastText string
+	err := tx.QueryRow(`SELECT value FROM metadata WHERE key='analytics_pruned_at_ns'`).Scan(&lastText)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	last, parseErr := strconv.ParseInt(lastText, 10, 64)
+	// Missing, invalid or future timestamps trigger cleanup, including after a
+	// clock correction or restore. The marker shares the caller's transaction.
+	if parseErr == nil && last > 0 && now.UnixNano() >= last && now.Sub(time.Unix(0, last)) < analyticsPruneInterval {
+		return nil
+	}
 	cutoff := now.Add(-analyticsRetention).UnixNano()
-	for _, query := range []string{
-		`DELETE FROM analytics_connections WHERE closed_ns>0 AND closed_ns<?`,
-		`DELETE FROM analytics_connections WHERE abandoned=1 AND last_seen_ns<?`,
-		`DELETE FROM analytics_daily WHERE day<?`,
-		`DELETE FROM analytics_events WHERE observed_ns<?`,
-		`DELETE FROM analytics_gap_events WHERE at_ns<?`,
+	more := false
+	for _, target := range []struct{ table, predicate string }{
+		{"analytics_connections", "closed_ns>0 AND closed_ns<?"},
+		{"analytics_connections", "abandoned=1 AND last_seen_ns<?"},
+		{"analytics_daily", "day<?"},
+		{"analytics_events", "observed_ns<?"},
+		{"analytics_gap_events", "at_ns<?"},
 	} {
 		arg := any(cutoff)
-		if strings.Contains(query, "day<") {
+		if target.table == "analytics_daily" {
 			arg = now.Add(-analyticsRetention).UTC().Format("2006-01-02")
 		}
-		if _, err := tx.Exec(query, arg); err != nil {
+		// Fixed identifiers only. Bound each write transaction so old backlogs
+		// cannot monopolize the shared state lock; resume on the next batch.
+		query := `DELETE FROM ` + target.table + ` WHERE rowid IN (SELECT rowid FROM ` + target.table + ` WHERE ` + target.predicate + ` LIMIT ?)`
+		result, err := tx.Exec(query, arg, analyticsPruneBatch)
+		if err != nil {
 			return err
 		}
+		deleted, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		more = more || deleted == analyticsPruneBatch
 	}
-	_, err := tx.Exec(`DELETE FROM analytics_events WHERE sequence <= (SELECT coalesce(max(sequence),0)-? FROM analytics_events)`, analyticsEventLimit)
+	if more {
+		return nil
+	}
+	_, err = tx.Exec(`INSERT INTO metadata(key,value) VALUES('analytics_pruned_at_ns',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, strconv.FormatInt(now.UnixNano(), 10))
 	return err
 }
 

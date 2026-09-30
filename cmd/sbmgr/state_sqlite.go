@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 10
+	sqliteSchemaVersion = 11
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -265,6 +265,12 @@ func isSQLiteStatePath(path string) bool {
 }
 
 func loadSQLiteStateWithCanonicalChange(path string) (*State, bool, error) {
+	return loadSQLiteState(path, true)
+}
+
+// Ordinary readers still verify the business hash, migrate and validate, but
+// need not serialize the whole state twice just to discard the change flag.
+func loadSQLiteState(path string, detectChange bool) (*State, bool, error) {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		if err := importLegacyJSONState(path); err != nil {
 			return nil, false, err
@@ -276,9 +282,12 @@ func loadSQLiteStateWithCanonicalChange(path string) (*State, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	before, err := json.Marshal(s)
-	if err != nil {
-		return nil, false, err
+	var before []byte
+	if detectChange {
+		before, err = json.Marshal(s)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	if err := migrateState(s); err != nil {
 		return nil, false, err
@@ -292,11 +301,14 @@ func loadSQLiteStateWithCanonicalChange(path string) (*State, bool, error) {
 	if err := validateState(s); err != nil {
 		return nil, false, fmt.Errorf("状态数据库校验失败: %w", err)
 	}
+	if !detectChange {
+		return s, false, nil
+	}
 	after, err := json.Marshal(s)
 	if err != nil {
 		return nil, false, err
 	}
-	return s, !strings.EqualFold(hex.EncodeToString(hashBytes(before)), hex.EncodeToString(hashBytes(after))), nil
+	return s, !bytes.Equal(before, after), nil
 }
 
 func loadSQLiteBackupState(path string) (*State, error) {
@@ -774,6 +786,27 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 10
+		case 10:
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			for _, statement := range sqliteAnalyticsMaintenanceSchema {
+				if _, err := tx.Exec(statement); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec("UPDATE metadata SET value = '11' WHERE key = 'schema_version'"); err != nil {
+				return err
+			}
+			if _, err := tx.Exec("PRAGMA user_version = 11"); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 11
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}

@@ -49,7 +49,9 @@ Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 →
 | 拓扑校验与协议编译 | `internal/mesh/{model,transport,config}.go` |
 | 备份、审计、巡检、健康 | `backup.go`、`audit.go`、`fleet.go`、`health.go` |
 
-除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 21、SQLite schema 为 10；版本常量分别在 `main.go:stateVersion` 和 `state_sqlite.go:sqliteSchemaVersion`，两者各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
+除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 22、SQLite schema 为 11；版本常量分别在 `main.go:stateVersion` 和 `state_sqlite.go:sqliteSchemaVersion`，两者各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
+
+连接分析维持 5 秒事件采样；事件批次已更新采集覆盖时间时，10 秒内的空心跳不重复写入。30 天历史按时间索引清理，每 5 分钟启动一次；每类过期记录每事务最多删除 1,000 条，有积压则后续批次继续，避免长时间占用状态锁。清理进度与数据同事务提交；主从事件队列仍在每批次维护原有上限。普通状态读取保留业务哈希、迁移、规范化和完整校验，只在调用者需要判断迁移变化时执行额外的前后序列化。
 
 ## 多机与协议
 

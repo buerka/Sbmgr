@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-const stateVersion = 21
+const stateVersion = 22
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -2105,6 +2105,10 @@ func renderMihomoDevice(s *State, u User, deviceName string) ([]byte, error) {
 }
 
 func loadState(path string) (*State, error) {
+	if isSQLiteStatePath(path) {
+		s, _, err := loadSQLiteState(path, false)
+		return s, err
+	}
 	s, _, err := loadStateWithCanonicalChange(path)
 	return s, err
 }
@@ -2271,6 +2275,10 @@ func migrateState(s *State) error {
 		case 20:
 			// Personal site blocks start empty and never inherit admin policy.
 			s.Version = 21
+		case 21:
+			// SQLite analytics retention gains indexes and a transactional
+			// maintenance marker; user policy and traffic totals are unchanged.
+			s.Version = 22
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}

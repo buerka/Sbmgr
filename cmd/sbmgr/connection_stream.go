@@ -162,6 +162,19 @@ func watchConnectionStream(ctx context.Context, address, secret string, onBatch 
 		}
 	}()
 	seenReset := false
+	var lastPublished time.Time
+	publish := func(samples []ConnectionSample, reset bool) error {
+		// Traffic batches already refresh coverage. A nearby status heartbeat
+		// should not acquire the state lock and write the same metadata again.
+		if !reset && len(samples) == 0 && !lastPublished.IsZero() && time.Since(lastPublished) < connectionStatusInterval {
+			return nil
+		}
+		if err := onBatch(samples, reset); err != nil {
+			return err
+		}
+		lastPublished = time.Now()
+		return nil
+	}
 	statusDeadline := time.NewTimer(3 * connectionStatusInterval)
 	defer statusDeadline.Stop()
 	for {
@@ -174,7 +187,7 @@ func watchConnectionStream(ctx context.Context, address, secret string, onBatch 
 			}
 			statusDeadline.Reset(3 * connectionStatusInterval)
 			if seenReset {
-				if err := onBatch(nil, false); err != nil {
+				if err := publish(nil, false); err != nil {
 					return err
 				}
 			}
@@ -210,7 +223,7 @@ func watchConnectionStream(ctx context.Context, address, secret string, onBatch 
 				batch = append(batch, sample)
 			}
 		}
-		if err := onBatch(batch, message.Reset_); err != nil {
+		if err := publish(batch, message.Reset_); err != nil {
 			return err
 		}
 	}
