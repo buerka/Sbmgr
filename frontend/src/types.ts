@@ -341,9 +341,10 @@ export interface ActionInput {
   confirm: boolean;
 }
 export interface Job {
+  logout?: boolean;
   id: string;
   title: string;
-  status: "running" | "success" | "failed";
+  status: "running" | "success" | "failed" | "unknown";
   message: string;
 }
 export interface ActionTarget {

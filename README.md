@@ -41,6 +41,6 @@ go build -trimpath -o sbmgr ./cmd/sbmgr
 | 贡献与历史 | [贡献指南](CONTRIBUTING.md) · [变更记录](CHANGELOG.md) |
 | 安全报告 | [安全策略](SECURITY.md) |
 
-`state.db`、配置、凭据和备份属于部署资料，不进入源码仓库。软件版本由 Git tag 和外部部署流程管理。
+`state.db` 保存业务状态，`state.analytics.db` 独立保存网站分析历史，使用各自的跨进程锁。数据库、配置、凭据和备份属于部署资料，不进入源码仓库。软件版本由 Git tag 和外部部署流程管理。
 
 许可证：[GPL-3.0-only](LICENSE)。第三方内容保留各自版权、许可证及 NOTICE 要求。

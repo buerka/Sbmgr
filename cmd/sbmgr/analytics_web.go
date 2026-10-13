@@ -32,7 +32,7 @@ type analyticsCoverage struct {
 	Note      string `json:"note"`
 }
 
-func (a *app) analyticsReply(s *State, owner *User, body []byte) webReply {
+func (a *app) analyticsReply(s *State, owner *User, body []byte, expectedControlHash string) webReply {
 	var input analyticsInput
 	if webDecode(body, &input) != nil || (input.Days != 1 && input.Days != 7 && input.Days != 30) || input.Page < 0 || input.Page > 10000 || len(input.Search) > 100 || len(input.Device) > 256 || len(input.User) > 256 || (input.Sort != "" && input.Sort != "traffic" && input.Sort != "connections") {
 		return webError(400, "分析查询参数无效")
@@ -53,14 +53,14 @@ func (a *app) analyticsReply(s *State, owner *User, body []byte) webReply {
 	if input.Device != "" && findDevice(u, input.Device) == nil {
 		return webError(404, "设备不属于该用户")
 	}
-	result, err := queryConnectionAnalytics(a.statePath, s, u, input)
+	result, err := queryConnectionAnalytics(a.statePath, s, u, input, expectedControlHash)
 	if err != nil {
 		return webError(503, "分析数据暂不可用")
 	}
 	return webJSON(200, result)
 }
 
-func queryConnectionAnalytics(path string, s *State, u *User, in analyticsInput) (map[string]any, error) {
+func queryConnectionAnalytics(path string, s *State, u *User, in analyticsInput, expectedControlHash string) (map[string]any, error) {
 	now := time.Now().UTC()
 	to := now.Format("2006-01-02")
 	fromDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -in.Days+1)
@@ -72,11 +72,14 @@ func queryConnectionAnalytics(path string, s *State, u *User, in analyticsInput)
 	if s.Analytics == nil || !s.Analytics.Enabled || !isSQLiteStatePath(path) {
 		return result, nil
 	}
-	db, _, err := openSQLiteState(path)
+	db, err := openSQLiteAnalytics(path)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
+	if expectedControlHash == "" || db.controlHash != expectedControlHash {
+		return nil, errors.New("分析查询期间账号设置已变化，请刷新后重试")
+	}
 	var userID int64
 	if err := db.QueryRow(`SELECT id FROM users WHERE name_key=?`, sqliteNameKey(u.Name)).Scan(&userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

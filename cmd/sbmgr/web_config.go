@@ -102,7 +102,9 @@ func readWebConfig(statePath string) (webConfig, error) {
 	return c, nil
 }
 
-func webPasswordHash(password, salt string) (string, error) {
+func webPasswordHash(password, salt string) (hash string, err error) {
+	finish := startPerformancePhase("web.password")
+	defer func() { finish(err) }()
 	key, err := pbkdf2.Key(sha256.New, password, []byte(salt), 600000, 32)
 	return hex.EncodeToString(key), err
 }

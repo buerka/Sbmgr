@@ -32,7 +32,9 @@ func (a *app) daemonCmd(args []string) error {
 		return fmt.Errorf("准备后台状态: %w", err)
 	}
 
-	runCycle := func() error {
+	runCycle := func() (err error) {
+		finish := startPerformancePhase("daemon.maintenance")
+		defer func() { finish(err); reportPerformance(a.err) }()
 		started := time.Now()
 		if err := a.daemonCycle(); err != nil {
 			return err
@@ -104,7 +106,9 @@ func (a *app) daemonCmd(args []string) error {
 // source-address observations between normal maintenance runs. Both paths use
 // the same state lock, so a sample cannot race an interactive edit or the
 // minute maintenance cycle.
-func (a *app) realtimeCycle() error {
+func (a *app) realtimeCycle() (err error) {
+	finish := startPerformancePhase("daemon.realtime")
+	defer func() { finish(err) }()
 	return errors.Join(a.meshLeaseCycle(), a.withStateLock(a.realtimeCycleLocked), a.meshSyncAccess())
 }
 

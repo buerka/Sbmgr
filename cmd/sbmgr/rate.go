@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -687,10 +687,7 @@ func runNftables(s *State, checkOnly bool, w io.Writer) error {
 	if checkOnly {
 		args = []string{"--check", "-f", name}
 	}
-	cmd := exec.Command("nft", args...)
-	cmd.Stdout = w
-	cmd.Stderr = w
-	if err := cmd.Run(); err != nil {
+	if err := runConfigurationCommand(w, w, "nft", args...); err != nil {
 		return fmt.Errorf("nftables 限速规则%s失败: %w", map[bool]string{true: "校验", false: "应用"}[checkOnly], err)
 	}
 	if checkOnly {
@@ -704,23 +701,23 @@ func runNftables(s *State, checkOnly bool, w io.Writer) error {
 }
 
 func nftRateTableExists() (bool, error) {
-	cmd := exec.Command("nft", "list", "table", "inet", "sbmgr")
-	var stderr bytes.Buffer
-	cmd.Stdout = io.Discard
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	ctx, cancel := context.WithTimeout(context.Background(), samplingCommandTimeout)
+	defer cancel()
+	_, stderr, err := runSamplingCommand(ctx, "nft", "list", "table", "inet", "sbmgr")
 	if err == nil {
 		return true, nil
 	}
-	text := strings.ToLower(stderr.String())
+	text := strings.ToLower(string(stderr))
 	if strings.Contains(text, "no such file") || strings.Contains(text, "does not exist") {
 		return false, nil
 	}
-	return false, fmt.Errorf("检查 nftables 表失败: %w: %s", err, strings.TrimSpace(stderr.String()))
+	return false, fmt.Errorf("检查 nftables 表失败: %w: %s", err, strings.TrimSpace(string(stderr)))
 }
 
 func readNftRateCounters() (map[string]int64, error) {
-	out, err := exec.Command("nft", "-j", "list", "table", "inet", "sbmgr").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), samplingCommandTimeout)
+	defer cancel()
+	out, _, err := runSamplingCommand(ctx, "nft", "-j", "list", "table", "inet", "sbmgr")
 	if err != nil {
 		return nil, fmt.Errorf("读取 nftables 用量计数: %w", err)
 	}
@@ -744,7 +741,9 @@ func captureNftRateSnapshot() (nftRateSnapshot, error) {
 	if err != nil || !exists {
 		return nftRateSnapshot{Exists: exists}, err
 	}
-	out, err := exec.Command("nft", "list", "table", "inet", "sbmgr").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), samplingCommandTimeout)
+	defer cancel()
+	out, _, err := runSamplingCommand(ctx, "nft", "list", "table", "inet", "sbmgr")
 	if err != nil {
 		return nftRateSnapshot{}, fmt.Errorf("备份 nftables 限速表: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -789,9 +788,7 @@ func restoreNftRateSnapshot(s *State, snapshot nftRateSnapshot, w io.Writer) err
 	if err := f.Close(); err != nil {
 		return err
 	}
-	cmd := exec.Command("nft", "-f", name)
-	cmd.Stdout, cmd.Stderr = w, w
-	if err := cmd.Run(); err != nil {
+	if err := runConfigurationCommand(w, w, "nft", "-f", name); err != nil {
 		return fmt.Errorf("恢复 nftables 限速表: %w", err)
 	}
 	return nil

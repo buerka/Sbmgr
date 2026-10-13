@@ -64,6 +64,7 @@ func (a *app) meshAgentRPC(reader io.Reader) error {
 
 func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 	response := meshResponse{Protocol: mesh.Protocol}
+	var analyticsMember, analyticsVersion string
 	err := a.withStateLock(func() error {
 		s, err := loadState(a.statePath)
 		if err != nil {
@@ -100,12 +101,9 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 				if r.Access != nil || r.AnalyticsAfter < 0 {
 					return errors.New("分析查询参数无效")
 				}
-				page, err := analyticsReadEvents(a.statePath, analyticsLocalMember(s), r.AnalyticsAfter)
-				if err != nil {
-					return err
-				}
-				response.Analytics = &page
-				return nil
+				analyticsMember = analyticsLocalMember(s)
+				analyticsVersion, err = analyticsControlVersion(a.statePath)
+				return err
 			}
 			return a.installMeshAccess(s, r.Access)
 		}
@@ -172,7 +170,7 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 			if err := meshCheckCandidate(&candidate); err != nil {
 				return err
 			}
-			if _, err := createManualStateBackup(a.statePath, time.Now()); err != nil {
+			if _, err := createBusinessStateBackup(a.statePath, time.Now()); err != nil {
 				return errors.New("准备前状态备份失败")
 			}
 			j.Pending, j.Previous, j.Transaction, j.Phase = r.Plan, j.Active, r.Transaction, "prepared"
@@ -227,5 +225,14 @@ func (a *app) meshExecute(r meshRequest) (meshResponse, error) {
 		}
 		return nil
 	})
+	if err == nil && analyticsMember != "" {
+		// Authorization is captured under the business lock; the independent
+		// history query checks the same revision without blocking state writes.
+		page, queryErr := analyticsReadEvents(a.statePath, analyticsMember, r.AnalyticsAfter, analyticsVersion)
+		if queryErr != nil {
+			return response, queryErr
+		}
+		response.Analytics = &page
+	}
 	return response, err
 }

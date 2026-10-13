@@ -108,108 +108,120 @@ func analyticsDomain(value string) (string, error) {
 
 func analyticsLocalMember(s *State) string { return machineTrafficLocalMember(s) }
 
-func (a *app) ingestAnalytics(samples []ConnectionSample, reset bool) error {
+func (a *app) ingestAnalytics(samples []ConnectionSample, reset bool) (resultErr error) {
+	finish := startPerformancePhase("analytics.ingest")
+	defer func() { finish(resultErr) }()
 	if len(samples) > connectionStreamLimit {
 		return errors.New("分析批次过大")
 	}
-	return a.withStateLock(func() error {
-		s, err := loadState(a.statePath)
+	var s *State
+	var controlHash string
+	if err := a.withStateLock(func() error {
+		var err error
+		s, err = loadState(a.statePath)
 		if err != nil {
 			return err
 		}
-		if s.Analytics == nil || !s.Analytics.Enabled {
-			return nil
+		controlHash, err = analyticsControlVersion(a.statePath)
+		return err
+	}); err != nil {
+		return err
+	}
+	if s.Analytics == nil || !s.Analytics.Enabled {
+		return nil
+	}
+	if !isSQLiteStatePath(a.statePath) {
+		return errors.New("连接分析需要 SQLite 状态数据库")
+	}
+	db, err := openSQLiteAnalytics(a.statePath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if db.controlHash != controlHash {
+		return errors.New("分析采集期间业务配置变化，等待下批重试")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	member := analyticsLocalMember(s)
+	now := time.Now()
+	if err := analyticsMarkCoverage(tx, member, now, reset); err != nil {
+		return err
+	}
+	if reset {
+		if _, err := tx.Exec(`UPDATE analytics_connections SET abandoned=2 WHERE member=? AND closed_ns=0 AND abandoned=0`, member); err != nil {
+			return err
 		}
-		if !isSQLiteStatePath(a.statePath) {
-			return errors.New("连接分析需要 SQLite 状态数据库")
+	}
+	for _, sample := range samples {
+		if sample.ID == "" || len(sample.ID) > 160 || sample.Upload < 0 || sample.Download < 0 || sample.StartedAt.IsZero() || sample.StartedAt.After(now.Add(5*time.Minute)) {
+			return errors.New("连接样本无效")
 		}
-		db, _, err := openSQLiteState(a.statePath)
+		if !sample.ClosedAt.IsZero() && sample.ClosedAt.Before(now.Add(-analyticsRetention)) {
+			continue
+		}
+		domain, err := analyticsDomain(sample.Domain)
+		if err != nil {
+			continue
+		}
+		var userID, deviceID, nodeID int64
+		var identity string
+		err = tx.QueryRow(`SELECT n.user_id,n.device_id,n.id,n.identity FROM nodes n WHERE n.auth_user=?`, sample.AuthUser).Scan(&userID, &deviceID, &nodeID, &identity)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
-		defer db.Close()
-		tx, err := db.Begin()
+		event := analyticsEvent{ID: sample.ID, NodeIdentity: identity, Domain: domain, StartedNS: sample.StartedAt.UnixNano(), Upload: sample.Upload, Download: sample.Download, ObservedNS: now.UnixNano()}
+		if !sample.ClosedAt.IsZero() {
+			event.ClosedNS = sample.ClosedAt.UnixNano()
+		}
+		if err := analyticsUpsert(tx, member, userID, deviceID, nodeID, event, true); err != nil {
+			return err
+		}
+	}
+	if reset {
+		rows, err := tx.Query(`SELECT c.stream_id,n.identity,c.domain,c.started_ns,c.upload_bytes,c.download_bytes FROM analytics_connections c JOIN nodes n ON n.id=c.node_id WHERE c.member=? AND c.closed_ns=0 AND c.abandoned=2`, member)
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
-		member := analyticsLocalMember(s)
-		now := time.Now()
-		if err := analyticsMarkCoverage(tx, member, now, reset); err != nil {
-			return err
-		}
-		if reset {
-			if _, err := tx.Exec(`UPDATE analytics_connections SET abandoned=2 WHERE member=? AND closed_ns=0 AND abandoned=0`, member); err != nil {
-				return err
-			}
-		}
-		for _, sample := range samples {
-			if sample.ID == "" || len(sample.ID) > 160 || sample.Upload < 0 || sample.Download < 0 || sample.StartedAt.IsZero() || sample.StartedAt.After(now.Add(5*time.Minute)) {
-				return errors.New("连接样本无效")
-			}
-			if !sample.ClosedAt.IsZero() && sample.ClosedAt.Before(now.Add(-analyticsRetention)) {
-				continue
-			}
-			domain, err := analyticsDomain(sample.Domain)
-			if err != nil {
-				continue
-			}
-			var userID, deviceID, nodeID int64
-			var uuid string
-			err = tx.QueryRow(`SELECT n.user_id,n.device_id,n.id,n.uuid FROM nodes n WHERE n.auth_user=?`, sample.AuthUser).Scan(&userID, &deviceID, &nodeID, &uuid)
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			event := analyticsEvent{ID: sample.ID, NodeIdentity: meshNodeIdentity(Node{UUID: uuid}), Domain: domain, StartedNS: sample.StartedAt.UnixNano(), Upload: sample.Upload, Download: sample.Download, ObservedNS: now.UnixNano()}
-			if !sample.ClosedAt.IsZero() {
-				event.ClosedNS = sample.ClosedAt.UnixNano()
-			}
-			if err := analyticsUpsert(tx, member, userID, deviceID, nodeID, event, true); err != nil {
-				return err
-			}
-		}
-		if reset {
-			rows, err := tx.Query(`SELECT c.stream_id,n.uuid,c.domain,c.started_ns,c.upload_bytes,c.download_bytes FROM analytics_connections c JOIN nodes n ON n.id=c.node_id WHERE c.member=? AND c.closed_ns=0 AND c.abandoned=2`, member)
-			if err != nil {
-				return err
-			}
-			var abandoned []analyticsEvent
-			for rows.Next() {
-				var event analyticsEvent
-				var uuid string
-				if err := rows.Scan(&event.ID, &uuid, &event.Domain, &event.StartedNS, &event.Upload, &event.Download); err != nil {
-					rows.Close()
-					return err
-				}
-				event.NodeIdentity = meshNodeIdentity(Node{UUID: uuid})
-				event.ObservedNS, event.Abandoned = now.UnixNano(), true
-				abandoned = append(abandoned, event)
-			}
-			if err := rows.Err(); err != nil {
+		var abandoned []analyticsEvent
+		for rows.Next() {
+			var event analyticsEvent
+			var identity string
+			if err := rows.Scan(&event.ID, &identity, &event.Domain, &event.StartedNS, &event.Upload, &event.Download); err != nil {
 				rows.Close()
 				return err
 			}
+			event.NodeIdentity = identity
+			event.ObservedNS, event.Abandoned = now.UnixNano(), true
+			abandoned = append(abandoned, event)
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
-			for _, event := range abandoned {
-				if _, err := tx.Exec(`INSERT INTO analytics_events(member,stream_id,node_identity,domain,destination,started_ns,closed_ns,upload_bytes,download_bytes,observed_ns,abandoned) VALUES(?,?,?,?,?,?,?,?,?,?,1)`, member, event.ID, event.NodeIdentity, event.Domain, "", event.StartedNS, 0, event.Upload, event.Download, event.ObservedNS); err != nil {
-					return err
-				}
-			}
-			if _, err := tx.Exec(`UPDATE analytics_connections SET abandoned=1 WHERE member=? AND closed_ns=0 AND abandoned=2`, member); err != nil {
+			return err
+		}
+		rows.Close()
+		for _, event := range abandoned {
+			if _, err := tx.Exec(`INSERT INTO analytics_events(member,stream_id,node_identity,domain,destination,started_ns,closed_ns,upload_bytes,download_bytes,observed_ns,abandoned) VALUES(?,?,?,?,?,?,?,?,?,?,1)`, member, event.ID, event.NodeIdentity, event.Domain, "", event.StartedNS, 0, event.Upload, event.Download, event.ObservedNS); err != nil {
 				return err
 			}
 		}
-		if err := analyticsPrune(tx, now); err != nil {
+		if _, err := tx.Exec(`UPDATE analytics_connections SET abandoned=1 WHERE member=? AND closed_ns=0 AND abandoned=2`, member); err != nil {
 			return err
 		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		return chmodSQLiteFiles(a.statePath)
-	})
+	}
+	if err := analyticsPrune(tx, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return chmodSQLiteFiles(analyticsDatabasePath(a.statePath))
 }
 
 func analyticsMarkCoverage(tx *sql.Tx, member string, at time.Time, reset bool) error {
@@ -350,13 +362,16 @@ func analyticsPrune(tx *sql.Tx, now time.Time) error {
 	return err
 }
 
-func analyticsReadEvents(path, member string, after int64) (analyticsPage, error) {
+func analyticsReadEvents(path, member string, after int64, controlHash string) (analyticsPage, error) {
 	var page analyticsPage
-	db, _, err := openSQLiteState(path)
+	db, err := openSQLiteAnalytics(path)
 	if err != nil {
 		return page, err
 	}
 	defer db.Close()
+	if controlHash == "" || db.controlHash != controlHash {
+		return page, errors.New("分析查询期间业务配置变化，请重试")
+	}
 	if err := db.QueryRow(`SELECT coalesce(min(sequence),0),coalesce(max(sequence),0) FROM analytics_events WHERE member=?`, member).Scan(&page.First, &page.Head); err != nil {
 		return page, err
 	}

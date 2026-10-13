@@ -13,7 +13,6 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -24,7 +23,7 @@ import (
 	"time"
 )
 
-const stateVersion = 22
+const stateVersion = 23
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -34,6 +33,7 @@ var (
 )
 
 type State struct {
+	sqliteSnapshot        *sqliteHistorySnapshot
 	Analytics             *ConnectionAnalyticsSettings `json:"analytics,omitempty"`
 	MachineTraffic        []MachineTrafficPeriod       `json:"machine_traffic,omitempty"`
 	MachineTrafficHistory []MachineTrafficPeriod       `json:"machine_traffic_history,omitempty"`
@@ -309,6 +309,13 @@ type app struct {
 	stateLockHeld      bool
 	lastNftUsageSample time.Time
 	lastStatsSample    time.Time
+}
+
+// workerApp starts an independent call chain. Never copy stateLockHeld or the
+// sampling clocks into another goroutine: the former only denotes reentrancy
+// within a single worker, not process-wide ownership of the file lock.
+func (a *app) workerApp() *app {
+	return &app{actor: a.actor, statePath: a.statePath, out: a.out, err: a.err}
 }
 
 func (a *app) newFlagSet(name string) *flag.FlagSet {
@@ -1803,7 +1810,9 @@ func (a *app) exportCmd(args []string) error {
 	return nil
 }
 
-func renderConfig(s *State) ([]byte, error) {
+func renderConfig(s *State) (result []byte, err error) {
+	finish := startPerformancePhase("config.render")
+	defer func() { finish(err) }()
 	if err := validateRuntimeSettings(s); err != nil {
 		return nil, err
 	}
@@ -1912,7 +1921,9 @@ func renderConfig(s *State) ([]byte, error) {
 	return append(b, '\n'), nil
 }
 
-func checkRendered(s *State, w io.Writer) error {
+func checkRendered(s *State, w io.Writer) (err error) {
+	finish := startPerformancePhase("config.check")
+	defer func() { finish(err) }()
 	b, err := renderConfig(s)
 	if err != nil {
 		return err
@@ -1931,11 +1942,8 @@ func checkRendered(s *State, w io.Writer) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	cmd := exec.Command(s.SingBoxBin, "check", "-c", name)
 	var diagnostics cappedDiagnosticBuffer
-	cmd.Stdout = &diagnostics
-	cmd.Stderr = &diagnostics
-	if err := cmd.Run(); err != nil {
+	if err := runConfigurationCommand(&diagnostics, &diagnostics, s.SingBoxBin, "check", "-c", name); err != nil {
 		diagnostics.writeRedactedTo(w, b)
 		return fmt.Errorf("sing-box 配置校验失败: %w", err)
 	}
@@ -1944,7 +1952,9 @@ func checkRendered(s *State, w io.Writer) error {
 	return nil
 }
 
-func applyState(s *State, noReload, restart bool, w io.Writer) error {
+func applyState(s *State, noReload, restart bool, w io.Writer) (err error) {
+	finish := startPerformancePhase("config.apply")
+	defer func() { finish(err) }()
 	b, err := renderConfig(s)
 	if err != nil {
 		return err
@@ -1963,11 +1973,8 @@ func applyState(s *State, noReload, restart bool, w io.Writer) error {
 	if err = f.Close(); err != nil {
 		return err
 	}
-	check := exec.Command(s.SingBoxBin, "check", "-c", tmp)
 	var diagnostics cappedDiagnosticBuffer
-	check.Stdout = &diagnostics
-	check.Stderr = &diagnostics
-	if err := check.Run(); err != nil {
+	if err := runConfigurationCommand(&diagnostics, &diagnostics, s.SingBoxBin, "check", "-c", tmp); err != nil {
 		diagnostics.writeRedactedTo(w, b)
 		return fmt.Errorf("校验失败，未修改现有配置: %w", err)
 	}
@@ -2279,6 +2286,10 @@ func migrateState(s *State) error {
 			// SQLite analytics retention gains indexes and a transactional
 			// maintenance marker; user policy and traffic totals are unchanged.
 			s.Version = 22
+		case 22:
+			// Analysis history moves to its own SQLite database; authoritative
+			// quotas and business state remain in the original transaction.
+			s.Version = 23
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}

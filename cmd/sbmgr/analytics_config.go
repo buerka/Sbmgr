@@ -41,6 +41,18 @@ func validateConnectionAnalyticsSettings(settings *ConnectionAnalyticsSettings) 
 }
 
 func (a *app) analyticsCmd(args []string) error {
+	if len(args) == 1 && args[0] == "check" {
+		exists, err := checkSQLiteAnalytics(a.statePath)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			fmt.Fprintln(a.out, "尚无独立连接分析数据库")
+			return nil
+		}
+		fmt.Fprintln(a.out, "连接分析数据库完整性、结构与身份关联校验通过")
+		return nil
+	}
 	if len(args) == 1 && args[0] == "status" {
 		s, err := loadState(a.statePath)
 		if err != nil {
@@ -54,7 +66,7 @@ func (a *app) analyticsCmd(args []string) error {
 		return nil
 	}
 	if len(args) == 0 || args[0] != "configure" {
-		return errors.New("用法: admin analytics configure --enabled true|false --listen 127.0.0.1:9191 | status")
+		return errors.New("用法: admin analytics configure --enabled true|false --listen 127.0.0.1:9191 | status | check")
 	}
 	fs := a.newFlagSet("analytics configure")
 	enabled := fs.String("enabled", "", "true 或 false")

@@ -10,7 +10,7 @@ import (
 )
 
 func analyticsRemoteCursor(path, member string) (int64, string, error) {
-	db, _, err := openSQLiteState(path)
+	db, err := openSQLiteAnalytics(path)
 	if err != nil {
 		return 0, "", err
 	}
@@ -24,18 +24,21 @@ func analyticsRemoteCursor(path, member string) (int64, string, error) {
 	return cursor, epoch, err
 }
 
-func mergeRemoteAnalytics(path string, s *State, member string, page analyticsPage) error {
+func mergeRemoteAnalytics(path string, s *State, member string, page analyticsPage, controlHash string) error {
 	if s.Mesh == nil || !mesh.ValidID(member) || member == s.Mesh.Master || !slices.ContainsFunc(s.Mesh.Members, func(m mesh.Member) bool { return m.ID == member }) {
 		return errors.New("分析数据节点不属于当前拓扑")
 	}
 	if len(page.Events) > 250 || page.Next < 0 || page.Head < page.Next || page.Gaps < 0 || len(page.Epoch) == 0 || len(page.Epoch) > 64 || page.First < 0 || page.Last < page.First {
 		return errors.New("分析数据分页无效")
 	}
-	db, _, err := openSQLiteState(path)
+	db, err := openSQLiteAnalytics(path)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
+	if db.controlHash != controlHash {
+		return errors.New("分析同步期间业务配置变化，等待下批重试")
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -88,14 +91,14 @@ func mergeRemoteAnalytics(path string, s *State, member string, page analyticsPa
 		} // revoked identity cannot reappear in history.
 		var userID, deviceID, nodeID int64
 		var storedUUID string
-		err := tx.QueryRow(`SELECT n.user_id,n.device_id,n.id,n.uuid FROM nodes n JOIN users u ON u.id=n.user_id JOIN devices d ON d.id=n.device_id WHERE u.name_key=? AND d.name_key=? AND n.uuid=?`, sqliteNameKey(userName), sqliteNameKey(deviceName), uuid).Scan(&userID, &deviceID, &nodeID, &storedUUID)
+		err := tx.QueryRow(`SELECT n.user_id,n.device_id,n.id,n.identity FROM nodes n JOIN users u ON u.id=n.user_id JOIN devices d ON d.id=n.device_id WHERE u.name_key=? AND d.name_key=? AND n.identity=?`, sqliteNameKey(userName), sqliteNameKey(deviceName), event.NodeIdentity).Scan(&userID, &deviceID, &nodeID, &storedUUID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		if storedUUID != uuid {
+		if storedUUID != event.NodeIdentity {
 			return errors.New("分析身份不匹配")
 		}
 		if err := analyticsUpsert(tx, member, userID, deviceID, nodeID, event, false); err != nil {
@@ -133,7 +136,7 @@ func mergeRemoteAnalytics(path string, s *State, member string, page analyticsPa
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return chmodSQLiteFiles(path)
+	return chmodSQLiteFiles(analyticsDatabasePath(path))
 }
 
 func (a *app) analyticsMeshCycle() error {
@@ -174,16 +177,23 @@ func (a *app) analyticsMeshCycle() error {
 				}
 				break
 			}
+			var current *State
+			var controlHash string
 			err = a.withStateLock(func() error {
-				current, err := loadState(a.statePath)
+				var err error
+				current, err = loadState(a.statePath)
 				if err != nil {
 					return err
 				}
 				if current.Mesh == nil || current.Mesh.ID != s.Mesh.ID || current.MeshRollout != nil {
 					return errors.New("分析同步期间拓扑变化")
 				}
-				return mergeRemoteAnalytics(a.statePath, current, member.ID, *response.Analytics)
+				controlHash, err = analyticsControlVersion(a.statePath)
+				return err
 			})
+			if err == nil {
+				err = mergeRemoteAnalytics(a.statePath, current, member.ID, *response.Analytics, controlHash)
+			}
 			if err != nil {
 				failures = append(failures, fmt.Errorf("分析节点 %s 合并失败: %w", member.ID, err))
 				break

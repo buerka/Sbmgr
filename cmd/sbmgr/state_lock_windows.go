@@ -3,8 +3,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -15,6 +18,15 @@ type stateFileLock struct {
 }
 
 func acquireStateFileLock(path string) (*stateFileLock, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), stateLockWaitLimit)
+	defer cancel()
+	return acquireStateFileLockContext(ctx, path)
+}
+
+func acquireStateFileLockContext(ctx context.Context, path string) (*stateFileLock, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
@@ -23,11 +35,24 @@ func acquireStateFileLock(path string) (*stateFileLock, error) {
 		return nil, err
 	}
 	lock := &stateFileLock{file: file}
-	if err := windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &lock.overlapped); err != nil {
-		file.Close()
-		return nil, err
+	for {
+		err = windows.LockFileEx(windows.Handle(file.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &lock.overlapped)
+		if err == nil {
+			return lock, nil
+		}
+		if !errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+			file.Close()
+			return nil, err
+		}
+		timer := time.NewTimer(20 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			file.Close()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return lock, nil
 }
 
 func (l *stateFileLock) release() error {

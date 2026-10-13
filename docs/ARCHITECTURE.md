@@ -14,6 +14,7 @@ Web API / admin → 跨进程锁 → SQLite 迁移、校验、事务 → state.d
 基础模板 + 管理状态 → 候选配置/规则 → 校验、备份 → 应用或回滚
                               ↑
 daemon → 计数器与日志 → 用量、账期、策略、待应用状态
+连接事件 → 独立分析锁与增量事务 → state.analytics.db → 网站数据看板
 Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 → 每台机器的续费周期流量与覆盖率
 
 面板浏览器 → 独立低权限 HTTP → 有界管理 IPC → 来源/登录/角色/CSRF → 白名单业务操作
@@ -22,6 +23,10 @@ Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 →
 
 网络维护使用“锁内快照 → 锁外探测/投递 → 锁内条件合并”，避免覆盖并发编辑。访问统计只含目标域名/IP、次数与时间；连接数量由日志推断。
 
+网站分析采集与查询先获取业务快照，释放业务锁后再持分析锁执行，并复核控制版本与身份代次。删除后重新创建的同名用户或复用行号的设备不会继承旧历史。后台采集使用独立 `app` 实例，锁的重入标志不跨 goroutine 共享。业务锁默认最多等待 30 秒；请求已有更短期限时以请求为准。获锁后的事务完成或回滚后才报告结果，不因浏览器停止等待而谎报失败。
+
+管理写任务只有一个执行槽，不隐式排队；忙时明确拒绝本次提交。密码校验和摘要计算在业务锁外完成，提交时重新校验账号版本。任务回执按提交会话隔离，保留 30 分钟、最多 128 项；不保存动作参数或密码，进程重启后结果可能无法确认。管理 IPC 按请求编号复用，最多 8 个在途请求；单次等待超时不再关闭整条通道。订阅仍使用独立只读 IPC。
+
 ## 代码导航
 
 路径均相对仓库根目录；先按符号定位，再读对应实现与专题文档。
@@ -29,29 +34,32 @@ Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 →
 | 修改点 | 入口 |
 | --- | --- |
 | CLI、模型、迁移、配置事务 | `cmd/sbmgr/main.go`：`loadState`、`validateState`、`saveState`、`renderConfig`、`applyState` |
-| SQLite、跨进程锁 | `state_sqlite.go`、`state_lock*.go`：`withStateLock` |
+| SQLite、增量历史与跨进程锁 | `state_sqlite.go`、`state_sqlite_delta.go`、`state_lock*.go`：`withStateLock` |
 | 用户、设备、模板、批量 | `device.go`、`user_template.go`、`batch.go` |
 | 自助设备、订阅重置 | `device_self_service.go`、`device_self_service_sqlite.go`、`web_portal_devices.go`；前端 `MyDevices`、`ResetSubscriptionLink` |
 | 个人网站屏蔽 | `site_blocks*.go`、`web_portal_site_blocks.go`；前端 `MySiteBlocks`、`AnalyticsDashboard` |
 | 分组继承、成员事务与持久化 | `user_groups.go`、`group_admin.go`、`group_sqlite.go`；前端 `Groups`、`UserGroupSettings` |
 | React / TypeScript / shadcn/ui 页面与状态 | `frontend/src/{pages,components}`、`api.ts`、`store.ts`、`theme.tsx`、`tokens.css` |
-| Web 认证、动作、静态资源与降权 | `web_{config,http,account,actions,routes,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
+| Web 认证、任务回执、动作、静态资源与降权 | `web_{config,http,account,jobs,actions,routes,state,runtime,worker_linux}.go`；`web/dist/` 为不入库的构建产物 |
 | 普通用户登录、单次邀请与隔离 | `portal_state.go`、`web_portal.go`、`web_invite.go`；前端 `Portal`、`Activate`、`PortalAccess` |
 | 参数化自动化、单文件安装 | `automation.go`、`service.go`、`deploy/embed.go` |
 | 后台统计与网络维护 | `daemon.go`、`stats.go`、`usage.go`、`network_maintenance.go`、`machine_traffic*.go` |
 | 限速、共享 WG 接入 | `rate.go`、`counter_keys.go`、`wireguard_bridge.go` |
 | 账期、配额、处罚 | `billing.go`、`quota.go`、`burst.go`、`policy_recovery.go` |
 | 访问、连接与来源地址观测 | `access_policy.go`、`connection_tracking.go` |
-| 网站流量采集与查询 | `analytics*.go`；前端 `AnalyticsDashboard` |
+| 网站流量采集、独立存储与查询 | `analytics*.go`，数据库迁移与身份镜像在 `analytics_database.go`；前端 `AnalyticsDashboard` |
 | 出站、端点、客户端入口 | `outbound_*.go`、`proxy_admin.go`、`client_endpoint.go` |
 | 订阅隔离与生命周期 | `subscription_{backend,http,ipc,worker_linux,supervisor}.go` |
 | 主从命令、存储、下发、入口授权 | `mesh_{admin,state,sqlite,routes,coordinator,agent,runtime,access}.go` |
 | 拓扑校验与协议编译 | `internal/mesh/{model,transport,config}.go` |
 | 备份、审计、巡检、健康 | `backup.go`、`audit.go`、`fleet.go`、`health.go` |
+| 分阶段性能记录 | `performance.go`：`startPerformancePhase`、`reportPerformance` |
 
-除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 22、SQLite schema 为 11；版本常量分别在 `main.go:stateVersion` 和 `state_sqlite.go:sqliteSchemaVersion`，两者各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
+除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 23、业务 SQLite schema 为 12、分析 schema 为 1；版本常量分别在 `main.go:stateVersion`、`state_sqlite.go:sqliteSchemaVersion` 和 `analytics_database.go:analyticsSchemaVersion`，各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
 
-连接分析维持 5 秒事件采样；事件批次已更新采集覆盖时间时，10 秒内的空心跳不重复写入。30 天历史按时间索引清理，每 5 分钟启动一次；每类过期记录每事务最多删除 1,000 条，有积压则后续批次继续，避免长时间占用状态锁。清理进度与数据同事务提交；主从事件队列仍在每批次维护原有上限。普通状态读取保留业务哈希、迁移、规范化和完整校验，只在调用者需要判断迁移变化时执行额外的前后序列化。
+连接分析维持 5 秒事件采样；事件批次已更新采集覆盖时间时，10 秒内的空心跳不重复写入。30 天历史按时间索引清理，每 5 分钟启动一次；每类过期记录每事务最多删除 1,000 条，有积压则后续批次继续，使用独立分析锁。停用采集后后台仍维护历史保留期限与已撤销身份。清理进度与数据同事务提交；主从事件队列仍在每批次维护原有上限。
+
+普通状态读取保留业务哈希、迁移、规范化和完整校验。哈希采用隔离副本，避免多次完整 JSON 编解码；全局设置不重复序列化已有结构化表的集合。七类高频历史按内容摘要跳过未变部分，缓存必须同时匹配数据库路径与已验证的业务哈希；发生变化时仍使用稳定主键和增量写入，失败事务不推进缓存。自动写前快照只包含业务库，每份快照仍执行完整性与业务哈希复核。
 
 ## 多机与协议
 

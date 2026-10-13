@@ -361,6 +361,27 @@ export function App() {
     return () => clearInterval(timer);
   }, [status, session?.role, dialog, dispatch]);
   useEffect(() => {
+    if (status !== "authenticated" || session?.role === "user") return;
+    let active = true;
+    void api
+      .resumeAction()
+      .then((result) => {
+        if (active && result) dispatch(jobReceived(result));
+      })
+      .catch(() => {
+        if (active)
+          dispatch(
+            notify({
+              message: "上次任务结果待确认，重新提交时将优先查询原任务。",
+              severity: "error",
+            }),
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [status, session?.role, dispatch]);
+  useEffect(() => {
     if (status !== "authenticated" || !job || job.status !== "running") return;
     let cancelled = false,
       timer: ReturnType<typeof setTimeout>,
@@ -377,7 +398,7 @@ export function App() {
             dispatch(
               notify({
                 message: result.message,
-                severity: result.status === "failed" ? "error" : "success",
+                severity: result.status === "success" ? "success" : "error",
               }),
             );
           void dispatch(refreshSnapshot());
@@ -595,8 +616,27 @@ export function App() {
         <main id="content" tabIndex={-1} className="main-content">
           {error && <Alert kind="error">{error}</Alert>}
           {job && job.status !== "success" && (
-            <Alert kind={job.status === "failed" ? "error" : "info"}>
+            <Alert kind={job.status === "running" ? "info" : "error"}>
               <strong>{job.title}</strong> · {job.message || "正在执行…"}
+              {job.status === "unknown" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-3"
+                  onClick={() => {
+                    api.clearPendingAction();
+                    dispatch(
+                      jobReceived({
+                        ...job,
+                        status: "failed",
+                        message: "已确认当前设置，可以提交新操作。",
+                      }),
+                    );
+                  }}
+                >
+                  已核对当前设置，开始新操作
+                </Button>
+              )}
             </Alert>
           )}
           {snapshot?.role === "slave" && (

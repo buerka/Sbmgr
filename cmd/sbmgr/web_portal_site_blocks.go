@@ -19,7 +19,7 @@ func portalSiteBlocksReply(u *User, pending bool, message string) webReply {
 // The privileged backend has already checked the session, origin and CSRF.
 // Called under the cross-process state lock by lookupPortalLocked.
 func (b *webBackend) changePortalSiteBlocksLocked(a *app, s *State, u *User, q webRequest) webReply {
-	if b.busy {
+	if b.mutationBusy() {
 		return webError(409, "管理员正在保存设置，请稍后重试")
 	}
 	var input portalSiteBlockInput

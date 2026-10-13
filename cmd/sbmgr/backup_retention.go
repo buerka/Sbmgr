@@ -161,6 +161,33 @@ func (a *app) cleanupExpiredBackupsLocked(settings BackupSettings, now time.Time
 			if unsafe {
 				continue
 			}
+			// Only a matched manual companion is eligible; migration and
+			// deployment history snapshots remain protected recovery material.
+			if expirableBackupKind(entry.Name) == "manual" {
+				companion := analyticsCompanionName(entry.Name)
+				info, statErr := root.Lstat(companion)
+				if statErr == nil {
+					if !info.Mode().IsRegular() {
+						continue
+					}
+					for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+						if _, err := root.Lstat(companion + suffix); !errors.Is(err, os.ErrNotExist) {
+							unsafe = true
+						}
+					}
+					if unsafe {
+						continue
+					}
+					if err := root.Remove(companion); err != nil {
+						cleanupErrors = append(cleanupErrors, err)
+						continue
+					}
+					freed += info.Size()
+				} else if !errors.Is(statErr, os.ErrNotExist) {
+					cleanupErrors = append(cleanupErrors, statErr)
+					continue
+				}
+			}
 		}
 		if err := root.Remove(entry.Name); err != nil {
 			cleanupErrors = append(cleanupErrors, err)

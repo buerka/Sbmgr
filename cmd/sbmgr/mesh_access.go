@@ -409,7 +409,9 @@ func (a *app) meshLeaseCycle() error {
 	})
 }
 
-func (a *app) meshSyncAccess() error {
+func (a *app) meshSyncAccess() (resultErr error) {
+	finish := startPerformancePhase("mesh.sync")
+	defer func() { finish(resultErr) }()
 	s, err := a.loadCanonicalState()
 	if err != nil {
 		return err

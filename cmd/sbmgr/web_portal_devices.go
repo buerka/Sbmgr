@@ -9,7 +9,7 @@ import (
 // Runs under the account revalidation and cross-process lock in lookupPortalLocked.
 // The owner always comes from the authenticated session, never from the body.
 func (b *webBackend) changePortalDeviceLocked(a *app, s *State, u *User, q webRequest, now time.Time) webReply {
-	if b.busy {
+	if b.mutationBusy() {
 		return webError(409, "管理员正在保存设置，请稍后重试")
 	}
 	var input portalDeviceInput

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -19,8 +20,8 @@ func portalInviteDigest(token string) string {
 }
 
 // Administrator-only; lookup has already checked role, origin and CSRF.
-func (b *webBackend) createPortalInvite(q webRequest, now time.Time) webReply {
-	if b.busy {
+func (b *webBackend) createPortalInvite(ctx context.Context, q webRequest, now time.Time) webReply {
+	if b.busy.Load() {
 		return webError(409, "请等待当前管理操作完成")
 	}
 	var input struct {
@@ -29,11 +30,18 @@ func (b *webBackend) createPortalInvite(q webRequest, now time.Time) webReply {
 	if webDecode(q.Body, &input) != nil || len(input.User) > 64 {
 		return webError(400, "邀请设置格式不正确")
 	}
+	config := b.config
+	b.busy.Store(true)
+	b.mu.Unlock()
 	token := webRandom()
 	expires := now.Add(portalInviteLifetime).UTC().Format(time.RFC3339)
 	var warnings bytes.Buffer
-	a := &app{statePath: b.a.statePath, out: io.Discard, err: &warnings, actor: "web:" + b.config.Username}
-	err := a.withAuditedStateLock("portal.invite", []string{input.User}, func() error {
+	a := &app{statePath: b.a.statePath, out: io.Discard, err: &warnings, actor: "web:" + config.Username}
+	err := a.withAuditedStateLockContext(ctx, "portal.invite", []string{input.User}, func() error {
+		current, err := readWebConfig(a.statePath)
+		if err != nil || current != config {
+			return errors.New("管理设置已变化，请重新打开邀请页面")
+		}
 		s, err := loadState(a.statePath)
 		if err != nil {
 			return errors.New("读取用户状态失败")
@@ -45,7 +53,7 @@ func (b *webBackend) createPortalInvite(q webRequest, now time.Time) webReply {
 		if u == nil {
 			return errors.New("用户不存在")
 		}
-		if len(u.Name) > 64 || strings.EqualFold(u.Name, b.config.Username) {
+		if len(u.Name) > 64 || strings.EqualFold(u.Name, config.Username) {
 			return errors.New("登录名不能与管理员重名，且不能超过 64 字节")
 		}
 		if u.Portal != nil && u.Portal.PasswordHash != "" {
@@ -57,6 +65,8 @@ func (b *webBackend) createPortalInvite(q webRequest, now time.Time) webReply {
 		}
 		return nil
 	})
+	b.mu.Lock()
+	b.busy.Store(false)
 	if err != nil {
 		return webError(400, err.Error())
 	}
@@ -66,7 +76,7 @@ func (b *webBackend) createPortalInvite(q webRequest, now time.Time) webReply {
 		message += "审计记录写入失败，请检查服务器。"
 	}
 	// Keep the bearer token out of HTTP paths, access logs and referrers.
-	return webJSON(200, map[string]string{"url": b.config.Origin + b.config.BasePath + "/#/activate?token=" + token, "expires": expires, "message": message})
+	return webJSON(200, map[string]string{"url": config.Origin + config.BasePath + "/#/activate?token=" + token, "expires": expires, "message": message})
 }
 
 func findPortalInvite(s *State, token string, now time.Time) *User {
@@ -91,7 +101,7 @@ func findPortalInvite(s *State, token string, now time.Time) *User {
 // Invitation possession authorizes only first-time password creation, never
 // login, user selection, configuration changes, or password reset. Origin/Host
 // validation happens in the privileged lookup before this public endpoint.
-func (b *webBackend) usePortalInvite(q webRequest, now time.Time) webReply {
+func (b *webBackend) usePortalInvite(ctx context.Context, q webRequest, now time.Time) webReply {
 	for key, attempt := range b.attempts {
 		if !now.Before(attempt.Until) {
 			delete(b.attempts, key)
@@ -120,22 +130,46 @@ func (b *webBackend) usePortalInvite(q webRequest, now time.Time) webReply {
 		return webError(400, "邀请链接无效或已失效，请联系管理员重新生成")
 	}
 	accept := q.Path == "/api/invite/accept"
-	if accept && b.busy {
+	if accept && b.busy.Load() {
 		return webError(409, "管理员正在保存设置，请稍后重试")
 	}
 	if accept && (len(input.Password) < 12 || len(input.Password) > 1024) {
 		return webError(400, "密码长度须为 12–1024 字节")
 	}
+	config := b.config
+	if accept {
+		b.busy.Store(true)
+	}
+	b.mu.Unlock()
+	salt, hash := "", ""
+	var hashErr error
+	if accept {
+		salt = webRandom()
+		hash, hashErr = webPasswordHash(input.Password, salt)
+		input.Password = ""
+	}
+	if hashErr != nil {
+		b.mu.Lock()
+		if accept {
+			b.busy.Store(false)
+		}
+		return webError(500, "无法生成密码摘要")
+	}
+	revoked := ""
 	result := webError(400, "邀请链接无效或已失效，请联系管理员重新生成")
 	var warnings bytes.Buffer
 	a := &app{statePath: b.a.statePath, out: io.Discard, err: &warnings, actor: "portal:activation"}
-	err := a.withStateLock(func() error {
+	err := a.withStateLockContext(ctx, func() error {
+		current, err := readWebConfig(a.statePath)
+		if err != nil || current != config {
+			return errors.New("管理设置已变化，请重新打开邀请页面")
+		}
 		s, err := loadState(a.statePath)
 		if err != nil {
 			return err
 		}
 		u := findPortalInvite(s, input.Token, time.Now())
-		if u == nil || strings.EqualFold(u.Name, b.config.Username) {
+		if u == nil || strings.EqualFold(u.Name, config.Username) {
 			return nil
 		}
 		if !accept {
@@ -144,11 +178,6 @@ func (b *webBackend) usePortalInvite(q webRequest, now time.Time) webReply {
 		}
 		a.actor = "portal:" + u.Name
 		err = a.withAuditedStateLock("portal.activate", nil, func() error {
-			salt := webRandom()
-			hash, err := webPasswordHash(input.Password, salt)
-			if err != nil {
-				return err
-			}
 			// Password creation and invitation consumption commit together. A competing
 			// backend/process re-reads after the lock, so only one request can succeed.
 			u.Portal = &PortalAccount{Enabled: true, Epoch: webRandom(), Salt: salt, PasswordHash: hash}
@@ -157,7 +186,7 @@ func (b *webBackend) usePortalInvite(q webRequest, now time.Time) webReply {
 		if err != nil {
 			return err
 		}
-		b.revokePortalSessions(u.Name)
+		revoked = u.Name
 		message := "密码已设置，邀请已作废。请使用账号和新密码登录。"
 		if warnings.Len() > 0 {
 			message += "审计记录写入失败，请联系管理员。"
@@ -165,6 +194,13 @@ func (b *webBackend) usePortalInvite(q webRequest, now time.Time) webReply {
 		result = webJSON(200, map[string]string{"message": message})
 		return nil
 	})
+	b.mu.Lock()
+	if accept {
+		b.busy.Store(false)
+	}
+	if revoked != "" {
+		b.revokePortalSessions(revoked)
+	}
 	if err != nil {
 		return webError(503, "邀请处理失败，请稍后重试；未成功保存时邀请不会被消耗")
 	}

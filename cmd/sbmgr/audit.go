@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -26,7 +27,13 @@ func auditAction(prefix string, args []string) string {
 }
 
 func (a *app) withAuditedStateLock(action string, args []string, fn func() error) error {
-	return a.withStateLock(func() error {
+	ctx, cancel := context.WithTimeout(context.Background(), stateLockWaitLimit)
+	defer cancel()
+	return a.withAuditedStateLockContext(ctx, action, args, fn)
+}
+
+func (a *app) withAuditedStateLockContext(ctx context.Context, action string, args []string, fn func() error) error {
+	return a.withStateLockContext(ctx, func() error {
 		if err := fn(); err != nil {
 			return err
 		}

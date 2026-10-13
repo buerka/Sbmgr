@@ -19,6 +19,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,14 +31,15 @@ const webMaxReply = 8 << 20
 const webCookie = "sbmgr_session"
 
 type webRequest struct {
-	Method  string `json:"method"`
-	Path    string `json:"path"`
-	Origin  string `json:"origin"`
-	Host    string `json:"host"`
-	Remote  string `json:"remote"`
-	Session string `json:"session"`
-	CSRF    string `json:"csrf"`
-	Body    []byte `json:"body,omitempty"`
+	Method    string `json:"method"`
+	Path      string `json:"path"`
+	Origin    string `json:"origin"`
+	Host      string `json:"host"`
+	Remote    string `json:"remote"`
+	Session   string `json:"session"`
+	CSRF      string `json:"csrf"`
+	Body      []byte `json:"body,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
 }
 type webReply struct {
 	Status     int    `json:"status"`
@@ -64,6 +66,11 @@ type webJob struct {
 	Title   string `json:"title"`
 	Status  string `json:"status"`
 	Message string `json:"message"`
+	Logout  bool   `json:"logout,omitempty"`
+	owner   string
+	csrf    string
+	path    string
+	expires time.Time
 }
 type webBackend struct {
 	a        *app
@@ -72,7 +79,7 @@ type webBackend struct {
 	sessions map[string]webSession
 	attempts map[string]webAttempt
 	jobs     map[string]webJob
-	busy     bool
+	busy     atomic.Bool
 }
 
 func newWebBackend(a *app, c webConfig) *webBackend {
@@ -114,11 +121,19 @@ func webDecode(data []byte, target any) error {
 	return nil
 }
 
-func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
+func (b *webBackend) lookup(ctx context.Context, q webRequest) (reply webReply) {
+	finish := startPerformancePhase("web.request")
+	defer func() {
+		var err error
+		if reply.Status >= 400 {
+			err = errors.New("request failed")
+		}
+		finish(err)
+	}()
 	if ctx.Err() != nil {
 		return webError(503, "请求已取消")
 	}
-	if len(q.Body) > webMaxRequest || len(q.Path) > 512 || len(q.Session) > 64 || len(q.CSRF) > 64 || len(q.Remote) > 128 {
+	if (q.RequestID != "" && !portalDigestValid(q.RequestID)) || len(q.Body) > webMaxRequest || len(q.Path) > 512 || len(q.Session) > 64 || len(q.CSRF) > 64 || len(q.Remote) > 128 {
 		return webError(400, "请求过大")
 	}
 	// Check at the privileged boundary too: the HTTP worker has no authority
@@ -137,11 +152,19 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		return webError(403, "请求来源不匹配")
 	}
 	b.mu.Lock()
+	if ctx.Err() != nil {
+		b.mu.Unlock()
+		return webError(503, "请求已取消；本次尚未执行")
+	}
 	if c.PasswordHash != b.config.PasswordHash || c.Username != b.config.Username || c.Origin != b.config.Origin || c.BasePath != b.config.BasePath {
 		clear(b.sessions)
 	}
 	b.config = c
 	now := time.Now()
+	if reply, ok := b.jobReceiptLocked(q, now); ok {
+		b.mu.Unlock()
+		return reply
+	}
 	for id, s := range b.sessions {
 		if !now.Before(s.Expires) {
 			delete(b.sessions, id)
@@ -149,7 +172,7 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 	}
 	if (q.Path == "/api/invite/info" || q.Path == "/api/invite/accept") && q.Method == "POST" {
 		defer b.mu.Unlock()
-		return b.usePortalInvite(q, now)
+		return b.usePortalInvite(ctx, q, now)
 	}
 	if q.Path == "/api/login" && q.Method == "POST" {
 		defer b.mu.Unlock()
@@ -170,30 +193,42 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		if webDecode(q.Body, &input) != nil || len(input.Password) > 1024 || len(input.Username) > 64 {
 			return webError(400, "登录信息格式不正确")
 		}
+		// Reserve rate-limit budget before unlocking, so concurrent attempts
+		// cannot bypass the limit. Password hashing and state reads never
+		// block receipt polling on the backend mutex.
+		if attempt.Count == 0 {
+			attempt.Until = now.Add(5 * time.Minute)
+		}
+		if global.Count == 0 {
+			global.Until = now.Add(5 * time.Minute)
+		}
+		attempt.Count++
+		global.Count++
+		b.attempts[q.Remote], b.attempts["*"] = attempt, global
+		b.mu.Unlock()
 		principal := webSession{Role: "admin", Username: c.Username}
 		authenticated := false
+		var authErr error
 		if strings.EqualFold(input.Username, c.Username) {
 			hash, err := webPasswordHash(input.Password, c.Salt)
 			authenticated = err == nil && subtle.ConstantTimeCompare([]byte(hash), []byte(c.PasswordHash)) == 1 && subtle.ConstantTimeCompare([]byte(input.Username), []byte(c.Username)) == 1
 		} else {
-			var err error
-			principal, authenticated, err = b.authenticatePortal(input.Username, input.Password)
-			if err != nil {
-				return webError(503, "登录服务暂不可用")
-			}
+			principal, authenticated, authErr = b.authenticatePortal(input.Username, input.Password, c)
+		}
+		input.Password = ""
+		latest, configErr := readWebConfig(b.a.statePath)
+		b.mu.Lock()
+		if ctx.Err() != nil {
+			return webError(503, "登录请求已取消")
+		}
+		if authErr != nil {
+			return webError(503, "登录服务暂不可用")
 		}
 		if !authenticated {
-			if attempt.Count == 0 {
-				attempt.Until = now.Add(5 * time.Minute)
-			}
-			attempt.Count++
-			b.attempts[q.Remote] = attempt
-			if global.Count == 0 {
-				global.Until = now.Add(5 * time.Minute)
-			}
-			global.Count++
-			b.attempts["*"] = global
 			return webError(401, "账号或密码错误")
+		}
+		if configErr != nil || latest != c || b.config != c {
+			return webError(409, "管理设置已变化，请重新登录")
 		}
 		delete(b.attempts, q.Remote)
 		roleCount, ownerCount := 0, 0
@@ -225,15 +260,19 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		return webError(403, "操作校验已失效，请刷新页面")
 	}
 	if session.Role == "user" {
-		defer b.mu.Unlock()
-		return b.lookupPortalLocked(q, session, now)
+		if q.Path == "/api/me/password" && q.Method == "POST" {
+			defer b.mu.Unlock()
+			return b.startCredentialJobLocked(q, session, c, now)
+		}
+		return b.lookupPortalLocked(ctx, q, session, now)
 	}
 	if session.Role != "admin" {
 		b.mu.Unlock()
 		return webError(401, "请重新登录")
 	}
+	a := &app{statePath: b.a.statePath, out: io.Discard, err: b.a.err}
 	if q.Path == "/api/machine-traffic/history" && q.Method == "POST" {
-		defer b.mu.Unlock()
+		b.mu.Unlock()
 		var input struct {
 			Member string `json:"member"`
 			Page   int    `json:"page"`
@@ -245,12 +284,12 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 			input.Page = 1
 		}
 		var result machineTrafficHistoryResult
-		err := b.a.withStateLock(func() error {
-			s, err := loadState(b.a.statePath)
+		err := a.withStateLockContext(ctx, func() error {
+			s, err := loadState(a.statePath)
 			if err != nil {
 				return err
 			}
-			result, err = machineTrafficHistory(b.a.statePath, s, input.Member, input.Page, now)
+			result, err = machineTrafficHistory(a.statePath, s, input.Member, input.Page, now)
 			return err
 		})
 		if err != nil {
@@ -259,20 +298,24 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 		return webJSON(200, result)
 	}
 	if q.Path == "/api/analytics" && q.Method == "POST" {
-		defer b.mu.Unlock()
-		var reply webReply
-		err := b.a.withStateLock(func() error {
-			s, err := loadState(b.a.statePath)
+		b.mu.Unlock()
+		var snapshot *State
+		var version string
+		err := a.withStateLockContext(ctx, func() error {
+			var err error
+			snapshot, err = loadState(a.statePath)
 			if err != nil {
 				return err
 			}
-			reply = b.a.analyticsReply(s, nil, q.Body)
-			return nil
+			version, err = analyticsControlVersion(a.statePath)
+			return err
 		})
 		if err != nil {
 			return webError(503, "分析数据暂不可用")
 		}
-		return reply
+		// History queries own only the analytics lock. The business version
+		// must still match the authenticated snapshot before any row is read.
+		return a.analyticsReply(snapshot, nil, q.Body, version)
 	}
 	if q.Path == "/api/session" && q.Method == "GET" {
 		b.mu.Unlock()
@@ -287,28 +330,20 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 	}
 	if q.Path == "/api/account" && q.Method == "POST" {
 		defer b.mu.Unlock()
-		return b.changeWebAccount(q, now)
+		return b.startCredentialJobLocked(q, session, c, now)
 	}
 	if q.Path == "/api/portal-invite" && q.Method == "POST" {
 		defer b.mu.Unlock()
-		return b.createPortalInvite(q, now)
+		return b.createPortalInvite(ctx, q, now)
 	}
 	if q.Path == "/api/portal-account" && q.Method == "POST" {
 		defer b.mu.Unlock()
-		return b.managePortalAccount(q)
-	}
-	if strings.HasPrefix(q.Path, "/api/jobs/") && q.Method == "GET" {
-		j, ok := b.jobs[strings.TrimPrefix(q.Path, "/api/jobs/")]
-		b.mu.Unlock()
-		if !ok {
-			return webError(404, "任务不存在")
-		}
-		return webJSON(200, j)
+		return b.startCredentialJobLocked(q, session, c, now)
 	}
 	b.mu.Unlock()
 	switch {
 	case q.Path == "/api/state" && q.Method == "GET":
-		state, err := b.a.webSnapshot()
+		state, err := a.webSnapshot()
 		if err != nil {
 			return webError(503, "读取管理状态失败；请检查初始化与数据库")
 		}
@@ -316,7 +351,7 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 	case q.Path == "/api/catalog" && q.Method == "GET":
 		return webJSON(200, webActions())
 	case strings.HasPrefix(q.Path, "/api/route-inventory/") && q.Method == "GET":
-		return b.a.webRouteInventory(strings.TrimPrefix(q.Path, "/api/route-inventory/"))
+		return a.webRouteInventory(strings.TrimPrefix(q.Path, "/api/route-inventory/"))
 	case q.Path == "/api/actions" && q.Method == "POST":
 		var input webActionInput
 		if err := webDecode(q.Body, &input); err != nil {
@@ -327,38 +362,30 @@ func (b *webBackend) lookup(ctx context.Context, q webRequest) webReply {
 			return webError(400, err.Error())
 		}
 		b.mu.Lock()
-		if b.busy {
-			b.mu.Unlock()
-			return webError(409, "上一项修改仍在执行，请等待结果")
+		defer b.mu.Unlock()
+		if reply, ok := b.jobReceiptLocked(q, time.Now()); ok {
+			return reply
 		}
-		b.busy = true
-		if len(b.jobs) >= 32 {
-			clear(b.jobs)
+		// Recheck after compiling the action: logout or credential rotation may
+		// have revoked the session while this request was outside the mutex.
+		if current, ok := b.sessions[q.Session]; !ok || current != session {
+			return webError(401, "登录已失效，请重新登录")
 		}
-		job := webJob{ID: webRandom(), Title: spec.Title, Status: "running", Message: "正在执行"}
-		b.jobs[job.ID] = job
-		b.mu.Unlock()
-		go func() {
+		return b.startJobLocked(q, spec.Title, func() (string, bool, error) {
 			var warnings bytes.Buffer
 			a := &app{statePath: b.a.statePath, out: io.Discard, err: &warnings, actor: "web:" + c.Username}
 			err := a.executeWebAction(input, args)
-			b.mu.Lock()
-			defer b.mu.Unlock()
-			b.busy = false
-			job.Status = "success"
-			job.Message = spec.Effect
-			if warnings.Len() != 0 {
-				job.Message += " 操作已完成，但审计或附加步骤存在告警；请检查服务器运行状态。"
-			}
 			if err != nil {
-				job.Status = "failed"
-				job.Message = safeWebActionError(err, input)
+				return "", false, errors.New(safeWebActionError(err, input))
 			}
-			b.jobs[job.ID] = job
-		}()
-		return webJSON(202, job)
+			message := spec.Effect
+			if warnings.Len() != 0 {
+				message += " 操作已完成，但审计或附加步骤存在告警；请检查服务器运行状态。"
+			}
+			return message, false, nil
+		})
 	case q.Path == "/api/delivery" && q.Method == "POST":
-		return b.a.webDelivery(q.Body)
+		return a.webDelivery(q.Body)
 	default:
 		return webError(404, "接口不存在")
 	}
@@ -428,7 +455,7 @@ func newWebHTTPServerWithAssets(address, origin, basePath string, lookup webLook
 			if cookie, err := r.Cookie(webCookie); err == nil {
 				session = cookie.Value
 			}
-			q := webRequest{Method: r.Method, Path: r.URL.Path, Origin: r.Header.Get("Origin"), Host: r.Host, Remote: subscriptionClientIP(r), Session: session, CSRF: r.Header.Get("X-CSRF-Token"), Body: body}
+			q := webRequest{Method: r.Method, Path: r.URL.Path, Origin: r.Header.Get("Origin"), Host: r.Host, Remote: subscriptionClientIP(r), Session: session, CSRF: r.Header.Get("X-CSRF-Token"), RequestID: r.Header.Get("X-Request-ID"), Body: body}
 			response := lookup(r.Context(), q)
 			if response.SetSession != "" {
 				http.SetCookie(w, &http.Cookie{Name: webCookie, Value: response.SetSession, Path: basePath + "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})

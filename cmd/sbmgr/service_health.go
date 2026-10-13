@@ -53,7 +53,9 @@ func configuredInboundAddress(s *State) (string, error) {
 	return "", errors.New("已应用配置缺少受管入站")
 }
 
-func reloadAndCheckService(s *State, restart bool, w io.Writer) error {
+func reloadAndCheckService(s *State, restart bool, w io.Writer) (err error) {
+	finish := startPerformancePhase("config.reload")
+	defer func() { finish(err) }()
 	if err := validateRuntimeSettings(s); err != nil {
 		return err
 	}

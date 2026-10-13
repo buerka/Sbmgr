@@ -93,6 +93,14 @@ func (a *app) backupCmdLocked(args []string) error {
 					return fmt.Errorf("恢复前创建安全备份: %w", err)
 				}
 			}
+			// Independent analytics readers must not reconcile against the new
+			// generations until the business restore (including optional apply)
+			// has committed. Otherwise an apply rollback could lose old history.
+			analyticsLock, err := acquireStateFileLock(analyticsLockPath(a.statePath))
+			if err != nil {
+				return fmt.Errorf("等待分析历史恢复边界: %w", err)
+			}
+			defer analyticsLock.release()
 			quarantine, err := installSQLiteStateForRestore(a.statePath, restored, time.Now())
 			if err != nil {
 				if loadErr != nil {
@@ -281,6 +289,20 @@ func createManualStateBackup(statePath string, now time.Time) (string, error) {
 }
 
 func createManualSQLiteStateBackup(statePath string, now time.Time) (string, error) {
+	return createSQLiteStateBackup(statePath, now, true)
+}
+
+// A configuration transaction restores only business state. Its safety
+// snapshot must not copy or validate unrelated connection history under the
+// business lock; explicit administrator backups still include that history.
+func createBusinessStateBackup(statePath string, now time.Time) (string, error) {
+	if !isSQLiteStatePath(statePath) {
+		return createManualStateBackup(statePath, now)
+	}
+	return createSQLiteStateBackup(statePath, now, false)
+}
+
+func createSQLiteStateBackup(statePath string, now time.Time, includeAnalytics bool) (string, error) {
 	dir := stateBackupDir(statePath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
@@ -288,17 +310,40 @@ func createManualSQLiteStateBackup(statePath string, now time.Time) (string, err
 	base := "state-manual-" + now.Format("20060102-150405")
 	name := base + ".db"
 	for suffix := 1; ; suffix++ {
-		if _, err := os.Stat(filepath.Join(dir, name)); errors.Is(err, os.ErrNotExist) {
+		available := true
+		for _, candidate := range []string{name, analyticsCompanionName(name)} {
+			for _, sidecar := range []string{"", "-wal", "-shm", "-journal"} {
+				if _, err := os.Lstat(filepath.Join(dir, candidate+sidecar)); err == nil {
+					available = false
+				} else if !errors.Is(err, os.ErrNotExist) {
+					return "", err
+				}
+			}
+		}
+		if available {
 			break
-		} else if err != nil {
-			return "", err
 		}
 		name = fmt.Sprintf("%s-%d.db", base, suffix)
 	}
 	if err := sqliteBackupTo(statePath, filepath.Join(dir, name)); err != nil {
 		return "", err
 	}
+	if !includeAnalytics {
+		return name, nil
+	}
+	// An explicit manual backup includes the independently stored history.
+	// Automatic pre-write backups stay small and cover business state only.
+	// The caller owns state.lock, and the analytics snapshot owns its own lock,
+	// so both files refer to the same account/device generations.
+	if err := sqliteAnalyticsBackupTo(statePath, filepath.Join(dir, analyticsCompanionName(name))); err != nil {
+		removeErr := os.Remove(filepath.Join(dir, name))
+		return "", errors.Join(fmt.Errorf("备份分析历史失败，完整备份未完成: %w", err), removeErr)
+	}
 	return name, nil
+}
+
+func analyticsCompanionName(stateBackupName string) string {
+	return "analytics-" + strings.TrimPrefix(stateBackupName, "state-")
 }
 
 func listStateBackups(statePath string) ([]BackupInfo, error) {

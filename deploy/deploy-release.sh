@@ -57,6 +57,7 @@ rollback_needed=0
 sbmgr_stopped=0
 app_state_lock_held=0
 legacy_state_lock_held=0
+analytics_state_lock_held=0
 
 usage() {
     echo "用法: $0 [--home 绝对安装目录] [--sing-box-bin 绝对路径] <SHA256值或SHA256校验文件>" >&2
@@ -66,7 +67,7 @@ usage() {
 
 valid_state_name() {
     case "$1" in
-        state.db|state.db-wal|state.db-journal|state.json|state.json.migrated) return 0 ;;
+        state.db|state.db-wal|state.db-journal|state.json|state.json.migrated|state.analytics.db|state.analytics.db-wal|state.analytics.db-journal) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -261,6 +262,23 @@ acquire_state_locks() {
         fi
         legacy_state_lock_held=1
     fi
+    if [ "$analytics_state_lock_held" -eq 0 ]; then
+        exec 7>"$app_dir/state.analytics.db.lock"
+        if ! flock -w 30 -x 7; then
+            echo "30 秒内无法取得分析数据部署锁" >&2
+            exec 7>&-
+            release_state_locks
+            return 1
+        fi
+        analytics_state_lock_held=1
+    fi
+}
+
+release_analytics_state_lock() {
+    [ "$analytics_state_lock_held" -eq 1 ] || return 0
+    flock -u 7 || true
+    exec 7>&-
+    analytics_state_lock_held=0
 }
 
 release_legacy_state_lock() {
@@ -271,6 +289,7 @@ release_legacy_state_lock() {
 }
 
 release_state_locks() {
+    release_analytics_state_lock
     if [ "$legacy_state_lock_held" -eq 1 ]; then
         flock -u 8 || true
         exec 8>&-
@@ -363,9 +382,9 @@ create_snapshot() {
     chmod 0600 "$state_manifest"
 
     # state.db-shm is disposable shared memory and must never be restored.
-    # With both cooperative locks held and the daemon stopped, DB/WAL/journal
-    # cannot change while these exact bytes are copied.
-    for state_name in state.db state.db-wal state.db-journal state.json state.json.migrated; do
+    # With all cooperative locks held and the daemon stopped, both business and
+    # analytics DB/WAL/journal families remain consistent while copied.
+    for state_name in state.db state.db-wal state.db-journal state.json state.json.migrated state.analytics.db state.analytics.db-wal state.analytics.db-journal; do
         if [ -f "$app_dir/$state_name" ] && [ ! -L "$app_dir/$state_name" ]; then
             install -m 0600 "$app_dir/$state_name" "$snapshot_dir/$state_name"
             printf '%s\n' "$state_name" >>"$state_manifest"
@@ -405,6 +424,7 @@ prepare_preflight_state() {
     "$candidate" --state "$preflight_state" admin check
     "$candidate" --state "$preflight_state" admin rate check
     "$candidate" --state "$preflight_state" admin proxy list >/dev/null
+    "$candidate" --state "$preflight_state" admin analytics check
 }
 
 restore_previous_state() {
@@ -441,7 +461,9 @@ restore_previous_state() {
     acquire_state_locks || return 1
     rm -f -- \
         "$app_dir/state.db" "$app_dir/state.db-wal" "$app_dir/state.db-shm" \
-        "$app_dir/state.db-journal" "$app_dir/state.json" "$app_dir/state.json.migrated" || {
+        "$app_dir/state.db-journal" "$app_dir/state.json" "$app_dir/state.json.migrated" \
+        "$app_dir/state.analytics.db" "$app_dir/state.analytics.db-wal" \
+        "$app_dir/state.analytics.db-shm" "$app_dir/state.analytics.db-journal" || {
         release_state_locks
         return 1
     }
@@ -631,12 +653,16 @@ fi
 # The importer takes the legacy lock itself. No old process can appear now that
 # the old executable has been replaced; state.lock remains held throughout.
 release_legacy_state_lock
+# The candidate acquires the analytics lock for the one-time split migration.
+# sbmgr is stopped and state.lock still prevents all business mutations.
+release_analytics_state_lock
 "$binary" --state "$database_state" admin check
 [ -s "$database_state" ] && [ ! -L "$database_state" ] || {
     echo "JSON → SQLite 迁移没有生成有效的 state.db" >&2
     exit 1
 }
 "$binary" --state "$database_state" admin check
+"$binary" --state "$database_state" admin analytics check
 sbmgr_assert_core_systemd_layout "$app_dir" "$sing_box_bin"
 
 systemctl start sbmgr.service

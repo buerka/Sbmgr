@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from "react";
-import { api } from "../api";
+import { api, TaskPendingError } from "../api";
 import type { User } from "../types";
 import { dateTime } from "../format";
 import { notify, refreshSnapshot, useAppDispatch } from "../store";
@@ -35,8 +35,14 @@ export function PortalAccess({
       expires: string;
     } | null>(null),
     [copied, setCopied] = useState(false);
+  const taskKey = `portal:${user.name}`;
+  const [progress, setProgress] = useState("");
+  const [pending, setPending] = useState(() => api.pendingCredential(taskKey));
   const dispatch = useAppDispatch(),
     dirty = enabled !== baseline || !!password || !!confirm;
+  useEffect(() => {
+    setPending(api.pendingCredential(taskKey));
+  }, [taskKey]);
   useEffect(() => {
     if (!dirty && !busy) {
       setEnabled(current);
@@ -54,15 +60,23 @@ export function PortalAccess({
     setBusy(true);
     setError("");
     try {
-      const result = await operation();
+      const operationResult = operation();
+      setPassword("");
+      setConfirm("");
+      const result = await operationResult;
+      setPending(false);
       setPassword("");
       setConfirm("");
       await dispatch(refreshSnapshot()).unwrap();
       dispatch(notify({ message: result.message, severity: "success" }));
     } catch (e) {
+      setPending(
+        e instanceof TaskPendingError || api.pendingCredential(taskKey),
+      );
       setError(e instanceof Error ? e.message : "操作失败，请刷新状态后重试。");
     } finally {
       setBusy(false);
+      setProgress("");
       setPassword("");
       setConfirm("");
     }
@@ -114,7 +128,7 @@ export function PortalAccess({
           </div>
           <div className="flex flex-wrap gap-3">
             <Button
-              disabled={disabled || busy}
+              disabled={disabled || busy || pending}
               onClick={() =>
                 void apply(async () => {
                   const result = await api.portalInvite(user.name);
@@ -136,13 +150,14 @@ export function PortalAccess({
             {invited && (
               <Button
                 variant="outline"
-                disabled={disabled || busy}
+                disabled={disabled || busy || pending}
                 onClick={() =>
                   void apply(async () => {
                     const result = await api.portalAccount(
                       user.name,
                       false,
                       "",
+                      setProgress,
                     );
                     setInvitation(null);
                     setEnabled(false);
@@ -213,13 +228,17 @@ export function PortalAccess({
                 user.name,
                 enabled,
                 password,
+                setProgress,
               );
               setBaseline(enabled);
               return result;
             });
           }}
         >
-          <fieldset disabled={disabled || busy} className="space-y-5">
+          <fieldset
+            disabled={disabled || busy || pending}
+            className="space-y-5"
+          >
             <div className="flex items-center gap-3">
               <Switch
                 id="portal-enabled"
@@ -258,7 +277,7 @@ export function PortalAccess({
             </div>
           </fieldset>
           <p className="text-sm text-muted-foreground">
-            保存立即生效。停用或重置密码会使该用户的旧登录会话失效；代理身份和订阅链接不变。保存失败保留原配置，无需应用代理配置。
+            提交后后台保存，成功后即时生效。停用或重置密码会使该用户的旧登录会话失效；代理身份和订阅链接不变。保存失败保留原配置，无需应用代理配置。
           </p>
           <div className="flex justify-end gap-2">
             <Button
@@ -275,7 +294,10 @@ export function PortalAccess({
             >
               取消修改
             </Button>
-            <Button type="submit" disabled={disabled || busy || !dirty}>
+            <Button
+              type="submit"
+              disabled={disabled || busy || pending || !dirty}
+            >
               {busy
                 ? "正在保存…"
                 : password
@@ -286,7 +308,39 @@ export function PortalAccess({
         </form>
       )}
       {disabled && <Alert>从机不提供账号开通，请在主机管理。</Alert>}
+      {progress && <Alert>{progress}</Alert>}
       {error && <Alert kind="error">{error}</Alert>}
+      {pending && (
+        <div className="space-y-3" role="status">
+          <Alert>
+            上次修改结果待确认。查询只读取任务结果，不会再次重置密码。任务记录保留
+            30 分钟；服务重启后请先核对当前设置。
+          </Alert>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                void apply(() => api.resumeCredential(taskKey, setProgress))
+              }
+            >
+              查询上次结果
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                api.clearPendingCredential(taskKey);
+                setPending(false);
+                setError("");
+              }}
+            >
+              已核对当前设置，开始新操作
+            </Button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

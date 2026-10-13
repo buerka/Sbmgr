@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../api";
+import { api, TaskPendingError } from "../api";
 import { notify, signedOut, useAppDispatch, useAppSelector } from "../store";
 import { PageHeader } from "../components/common";
 import { Button } from "../components/ui/button";
@@ -18,6 +18,37 @@ export function Account() {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [progress, setProgress] = useState("");
+  const taskKey = personal ? "self" : "admin";
+  const [pending, setPending] = useState(() => api.pendingCredential(taskKey));
+  async function save(resume = false) {
+    setBusy(true);
+    setError("");
+    setProgress("正在提交…");
+    const old = current,
+      next = password;
+    setCurrent("");
+    setPassword("");
+    setConfirm("");
+    try {
+      const result = resume
+        ? await api.resumeCredential(taskKey, setProgress)
+        : personal
+          ? await api.selfPassword(old, next, setProgress)
+          : await api.account(username.trim(), old, next, setProgress);
+      setPending(false);
+      dispatch(signedOut());
+      dispatch(notify({ message: result.message, severity: "success" }));
+    } catch (e) {
+      setPending(
+        e instanceof TaskPendingError || api.pendingCredential(taskKey),
+      );
+      setError(e instanceof Error ? e.message : "修改失败，请重试。");
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
+  }
   const changed = username.trim() !== session?.username || !!password;
   return (
     <>
@@ -57,26 +88,10 @@ export function Account() {
               );
               return;
             }
-            setBusy(true);
-            try {
-              const result = personal
-                ? await api.selfPassword(current, password)
-                : await api.account(username.trim(), current, password);
-              setCurrent("");
-              setPassword("");
-              setConfirm("");
-              dispatch(signedOut());
-              dispatch(
-                notify({ message: result.message, severity: "success" }),
-              );
-            } catch (e) {
-              setError(e instanceof Error ? e.message : "修改失败，请重试。");
-            } finally {
-              setBusy(false);
-            }
+            await save();
           }}
         >
-          <fieldset disabled={busy} className="space-y-6">
+          <fieldset disabled={busy || pending} className="space-y-6">
             <div>
               <label htmlFor="admin-username">用户名</label>
               <Input
@@ -143,17 +158,48 @@ export function Account() {
               </div>
             </div>
           </fieldset>
+          {progress && <Alert>{progress}</Alert>}
           {error && <Alert kind="error">{error}</Alert>}
+          {pending && (
+            <div className="space-y-3" role="status">
+              <Alert>
+                上次修改的结果待确认。查询只读取任务结果，不会再次修改密码。任务记录保留
+                30 分钟；服务重启后请核对当前设置。
+              </Alert>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void save(true)}
+                >
+                  查询上次结果
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    api.clearPendingCredential(taskKey);
+                    setPending(false);
+                    setError("");
+                  }}
+                >
+                  已核对当前设置，开始新操作
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="account-footer">
             <p>
               {personal
                 ? "仅修改自己的面板密码，代理身份与订阅链接不变。"
-                : "仅更新本机的管理账号，即时生效。"}
+                : "仅更新本机的管理账号，后台保存成功后生效，无需应用配置。"}
             </p>
             <Button
               type="submit"
               disabled={
                 busy ||
+                pending ||
                 !changed ||
                 !current ||
                 !username.trim() ||

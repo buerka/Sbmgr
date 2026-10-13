@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os/exec"
 	"regexp"
 	"runtime"
 	"sort"
@@ -296,24 +295,31 @@ func syncAccessStats(s *State) (int, bool, error) {
 	if runtime.GOOS != "linux" {
 		return 0, false, nil
 	}
-	args := []string{"-u", s.Service, "-o", "json", "--no-pager"}
-	baseline := s.JournalCursor == ""
-	if baseline {
-		args = append(args, "-n", "1")
-	} else {
-		args = append(args, "--after-cursor", s.JournalCursor)
-	}
-	out, err := exec.Command("journalctl", args...).Output()
-	if err != nil && !baseline {
-		// A vacuumed journal can invalidate a saved cursor. Re-baseline at the
-		// newest record instead of failing every future maintenance cycle.
-		baseline = true
-		out, err = exec.Command("journalctl", "-u", s.Service, "-o", "json", "--no-pager", "-n", "1").Output()
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), samplingCommandTimeout)
+	defer cancel()
+	out, baseline, err := readAccessJournal(ctx, s.Service, s.JournalCursor)
 	if err != nil {
 		return 0, false, fmt.Errorf("读取 sing-box 访问日志: %w", err)
 	}
 	return ingestAccessJournal(s, out, baseline)
+}
+
+func readAccessJournal(ctx context.Context, service, cursor string) ([]byte, bool, error) {
+	args := []string{"-u", service, "-o", "json", "--no-pager"}
+	baseline := cursor == ""
+	if baseline {
+		args = append(args, "-n", "1")
+	} else {
+		args = append(args, "--after-cursor", cursor)
+	}
+	out, stderr, err := runSamplingCommand(ctx, "journalctl", args...)
+	if err != nil && !baseline && ctx.Err() == nil && strings.Contains(string(stderr), "Failed to seek to cursor") {
+		// Rebaseline only a genuinely vacuumed/invalid cursor. Timeouts,
+		// excessive output and permission failures must not skip unread events.
+		baseline = true
+		out, _, err = runSamplingCommand(ctx, "journalctl", "-u", service, "-o", "json", "--no-pager", "-n", "1")
+	}
+	return out, baseline, err
 }
 
 func ingestAccessJournal(s *State, out []byte, baseline bool) (int, bool, error) {
