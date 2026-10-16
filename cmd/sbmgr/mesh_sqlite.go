@@ -17,7 +17,8 @@ var sqliteMeshSchema = []string{
  id TEXT PRIMARY KEY, ordinal INTEGER NOT NULL,
  hops_json TEXT NOT NULL CHECK(json_valid(hops_json) AND json_type(hops_json) = 'array'),
  transports_json TEXT NOT NULL CHECK(json_valid(transports_json) AND json_type(transports_json) = 'array'),
- entry TEXT NOT NULL DEFAULT '', exit_tag TEXT NOT NULL DEFAULT ''
+ entry TEXT NOT NULL DEFAULT '', exit_tag TEXT NOT NULL DEFAULT '',
+ name TEXT NOT NULL DEFAULT ''
  ) STRICT`,
 }
 
@@ -62,10 +63,10 @@ func writeSQLiteMesh(tx *sql.Tx, s *State) error {
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO mesh_routes VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
-    ordinal=excluded.ordinal,hops_json=excluded.hops_json,transports_json=excluded.transports_json,entry=excluded.entry,exit_tag=excluded.exit_tag
-    WHERE (mesh_routes.ordinal,mesh_routes.hops_json,mesh_routes.transports_json,mesh_routes.entry,mesh_routes.exit_tag)
-    IS NOT (excluded.ordinal,excluded.hops_json,excluded.transports_json,excluded.entry,excluded.exit_tag)`, r.ID, i, string(hops), string(raw), r.Entry, r.Exit); err != nil {
+			if _, err := tx.Exec(`INSERT INTO mesh_routes(id,ordinal,hops_json,transports_json,entry,exit_tag,name) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+    ordinal=excluded.ordinal,hops_json=excluded.hops_json,transports_json=excluded.transports_json,entry=excluded.entry,exit_tag=excluded.exit_tag,name=excluded.name
+    WHERE (mesh_routes.ordinal,mesh_routes.hops_json,mesh_routes.transports_json,mesh_routes.entry,mesh_routes.exit_tag,mesh_routes.name)
+    IS NOT (excluded.ordinal,excluded.hops_json,excluded.transports_json,excluded.entry,excluded.exit_tag,excluded.name)`, r.ID, i, string(hops), string(raw), r.Entry, r.Exit, r.Name); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`INSERT INTO keep_mesh_routes VALUES(?)`, r.ID); err != nil {
@@ -104,7 +105,7 @@ func readSQLiteMesh(tx *sql.Tx, s *State) error {
 		return err
 	}
 	rows.Close()
-	rows, err = tx.Query(`SELECT id,hops_json,transports_json,entry,exit_tag FROM mesh_routes ORDER BY ordinal`)
+	rows, err = tx.Query(`SELECT id,hops_json,transports_json,entry,exit_tag,name FROM mesh_routes ORDER BY ordinal`)
 	if err != nil {
 		return err
 	}
@@ -112,7 +113,7 @@ func readSQLiteMesh(tx *sql.Tx, s *State) error {
 	for rows.Next() {
 		var r mesh.Route
 		var hops, transports string
-		if err := rows.Scan(&r.ID, &hops, &transports, &r.Entry, &r.Exit); err != nil {
+		if err := rows.Scan(&r.ID, &hops, &transports, &r.Entry, &r.Exit, &r.Name); err != nil {
 			return err
 		}
 		if err := json.Unmarshal([]byte(hops), &r.Hops); err != nil {

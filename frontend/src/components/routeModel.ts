@@ -70,6 +70,7 @@ export function clientExitName(exit: string, fallback = "直接出站") {
 }
 
 export const routeName = (r: Snapshot["routes"][number]) => {
+  if (r.label) return r.label;
   const known = clientRouteNames[r.id.toLowerCase()];
   if (known) return known;
   if (r.name) return canonicalRouteName(r.name);

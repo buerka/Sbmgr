@@ -13,7 +13,7 @@ import (
 
 func (a *app) meshCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: sbmgr admin mesh init|add|entry|route|remove-route|remove|export|join|check|apply|recover|sync|list")
+		return errors.New("用法: sbmgr admin mesh init|add|entry|route|rename-route|remove-route|remove|export|join|check|apply|recover|sync|list")
 	}
 	switch args[0] {
 	case "sync":
@@ -152,6 +152,7 @@ func (a *app) meshCmd(args []string) error {
 			}
 			fs := a.newFlagSet("mesh " + args[0])
 			id := fs.String("id", "", "节点或线路标识")
+			labelOnly := false
 			switch args[0] {
 			case "entry":
 				file := fs.String("file", "", "仅包含入口公开参数的 JSON 文件")
@@ -203,6 +204,19 @@ func (a *app) meshCmd(args []string) error {
 				if err := setMeshRouteOptions(s.Mesh, *id, path, *protocols, *endpoints, *rotate, *entry, *exit); err != nil {
 					return err
 				}
+			case "rename-route":
+				name := fs.String("name", "", "线路名称；留空恢复默认名称")
+				if err := fs.Parse(args[1:]); err != nil {
+					return err
+				}
+				index := slices.IndexFunc(s.Mesh.Routes, func(r mesh.Route) bool { return r.ID == *id })
+				if index < 0 {
+					return errors.New("线路不存在")
+				}
+				// The label is client-facing metadata only: plans, listeners and
+				// the topology revision stay untouched, so no apply is needed.
+				s.Mesh.Routes[index].Name = strings.TrimSpace(*name)
+				labelOnly = true
 			case "remove-route":
 				if err := fs.Parse(args[1:]); err != nil {
 					return err
@@ -245,7 +259,9 @@ func (a *app) meshCmd(args []string) error {
 			if fs.NArg() != 0 {
 				return errors.New("主从操作不接受位置参数")
 			}
-			s.Mesh.Revision++
+			if !labelOnly {
+				s.Mesh.Revision++
+			}
 		}
 		if err := validateMeshState(s); err != nil {
 			return err

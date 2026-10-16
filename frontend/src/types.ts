@@ -268,6 +268,7 @@ export interface Snapshot {
   routes: {
     id: string;
     name?: string;
+    label?: string;
     outbound_aliases?: string[];
     entry: string;
     hops: string[];

@@ -55,7 +55,7 @@ Linux 物理网卡采样 → 本机增量统计 → 主机汇总从机采样 →
 | 备份、审计、巡检、健康 | `backup.go`、`audit.go`、`fleet.go`、`health.go` |
 | 分阶段性能记录 | `performance.go`：`startPerformancePhase`、`reportPerformance` |
 
-除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 23、业务 SQLite schema 为 12、分析 schema 为 1；版本常量分别在 `main.go:stateVersion`、`state_sqlite.go:sqliteSchemaVersion` 和 `analytics_database.go:analyticsSchemaVersion`，各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
+除 `internal/mesh` 外，表中省略目录的文件均在 `cmd/sbmgr/`。当前状态模型为 24、业务 SQLite schema 为 13、分析 schema 为 1；版本常量分别在 `main.go:stateVersion`、`state_sqlite.go:sqliteSchemaVersion` 和 `analytics_database.go:analyticsSchemaVersion`，各自迁移，不按软件版本推断。升级迁移自动清除旧来源 IP 绑定和限制，不修改基础模板中的手工规则。
 
 连接分析维持 5 秒事件采样；事件批次已更新采集覆盖时间时，10 秒内的空心跳不重复写入。30 天历史按时间索引清理，每 5 分钟启动一次；每类过期记录每事务最多删除 1,000 条，有积压则后续批次继续，使用独立分析锁。停用采集后后台仍维护历史保留期限与已撤销身份。清理进度与数据同事务提交；主从事件队列仍在每批次维护原有上限。
 

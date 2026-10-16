@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const stateVersion = 23
+const stateVersion = 24
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -2290,6 +2290,10 @@ func migrateState(s *State) error {
 			// Analysis history moves to its own SQLite database; authoritative
 			// quotas and business state remain in the original transaction.
 			s.Version = 23
+		case 23:
+			// Mesh routes gain an optional client-facing name. Routing, grants
+			// and node identities are unchanged.
+			s.Version = 24
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}

@@ -9,6 +9,9 @@ import (
 	"net/netip"
 	"regexp"
 	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -62,7 +65,10 @@ type RouteInfo struct {
 // Transports describes the incoming connection of each listed hop.
 // A sole master hop means local egress and needs no transport.
 type Route struct {
-	ID         string      `json:"id"`
+	ID string `json:"id"`
+	// Name is an optional client-facing label. It never affects routing, plans
+	// or the topology revision.
+	Name       string      `json:"name,omitempty"`
 	Entry      string      `json:"entry,omitempty"`
 	Exit       string      `json:"exit,omitempty"`
 	Hops       []string    `json:"hops"`
@@ -102,7 +108,24 @@ func (t Topology) Entry(r Route) string {
 	return t.Master
 }
 
-func ValidID(id string) bool    { return identifier.MatchString(id) }
+func ValidID(id string) bool { return identifier.MatchString(id) }
+
+// ValidRouteName accepts an empty name (use the generated default) or 1-48
+// visible characters without control characters, slashes or edge spaces.
+func ValidRouteName(name string) bool {
+	if name == "" {
+		return true
+	}
+	if name != strings.TrimSpace(name) || utf8.RuneCountInString(name) > 48 {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) || r == '/' || r == '\\' || r == utf8.RuneError {
+			return false
+		}
+	}
+	return true
+}
 func RouteTag(id string) string { return "sbmgr-mesh-" + id }
 func ValidateEndpoint(value string) error {
 	host, rawPort, err := net.SplitHostPort(value)
@@ -138,8 +161,18 @@ func (t Topology) Validate() error {
 	if !members[t.Master] {
 		return errors.New("主机不在节点集合中")
 	}
-	names, listeners := map[string]bool{}, map[string]bool{}
+	names, listeners, labels := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, r := range t.Routes {
+		if !ValidRouteName(r.Name) {
+			return errors.New("线路名称无效：最多 48 个字符，不含斜杠、控制字符或首尾空格")
+		}
+		if r.Name != "" {
+			key := strings.ToLower(r.Name)
+			if labels[key] {
+				return errors.New("线路名称已被其他线路使用")
+			}
+			labels[key] = true
+		}
 		if !ValidID(r.ID) || names[r.ID] || len(r.Hops) < 1 || len(r.Hops) > MaxHops {
 			return errors.New("线路标识无效或重复；线路需要 1 至 16 跳")
 		}

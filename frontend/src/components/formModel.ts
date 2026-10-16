@@ -126,6 +126,10 @@ export function initialFields(
           : "",
       };
   }
+  if (action.id === "mesh.rename-route") {
+    const r = state.routes.find((r) => r.id === context.id);
+    if (r) fields = { id: r.id, name: r.label || "" };
+  }
   if (action.id === "mesh.entry") {
     const m = state.members.find((m) => m.id === context.id);
     fields = { port: "443" };

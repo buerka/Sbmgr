@@ -25,7 +25,7 @@ func setMeshRouteOptions(t *mesh.Topology, id string, path []string, protocolLis
 	if entry == "" {
 		entry = t.Master
 	}
-	route := mesh.Route{ID: id, Hops: path, Entry: entry, Exit: exit}
+	route := mesh.Route{ID: id, Name: old.Name, Hops: path, Entry: entry, Exit: exit}
 	if len(path) != 1 || path[0] != entry {
 		protocols, endpoints := []string{}, []string{}
 		if protocolList != "" {

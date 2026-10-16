@@ -121,6 +121,9 @@ func webRouteName(s *State, r mesh.Route) string {
 }
 
 func webRouteNameWithAliases(s *State, r mesh.Route, aliases map[string]string) string {
+	if r.Name != "" {
+		return r.Name
+	}
 	canonical := mesh.RouteTag(r.ID)
 	for _, u := range s.Users {
 		for _, n := range u.Nodes {

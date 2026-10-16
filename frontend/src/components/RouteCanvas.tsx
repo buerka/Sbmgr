@@ -617,6 +617,10 @@ export function RouteCanvas() {
                       label={`管理线路：${routeName(selected)}`}
                       items={[
                         {
+                          id: "mesh.rename-route",
+                          context: { id: selected.id },
+                        },
+                        {
                           id: "mesh.remove-route",
                           context: { id: selected.id },
                         },

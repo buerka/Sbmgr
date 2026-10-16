@@ -58,6 +58,9 @@ func (a *app) webSnapshot() (map[string]any, error) {
 				protocols = append(protocols, transport.Type)
 			}
 			item := map[string]any{"id": r.ID, "name": webRouteNameWithAliases(s, r, routeAliases), "entry": s.Mesh.Entry(r), "hops": r.Hops, "exit": r.Exit, "protocols": protocols}
+			if r.Name != "" {
+				item["label"] = r.Name
+			}
 			if aliases := webRouteAliasesFromMap(routeAliases, r.ID); len(aliases) > 0 {
 				item["outbound_aliases"] = aliases
 			}

@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 12
+	sqliteSchemaVersion = 13
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -818,6 +818,33 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 12
+		case 12:
+			// Routes gain an optional client-facing name; existing routes keep
+			// the generated default (empty value) and no row is rewritten.
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			var count int
+			if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('mesh_routes') WHERE name='name'").Scan(&count); err != nil {
+				return err
+			}
+			if count == 0 {
+				if _, err := tx.Exec(`ALTER TABLE mesh_routes ADD COLUMN name TEXT NOT NULL DEFAULT ''`); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec(`UPDATE metadata SET value='13' WHERE key='schema_version'`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`PRAGMA user_version=13`); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 13
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}
