@@ -13,7 +13,29 @@ func setMeshRoute(t *mesh.Topology, id string, path []string, protocolList, endp
 	return setMeshRouteOptions(t, id, path, protocolList, endpointList, rotate, "", "")
 }
 
+func canonicalMeshMember(t *mesh.Topology, id string) string {
+	for _, m := range t.Members {
+		if strings.EqualFold(m.ID, id) {
+			return m.ID
+		}
+	}
+	return id
+}
+
+func canonicalMeshRoute(t *mesh.Topology, id string) string {
+	for _, r := range t.Routes {
+		if strings.EqualFold(r.ID, id) {
+			return r.ID
+		}
+	}
+	return id
+}
+
 func setMeshRouteOptions(t *mesh.Topology, id string, path []string, protocolList, endpointList string, rotate bool, entry, exit string) error {
+	id = canonicalMeshRoute(t, id)
+	for i := range path {
+		path[i] = canonicalMeshMember(t, path[i])
+	}
 	if !mesh.ValidID(id) || len(path) < 1 || len(path) > mesh.MaxHops {
 		return errors.New("线路标识无效，或跳数不在 1–16 范围")
 	}
@@ -25,6 +47,7 @@ func setMeshRouteOptions(t *mesh.Topology, id string, path []string, protocolLis
 	if entry == "" {
 		entry = t.Master
 	}
+	entry = canonicalMeshMember(t, entry)
 	route := mesh.Route{ID: id, Name: old.Name, Hops: path, Entry: entry, Exit: exit}
 	if len(path) != 1 || path[0] != entry {
 		protocols, endpoints := []string{}, []string{}

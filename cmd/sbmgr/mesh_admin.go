@@ -13,7 +13,7 @@ import (
 
 func (a *app) meshCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: sbmgr admin mesh init|add|rename-node|entry|route|rename-route|remove-route|remove|export|join|check|apply|recover|sync|list")
+		return errors.New("用法: sbmgr admin mesh init|add|rename-node|rename-identity|rename-member|entry|route|rename-route|remove-route|remove|export|join|check|apply|recover|sync|list")
 	}
 	switch args[0] {
 	case "sync":
@@ -201,6 +201,118 @@ func (a *app) meshCmd(args []string) error {
 				// route labels; member identity, plans and SSH stay unchanged.
 				s.Mesh.Members[index].Name = strings.TrimSpace(*name)
 				labelOnly = true
+			case "rename-identity":
+				if err := fs.Parse(args[1:]); err != nil {
+					return err
+				}
+				if s.Mesh != nil {
+					return errors.New("主机请在拓扑中使用 rename-member 重命名节点")
+				}
+				if s.MeshAgent.Cluster == "" || s.MeshAgent.Member == "" {
+					return errors.New("本机尚未加入主从集合")
+				}
+				if !mesh.ValidID(*id) {
+					return errors.New("节点标识无效")
+				}
+				if s.MeshAgent.Transaction != "" {
+					return errors.New("存在未完成的主从事务")
+				}
+				oldIdentity := s.MeshAgent.Member
+				s.MeshAgent.Member = *id
+				for _, plan := range []*mesh.Plan{s.MeshAgent.Active, s.MeshAgent.Pending, s.MeshAgent.Previous} {
+					if plan == nil {
+						continue
+					}
+					plan.Member = *id
+					for i := range plan.Catalog {
+						if strings.EqualFold(plan.Catalog[i].Entry, oldIdentity) {
+							plan.Catalog[i].Entry = *id
+						}
+					}
+				}
+				// Identity is not topology; the master owns the revision.
+				labelOnly = true
+			case "rename-member":
+				from := fs.String("from", "", "原节点标识")
+				to := fs.String("to", "", "新节点标识")
+				if err := fs.Parse(args[1:]); err != nil {
+					return err
+				}
+				if s.Mesh == nil {
+					return errors.New("请在主机上执行此操作")
+				}
+				if s.MeshRollout != nil || s.MeshAgent.Transaction != "" {
+					return errors.New("请先恢复未完成的主从事务")
+				}
+				if !mesh.ValidID(*to) {
+					return errors.New("节点标识无效")
+				}
+				index := slices.IndexFunc(s.Mesh.Members, func(m mesh.Member) bool { return strings.EqualFold(m.ID, *from) })
+				if index < 0 {
+					return errors.New("节点不存在")
+				}
+				oldID := s.Mesh.Members[index].ID
+				newID := *to
+				if oldID == newID {
+					return errors.New("新旧标识相同")
+				}
+				for i, m := range s.Mesh.Members {
+					if i != index && strings.EqualFold(m.ID, newID) {
+						return errors.New("节点标识已被其他节点使用")
+					}
+					if i != index && m.Name != "" && strings.EqualFold(m.Name, newID) {
+						return errors.New("节点名称与目标标识冲突")
+					}
+				}
+				s.Mesh.Members[index].ID = newID
+				if s.Mesh.Master == oldID {
+					s.Mesh.Master = newID
+				}
+				for i := range s.Mesh.Routes {
+					if s.Mesh.Routes[i].Entry == oldID {
+						s.Mesh.Routes[i].Entry = newID
+					}
+					for j := range s.Mesh.Routes[i].Hops {
+						if s.Mesh.Routes[i].Hops[j] == oldID {
+							s.Mesh.Routes[i].Hops[j] = newID
+						}
+					}
+				}
+				for i := range s.MachineTraffic {
+					if s.MachineTraffic[i].Member == oldID {
+						s.MachineTraffic[i].Member = newID
+					}
+				}
+				for i := range s.MachineTrafficHistory {
+					if s.MachineTrafficHistory[i].Member == oldID {
+						s.MachineTrafficHistory[i].Member = newID
+					}
+				}
+				if s.Counters != nil {
+					oldPrefix, newPrefix := "mesh:"+oldID+":", "mesh:"+newID+":"
+					for key, value := range s.Counters {
+						if strings.HasPrefix(key, oldPrefix) {
+							delete(s.Counters, key)
+							s.Counters[newPrefix+strings.TrimPrefix(key, oldPrefix)] = value
+						}
+					}
+				}
+				if s.MeshAgent.Member == oldID {
+					s.MeshAgent.Member = newID
+				}
+				for _, plan := range []*mesh.Plan{s.MeshAgent.Active, s.MeshAgent.Pending, s.MeshAgent.Previous} {
+					if plan == nil {
+						continue
+					}
+					if plan.Member == oldID {
+						plan.Member = newID
+					}
+					for i := range plan.Catalog {
+						if plan.Catalog[i].Entry == oldID {
+							plan.Catalog[i].Entry = newID
+						}
+					}
+				}
 			case "route":
 				entry := fs.String("entry", "", "客户端入口节点；留空使用主机")
 				exit := fs.String("exit", "", "末跳基础配置的出站 tag；留空直接出站")

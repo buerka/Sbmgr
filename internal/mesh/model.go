@@ -22,7 +22,7 @@ const (
 	MaxMessage = 2 << 20
 )
 
-var identifier = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+var identifier = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]{0,31}$`)
 var hostname = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
 var exitTag = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 
@@ -183,30 +183,34 @@ func (t Topology) Validate() error {
 	if !ValidID(t.ID) || !ValidID(t.Master) || t.Revision == 0 || len(t.Members) < 1 || len(t.Members) > MaxMembers || len(t.Routes) > MaxRoutes {
 		return errors.New("主从标识、修订号或数量无效")
 	}
-	members := map[string]bool{}
-	memberNames := map[string]bool{}
+	// Identifiers and labels are compared case-insensitively: "TRI" and "tri"
+	// must never resolve to two different nodes.
+	members := map[string]string{}
 	for _, m := range t.Members {
-		if !ValidID(m.ID) || members[m.ID] {
+		key := strings.ToLower(m.ID)
+		if !ValidID(m.ID) || members[key] != "" {
 			return errors.New("节点标识无效或重复")
 		}
-		members[m.ID] = true
+		members[key] = m.ID
 		if !ValidRouteName(m.Name) {
 			return errors.New("节点名称无效：最多 48 个字符，不含斜杠、控制字符或首尾空格")
 		}
-		if m.Name != "" {
-			key := strings.ToLower(m.Name)
-			if memberNames[key] {
-				return errors.New("节点名称已被其他节点使用")
-			}
-			memberNames[key] = true
-		}
-		if m.Client != nil {
-			if err := m.Client.Validate(); err != nil {
-				return err
-			}
-		}
 	}
-	if !members[t.Master] {
+	memberNames := map[string]string{}
+	for _, m := range t.Members {
+		if m.Name == "" {
+			continue
+		}
+		key := strings.ToLower(m.Name)
+		if owner := members[key]; owner != "" && !strings.EqualFold(owner, m.ID) {
+			return errors.New("节点名称与其它节点标识冲突")
+		}
+		if owner := memberNames[key]; owner != "" && !strings.EqualFold(owner, m.ID) {
+			return errors.New("节点名称已被其他节点使用")
+		}
+		memberNames[key] = m.ID
+	}
+	if members[strings.ToLower(t.Master)] != t.Master {
 		return errors.New("主机不在节点集合中")
 	}
 	names, listeners, labels, kernelTags := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
@@ -228,28 +232,31 @@ func (t Topology) Validate() error {
 			}
 			labels[key] = true
 		}
-		if !ValidID(r.ID) || names[r.ID] || len(r.Hops) < 1 || len(r.Hops) > MaxHops {
+		idKey := strings.ToLower(r.ID)
+		if !ValidID(r.ID) || names[idKey] || len(r.Hops) < 1 || len(r.Hops) > MaxHops {
 			return errors.New("线路标识无效或重复；线路需要 1 至 16 跳")
 		}
+		names[idKey] = true
 		entry := t.Entry(r)
-		if !members[entry] || (r.Exit != "" && !exitTag.MatchString(r.Exit)) {
+		if members[strings.ToLower(entry)] != entry || (r.Exit != "" && !exitTag.MatchString(r.Exit)) {
 			return errors.New("线路入口或落地出站无效")
 		}
 		for _, m := range t.Members {
-			if m.ID == entry && entry != t.Master && m.Client == nil {
+			if strings.EqualFold(m.ID, entry) && !strings.EqualFold(entry, t.Master) && m.Client == nil {
 				return errors.New("从机入口需要先登记公开连接参数")
 			}
 		}
-		local := len(r.Hops) == 1 && r.Hops[0] == entry
+		local := len(r.Hops) == 1 && strings.EqualFold(r.Hops[0], entry)
 		if (local && len(r.Transports) != 0) || (!local && len(r.Transports) != len(r.Hops)) {
 			return errors.New("每一跳必须选择传输协议；本机落地不需要协议")
 		}
 		seen := map[string]bool{}
 		for i, id := range r.Hops {
-			if !members[id] || seen[id] || (id == entry && !local) {
+			hopKey := strings.ToLower(id)
+			if members[hopKey] != id || seen[hopKey] || (strings.EqualFold(id, entry) && !local) {
 				return errors.New("线路包含不存在的节点或循环")
 			}
-			seen[id] = true
+			seen[hopKey] = true
 			if local {
 				continue
 			}
@@ -321,9 +328,11 @@ func (p Plan) Validate() error {
 	}
 	names, ports, tags := map[string]bool{}, map[int]bool{}, map[string]bool{}
 	for _, h := range p.Hops {
-		if !ValidID(h.ID) || names[h.ID] || (h.Entry && h.Incoming != nil) || (!p.Master && !h.Entry && h.Incoming == nil) || (h.Exit != "" && (h.Outgoing != nil || !exitTag.MatchString(h.Exit))) {
+		idKey := strings.ToLower(h.ID)
+		if !ValidID(h.ID) || names[idKey] || (h.Entry && h.Incoming != nil) || (!p.Master && !h.Entry && h.Incoming == nil) || (h.Exit != "" && (h.Outgoing != nil || !exitTag.MatchString(h.Exit))) {
 			return errors.New("节点线路角色无效或重复")
 		}
+		names[idKey] = true
 		if h.Tag != "" {
 			if len(h.Tag) > 64 || strings.ContainsAny(h.Tag, "\r\n\x00") {
 				return errors.New("节点线路 tag 无效")
