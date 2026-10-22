@@ -13,7 +13,7 @@ import (
 
 func (a *app) meshCmd(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: sbmgr admin mesh init|add|entry|route|rename-route|remove-route|remove|export|join|check|apply|recover|sync|list")
+		return errors.New("用法: sbmgr admin mesh init|add|rename-node|entry|route|rename-route|remove-route|remove|export|join|check|apply|recover|sync|list")
 	}
 	switch args[0] {
 	case "sync":
@@ -50,7 +50,7 @@ func (a *app) meshCmd(args []string) error {
 				return nil
 			}
 			for _, m := range s.Mesh.Members {
-				fmt.Fprintf(a.out, "节点 %s\t管理连接 %s\n", m.ID, m.SSHHost)
+				fmt.Fprintf(a.out, "节点 %s\t管理连接 %s\n", m.DisplayName(), m.SSHHost)
 			}
 			for _, r := range s.Mesh.Routes {
 				fmt.Fprintf(a.out, "线路 %s\t入口 %s → %s → %s\n", r.ID, s.Mesh.Entry(r), strings.Join(r.Hops, " → "), dash(r.Exit))
@@ -177,6 +177,7 @@ func (a *app) meshCmd(args []string) error {
 				host := fs.String("host", "", "SSH 管理地址")
 				port, user := fs.Int("port", 22, "SSH 端口"), fs.String("user", "root", "SSH 用户")
 				key, home := fs.String("key", "", "专用 SSH 私钥路径"), fs.String("home", "", "远端应用目录")
+				name := fs.String("name", "", "节点显示名（留空显示标识）")
 				if err := fs.Parse(args[1:]); err != nil {
 					return err
 				}
@@ -186,7 +187,20 @@ func (a *app) meshCmd(args []string) error {
 				if *id == "local" {
 					return errors.New("local 是单机流量历史保留标识，不能作为从机标识")
 				}
-				s.Mesh.Members = append(s.Mesh.Members, mesh.Member{ID: *id, SSHHost: *host, SSHPort: *port, SSHUser: *user, SSHKeyPath: *key, AppDir: *home})
+				s.Mesh.Members = append(s.Mesh.Members, mesh.Member{ID: *id, Name: strings.TrimSpace(*name), SSHHost: *host, SSHPort: *port, SSHUser: *user, SSHKeyPath: *key, AppDir: *home})
+			case "rename-node":
+				name := fs.String("name", "", "节点显示名；留空恢复为节点标识")
+				if err := fs.Parse(args[1:]); err != nil {
+					return err
+				}
+				index := slices.IndexFunc(s.Mesh.Members, func(m mesh.Member) bool { return m.ID == *id })
+				if index < 0 {
+					return errors.New("节点不存在")
+				}
+				// The display name only affects panel/CLI labels and generated
+				// route labels; member identity, plans and SSH stay unchanged.
+				s.Mesh.Members[index].Name = strings.TrimSpace(*name)
+				labelOnly = true
 			case "route":
 				entry := fs.String("entry", "", "客户端入口节点；留空使用主机")
 				exit := fs.String("exit", "", "末跳基础配置的出站 tag；留空直接出站")
@@ -194,6 +208,7 @@ func (a *app) meshCmd(args []string) error {
 				protocols := fs.String("protocols", "", "逐跳协议或统一协议：socks、hysteria2、wireguard；新线路默认 hysteria2")
 				endpoints := fs.String("endpoints", "", "逐跳数据地址 host:port；留空使用节点 SSH 主机名和自动端口")
 				rotate := fs.Bool("rotate", false, "重新生成线路认证材料与证书；应用后生效")
+				name := fs.String("name", "", "线路名称（内核 tag 同步使用）；留空沿用原名称")
 				if err := fs.Parse(args[1:]); err != nil {
 					return err
 				}
@@ -204,6 +219,13 @@ func (a *app) meshCmd(args []string) error {
 				if err := setMeshRouteOptions(s.Mesh, *id, path, *protocols, *endpoints, *rotate, *entry, *exit); err != nil {
 					return err
 				}
+				if trimmed := strings.TrimSpace(*name); trimmed != "" {
+					index := slices.IndexFunc(s.Mesh.Routes, func(r mesh.Route) bool { return r.ID == *id })
+					if index < 0 {
+						return errors.New("线路不存在")
+					}
+					s.Mesh.Routes[index].Name = trimmed
+				}
 			case "rename-route":
 				name := fs.String("name", "", "线路名称；留空恢复默认名称")
 				if err := fs.Parse(args[1:]); err != nil {
@@ -213,10 +235,10 @@ func (a *app) meshCmd(args []string) error {
 				if index < 0 {
 					return errors.New("线路不存在")
 				}
-				// The label is client-facing metadata only: plans, listeners and
-				// the topology revision stay untouched, so no apply is needed.
+				// The name is also the sing-box outbound tag, so a rename is a
+				// topology change that must be applied; stored node references
+				// keep pointing at the stable route identifier.
 				s.Mesh.Routes[index].Name = strings.TrimSpace(*name)
-				labelOnly = true
 			case "remove-route":
 				if err := fs.Parse(args[1:]); err != nil {
 					return err

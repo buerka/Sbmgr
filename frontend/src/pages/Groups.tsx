@@ -624,61 +624,132 @@ function GroupMembers({
     void dispatch(refreshSnapshot());
   });
   const locked = disabled || s.role === "slave" || job.busy || job.blocked;
-  const users = s.users
-    .filter((u) => u.name.toLowerCase().includes(search.trim().toLowerCase()))
-    .sort(
-      (a, b) =>
-        Number((b.group_id || "default") === g.id) -
-          Number((a.group_id || "default") === g.id) ||
-        a.name.localeCompare(b.name),
-    );
+  const query = search.trim().toLowerCase();
+  const members = s.users
+    .filter((u) => (u.group_id || "default") === g.id)
+    .filter((u) => u.name.toLowerCase().includes(query))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const membersTotal = s.users.filter(
+    (u) => (u.group_id || "default") === g.id,
+  ).length;
+  const others = s.users
+    .filter((u) => (u.group_id || "default") !== g.id)
+    .filter((u) => u.name.toLowerCase().includes(query))
+    .sort((a, b) => a.name.localeCompare(b.name));
   function select(name: string, on: boolean) {
     if (!selected.length) setExpected(s.group_version);
     setSelected(on ? [...selected, name] : selected.filter((v) => v !== name));
   }
+  function moveOut(name: string) {
+    if (
+      !window.confirm(
+        `将 ${name} 移出「${g.name}」并移入默认分组？个人配置会保留。`,
+      )
+    )
+      return;
+    void job.submit({
+      action: "group.members",
+      confirm: true,
+      fields: {
+        request: JSON.stringify({
+          id: "default",
+          users: [name],
+          mode: "preserve",
+          expected: s.group_version,
+        }),
+      },
+    });
+  }
   return (
     <div className="space-y-5 max-w-4xl">
-      <div>
-        <h2>成员与移入</h2>
-        <p className="text-sm text-muted-foreground mt-2">
-          当前分组成员排在前面。可选择其他分组的用户移入，或将现有成员移出。
-        </p>
-      </div>
       {disabled && <Alert>请先保存或撤销规则草稿，再调整成员。</Alert>}
       {job.error && <Alert kind="error">{job.error}</Alert>}
-      <Input
-        aria-label="搜索分组成员"
-        placeholder="搜索用户…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-      <div className="rounded-xl border divide-y max-h-96 overflow-y-auto">
-        {users.map((u) => (
-          <label
-            key={u.name}
-            className="flex items-center gap-3 p-4 hover:bg-accent/30"
-          >
-            <input
-              type="checkbox"
-              disabled={locked}
-              checked={selected.includes(u.name)}
-              onChange={(e) => select(u.name, e.target.checked)}
-            />
-            <span className="flex-1 min-w-0">
-              <strong className="block text-sm">{u.name}</strong>
-              <span className="text-xs text-muted-foreground">
-                {groupName(s, u.group_id)} · {u.group_overrides?.length || 0}{" "}
-                项个人配置
-              </span>
-            </span>
-            <Link
-              className="text-sm underline underline-offset-4"
-              to={`/users/${encodeURIComponent(u.name)}`}
-            >
-              配置用户
-            </Link>
-          </label>
-        ))}
+      <div className="space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2>当前成员（{membersTotal}）</h2>
+          <span className="text-xs text-muted-foreground">
+            个人配置与分组规则分别管理
+          </span>
+        </div>
+        <div className="rounded-xl border divide-y">
+          {members.length ? (
+            members.map((u) => (
+              <div key={u.name} className="flex items-center gap-3 p-4">
+                <span className="flex-1 min-w-0">
+                  <strong className="block text-sm">{u.name}</strong>
+                  <span className="text-xs text-muted-foreground">
+                    {groupName(s, u.group_id)} ·{" "}
+                    {u.group_overrides?.length || 0} 项个人配置
+                  </span>
+                </span>
+                <Link
+                  className="text-sm underline underline-offset-4"
+                  to={`/users/${encodeURIComponent(u.name)}`}
+                >
+                  配置用户
+                </Link>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={locked}
+                  onClick={() => moveOut(u.name)}
+                >
+                  移出
+                </Button>
+              </div>
+            ))
+          ) : (
+            <p className="p-4 text-sm text-muted-foreground">
+              {query ? "没有匹配的成员。" : "该分组还没有成员。"}
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="space-y-3">
+        <h2>其他用户（可移入）</h2>
+        <p className="text-sm text-muted-foreground">
+          勾选其他分组的用户，选择目标分组后移入；移动不重置用量或登录密码。
+        </p>
+        <Input
+          aria-label="搜索用户"
+          placeholder="搜索用户…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="rounded-xl border divide-y max-h-96 overflow-y-auto">
+          {others.length ? (
+            others.map((u) => (
+              <label
+                key={u.name}
+                className="flex items-center gap-3 p-4 hover:bg-accent/30"
+              >
+                <input
+                  type="checkbox"
+                  disabled={locked}
+                  checked={selected.includes(u.name)}
+                  onChange={(e) => select(u.name, e.target.checked)}
+                />
+                <span className="flex-1 min-w-0">
+                  <strong className="block text-sm">{u.name}</strong>
+                  <span className="text-xs text-muted-foreground">
+                    {groupName(s, u.group_id)} ·{" "}
+                    {u.group_overrides?.length || 0} 项个人配置
+                  </span>
+                </span>
+                <Link
+                  className="text-sm underline underline-offset-4"
+                  to={`/users/${encodeURIComponent(u.name)}`}
+                >
+                  配置用户
+                </Link>
+              </label>
+            ))
+          ) : (
+            <p className="p-4 text-sm text-muted-foreground">
+              {query ? "没有匹配的用户。" : "所有用户都已在此分组。"}
+            </p>
+          )}
+        </div>
       </div>
       <div className="rounded-xl border p-5 space-y-4">
         <p className="text-sm font-medium">已选择 {selected.length} 位用户</p>

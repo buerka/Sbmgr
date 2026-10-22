@@ -130,6 +130,10 @@ export function initialFields(
     const r = state.routes.find((r) => r.id === context.id);
     if (r) fields = { id: r.id, name: r.label || "" };
   }
+  if (action.id === "mesh.rename-node") {
+    const m = state.members.find((m) => m.id === context.id);
+    fields = { id: context.id || "", name: m?.name || "" };
+  }
   if (action.id === "mesh.entry") {
     const m = state.members.find((m) => m.id === context.id);
     fields = { port: "443" };
@@ -191,7 +195,7 @@ export function fieldOptions(
         m.member === "local" ? "本机" : m.member,
       ]);
     case "members":
-      return state.members.map((m) => [m.id, m.id]);
+      return state.members.map((m) => [m.id, m.name || m.id]);
     case "outbounds":
       return state.outbounds.map((o) => [o.outbound, o.name]);
     case "backups":

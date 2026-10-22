@@ -9,6 +9,7 @@ import (
 var sqliteMeshSchema = []string{
 	`CREATE TABLE IF NOT EXISTS mesh_members (
  id TEXT PRIMARY KEY, ordinal INTEGER NOT NULL,
+ name TEXT NOT NULL DEFAULT '',
  ssh_host TEXT NOT NULL, ssh_port INTEGER NOT NULL, ssh_user TEXT NOT NULL,
  ssh_key_path TEXT NOT NULL, app_dir TEXT NOT NULL,
  client_json TEXT NOT NULL DEFAULT 'null' CHECK(json_valid(client_json))
@@ -38,12 +39,13 @@ func writeSQLiteMesh(tx *sql.Tx, s *State) error {
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Exec(`INSERT INTO mesh_members VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
-    ordinal=excluded.ordinal,ssh_host=excluded.ssh_host,ssh_port=excluded.ssh_port,ssh_user=excluded.ssh_user,
+			if _, err := tx.Exec(`INSERT INTO mesh_members(id,ordinal,name,ssh_host,ssh_port,ssh_user,ssh_key_path,app_dir,client_json)
+    VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+    ordinal=excluded.ordinal,name=excluded.name,ssh_host=excluded.ssh_host,ssh_port=excluded.ssh_port,ssh_user=excluded.ssh_user,
     ssh_key_path=excluded.ssh_key_path,app_dir=excluded.app_dir,client_json=excluded.client_json
-    WHERE (mesh_members.ordinal,mesh_members.ssh_host,mesh_members.ssh_port,mesh_members.ssh_user,mesh_members.ssh_key_path,mesh_members.app_dir,mesh_members.client_json)
-    IS NOT (excluded.ordinal,excluded.ssh_host,excluded.ssh_port,excluded.ssh_user,excluded.ssh_key_path,excluded.app_dir,excluded.client_json)`,
-				m.ID, i, m.SSHHost, m.SSHPort, m.SSHUser, m.SSHKeyPath, m.AppDir, string(client)); err != nil {
+    WHERE (mesh_members.ordinal,mesh_members.name,mesh_members.ssh_host,mesh_members.ssh_port,mesh_members.ssh_user,mesh_members.ssh_key_path,mesh_members.app_dir,mesh_members.client_json)
+    IS NOT (excluded.ordinal,excluded.name,excluded.ssh_host,excluded.ssh_port,excluded.ssh_user,excluded.ssh_key_path,excluded.app_dir,excluded.client_json)`,
+				m.ID, i, m.Name, m.SSHHost, m.SSHPort, m.SSHUser, m.SSHKeyPath, m.AppDir, string(client)); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(`INSERT INTO keep_mesh_members VALUES(?)`, m.ID); err != nil {
@@ -85,7 +87,7 @@ func readSQLiteMesh(tx *sql.Tx, s *State) error {
 	if s.Mesh == nil {
 		return nil
 	}
-	rows, err := tx.Query(`SELECT id,ssh_host,ssh_port,ssh_user,ssh_key_path,app_dir,client_json FROM mesh_members ORDER BY ordinal`)
+	rows, err := tx.Query(`SELECT id,name,ssh_host,ssh_port,ssh_user,ssh_key_path,app_dir,client_json FROM mesh_members ORDER BY ordinal`)
 	if err != nil {
 		return err
 	}
@@ -93,7 +95,7 @@ func readSQLiteMesh(tx *sql.Tx, s *State) error {
 	for rows.Next() {
 		var m mesh.Member
 		var client string
-		if err := rows.Scan(&m.ID, &m.SSHHost, &m.SSHPort, &m.SSHUser, &m.SSHKeyPath, &m.AppDir, &client); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.SSHHost, &m.SSHPort, &m.SSHUser, &m.SSHKeyPath, &m.AppDir, &client); err != nil {
 			return err
 		}
 		if err := json.Unmarshal([]byte(client), &m.Client); err != nil {

@@ -8,6 +8,7 @@ import {
 } from "../components/common";
 import { TableCell, TableRow } from "../components/ui/table";
 import { Icon } from "../components/Icons";
+import { memberName } from "../components/routeModel";
 import { useAppSelector } from "../store";
 export function RouteResources() {
   const s = useAppSelector((s) => s.admin.snapshot)!;
@@ -33,7 +34,7 @@ export function RouteResources() {
                   </span>
                   <div>
                     <div className="flex items-center gap-2 font-medium text-sm">
-                      {m.id}
+                      {memberName(s, m.id)}
                       <Badge kind="default">{m.master ? "主机" : "从机"}</Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
@@ -48,13 +49,19 @@ export function RouteResources() {
                   <ActionButton id="mesh.entry" context={{ id: m.id }}>
                     入口设置
                   </ActionButton>
-                  {!m.master && (
-                    <ActionMenu
-                      compact
-                      label={`管理服务器：${m.id}`}
-                      items={[{ id: "mesh.remove", context: { id: m.id } }]}
-                    />
-                  )}
+                  <ActionMenu
+                    compact
+                    label={`管理服务器：${memberName(s, m.id)}`}
+                    items={[
+                      {
+                        id: "mesh.rename-node",
+                        context: { id: m.id, name: m.name || "" },
+                      },
+                      ...(!m.master
+                        ? [{ id: "mesh.remove", context: { id: m.id } }]
+                        : []),
+                    ]}
+                  />
                 </div>
               </div>
             ))

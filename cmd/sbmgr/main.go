@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const stateVersion = 24
+const stateVersion = 25
 
 // These values are display/build metadata only; release builds inject values
 // from Git with -ldflags and the application never manages its own binary.
@@ -823,11 +823,11 @@ func nodeTemplates(s *State) []NodeTemplate {
 	if plan := s.MeshAgent.Active; plan != nil && plan.Master {
 		if len(plan.Catalog) > 0 {
 			for _, r := range plan.Catalog {
-				templates = append(templates, NodeTemplate{Name: "主从 · " + r.ID, Outbound: mesh.RouteTag(r.ID)})
+				templates = append(templates, NodeTemplate{Name: "主从 · " + routeLabel(r), Outbound: mesh.RouteTag(r.ID)})
 			}
 		} else {
 			for _, hop := range plan.Hops {
-				templates = append(templates, NodeTemplate{Name: "主从 · " + hop.ID, Outbound: mesh.RouteTag(hop.ID)})
+				templates = append(templates, NodeTemplate{Name: "主从 · " + routeLabel(mesh.RouteInfo{ID: hop.ID, Tag: hop.Tag}), Outbound: mesh.RouteTag(hop.ID)})
 			}
 		}
 	}
@@ -838,6 +838,13 @@ func nodeTemplates(s *State) []NodeTemplate {
 		return strings.ToLower(templates[i].Name) < strings.ToLower(templates[j].Name)
 	})
 	return templates
+}
+
+func routeLabel(r mesh.RouteInfo) string {
+	if r.Tag != "" {
+		return r.Tag
+	}
+	return r.ID
 }
 
 func findNodeTemplate(s *State, name string) (NodeTemplate, bool) {
@@ -1881,7 +1888,7 @@ func renderConfig(s *State) (result []byte, err error) {
 	}
 	for _, u := range activeUsers {
 		for _, n := range u.Nodes {
-			outbound := n.Outbound
+			outbound := meshKernelTag(s, n.Outbound)
 			_, _, mark := effectiveNodeRate(u, n)
 			if validRateMark(mark) {
 				outbound = rateOutbounds[n.AuthUser]
@@ -2294,6 +2301,10 @@ func migrateState(s *State) error {
 			// Mesh routes gain an optional client-facing name. Routing, grants
 			// and node identities are unchanged.
 			s.Version = 24
+		case 24:
+			// Mesh members gain an optional display name. Identity, plans,
+			// grants and SSH material are unchanged.
+			s.Version = 25
 		default:
 			return fmt.Errorf("缺少从状态版本 %d 开始的迁移程序", s.Version)
 		}

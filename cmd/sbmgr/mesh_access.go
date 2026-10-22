@@ -57,6 +57,16 @@ func meshRouteInfo(s *State, tag string) (mesh.RouteInfo, bool) {
 	return mesh.RouteInfo{}, false
 }
 
+// meshKernelTag resolves a stored route reference to the outbound tag used in
+// sing-box. Routes with a display name render that name verbatim; unnamed
+// routes and non-route outbounds keep their stored tag.
+func meshKernelTag(s *State, tag string) string {
+	if r, ok := meshRouteInfo(s, tag); ok && r.Tag != "" {
+		return r.Tag
+	}
+	return tag
+}
+
 func meshNodeLocal(s *State, n Node) bool {
 	r, ok := meshRouteInfo(s, n.Outbound)
 	return !ok || r.Entry == s.MeshAgent.Member

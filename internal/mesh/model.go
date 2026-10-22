@@ -28,13 +28,38 @@ var exitTag = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,64}$`)
 
 // Member describes a management connection, with no traffic-protocol fields.
 type Member struct {
-	ID         string  `json:"id"`
+	ID string `json:"id"`
+	// Name is the display name shown in the panel, CLI and generated route
+	// labels. It never changes the member identity used by plans and SSH.
+	Name       string  `json:"name,omitempty"`
 	SSHHost    string  `json:"ssh_host,omitempty"`
 	SSHPort    int     `json:"ssh_port,omitempty"`
 	SSHUser    string  `json:"ssh_user,omitempty"`
 	SSHKeyPath string  `json:"ssh_key_path,omitempty"`
 	AppDir     string  `json:"app_dir,omitempty"`
 	Client     *Client `json:"client,omitempty"`
+}
+
+// MemberLabel returns the display name for a member, falling back to the
+// upper-case identifier used by the route labels.
+func (t Topology) MemberLabel(id string) string {
+	for _, m := range t.Members {
+		if m.ID == id {
+			if m.Name != "" {
+				return m.Name
+			}
+			break
+		}
+	}
+	return strings.ToUpper(id)
+}
+
+// DisplayName is the human-facing label; it falls back to the stable ID.
+func (m Member) DisplayName() string {
+	if m.Name != "" {
+		return m.Name
+	}
+	return m.ID
 }
 
 // Client contains only the public parameters of an independently managed entry.
@@ -59,6 +84,7 @@ func (c Client) Validate() error {
 type RouteInfo struct {
 	ID     string  `json:"id"`
 	Entry  string  `json:"entry"`
+	Tag    string  `json:"tag,omitempty"`
 	Client *Client `json:"client,omitempty"`
 }
 
@@ -83,6 +109,7 @@ type Topology struct {
 }
 type Hop struct {
 	ID       string      `json:"id"`
+	Tag      string      `json:"tag,omitempty"`
 	Entry    bool        `json:"entry,omitempty"`
 	Exit     string      `json:"exit,omitempty"`
 	Incoming *Connection `json:"incoming,omitempty"`
@@ -127,6 +154,16 @@ func ValidRouteName(name string) bool {
 	return true
 }
 func RouteTag(id string) string { return "sbmgr-mesh-" + id }
+
+// KernelTag is the outbound tag rendered into sing-box for this route. A
+// display name, when set, is used verbatim so the panel label and the kernel
+// configuration stay identical; unnamed routes keep the legacy stable tag.
+func (r Route) KernelTag() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return RouteTag(r.ID)
+}
 func ValidateEndpoint(value string) error {
 	host, rawPort, err := net.SplitHostPort(value)
 	port, portErr := strconv.Atoi(rawPort)
@@ -147,11 +184,22 @@ func (t Topology) Validate() error {
 		return errors.New("主从标识、修订号或数量无效")
 	}
 	members := map[string]bool{}
+	memberNames := map[string]bool{}
 	for _, m := range t.Members {
 		if !ValidID(m.ID) || members[m.ID] {
 			return errors.New("节点标识无效或重复")
 		}
 		members[m.ID] = true
+		if !ValidRouteName(m.Name) {
+			return errors.New("节点名称无效：最多 48 个字符，不含斜杠、控制字符或首尾空格")
+		}
+		if m.Name != "" {
+			key := strings.ToLower(m.Name)
+			if memberNames[key] {
+				return errors.New("节点名称已被其他节点使用")
+			}
+			memberNames[key] = true
+		}
 		if m.Client != nil {
 			if err := m.Client.Validate(); err != nil {
 				return err
@@ -161,10 +209,17 @@ func (t Topology) Validate() error {
 	if !members[t.Master] {
 		return errors.New("主机不在节点集合中")
 	}
-	names, listeners, labels := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	names, listeners, labels, kernelTags := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, r := range t.Routes {
 		if !ValidRouteName(r.Name) {
 			return errors.New("线路名称无效：最多 48 个字符，不含斜杠、控制字符或首尾空格")
+		}
+		for _, rawTag := range []string{r.KernelTag(), r.KernelTag() + "-in"} {
+			tagKey := strings.ToLower(rawTag)
+			if kernelTags[tagKey] {
+				return errors.New("线路名称或标识生成的内核 tag 重复")
+			}
+			kernelTags[tagKey] = true
 		}
 		if r.Name != "" {
 			key := strings.ToLower(r.Name)
@@ -227,7 +282,7 @@ func (t Topology) Compile(id string) (Plan, error) {
 	for _, r := range t.Routes {
 		entry := t.Entry(r)
 		if p.Master || entry == id {
-			info := RouteInfo{ID: r.ID, Entry: entry}
+			info := RouteInfo{ID: r.ID, Entry: entry, Tag: r.KernelTag()}
 			for _, m := range t.Members {
 				if m.ID == entry {
 					info.Client = m.Client
@@ -236,7 +291,7 @@ func (t Topology) Compile(id string) (Plan, error) {
 			p.Catalog = append(p.Catalog, info)
 		}
 		if entry == id {
-			h := Hop{ID: r.ID, Entry: true}
+			h := Hop{ID: r.ID, Tag: r.KernelTag(), Entry: true}
 			if len(r.Transports) > 0 {
 				h.Outgoing = r.Transports[0].Connection(false)
 			} else {
@@ -249,7 +304,7 @@ func (t Topology) Compile(id string) (Plan, error) {
 			if member != id {
 				continue
 			}
-			h := Hop{ID: r.ID, Incoming: r.Transports[i].Connection(true)}
+			h := Hop{ID: r.ID, Tag: r.KernelTag(), Incoming: r.Transports[i].Connection(true)}
 			if i+1 < len(r.Hops) {
 				h.Outgoing = r.Transports[i+1].Connection(false)
 			} else {
@@ -264,10 +319,21 @@ func (p Plan) Validate() error {
 	if p.Protocol != Protocol || !ValidID(p.Cluster) || !ValidID(p.Member) || p.Revision == 0 || len(p.Hops) > MaxRoutes {
 		return errors.New("节点管理协议、标识或修订号无效")
 	}
-	names, ports := map[string]bool{}, map[int]bool{}
+	names, ports, tags := map[string]bool{}, map[int]bool{}, map[string]bool{}
 	for _, h := range p.Hops {
 		if !ValidID(h.ID) || names[h.ID] || (h.Entry && h.Incoming != nil) || (!p.Master && !h.Entry && h.Incoming == nil) || (h.Exit != "" && (h.Outgoing != nil || !exitTag.MatchString(h.Exit))) {
 			return errors.New("节点线路角色无效或重复")
+		}
+		if h.Tag != "" {
+			if len(h.Tag) > 64 || strings.ContainsAny(h.Tag, "\r\n\x00") {
+				return errors.New("节点线路 tag 无效")
+			}
+			for _, rawTag := range []string{h.Tag, h.Tag + "-in"} {
+				if tags[rawTag] {
+					return errors.New("节点线路 tag 重复或与监听 tag 冲突")
+				}
+				tags[rawTag] = true
+			}
 		}
 		if h.Incoming != nil {
 			if err := h.Incoming.Validate(true); err != nil {

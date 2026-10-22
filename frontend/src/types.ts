@@ -261,6 +261,7 @@ export interface Snapshot {
   proxies: { kind: string; tag: string; type: string }[];
   members: {
     id: string;
+    name?: string;
     host: string;
     master: boolean;
     client?: ClientEntry;

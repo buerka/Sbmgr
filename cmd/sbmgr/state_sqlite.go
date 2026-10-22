@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	sqliteSchemaVersion = 13
+	sqliteSchemaVersion = 14
 	sqliteApplicationID = 0x53424d47 // "SBMG"
 	sqliteFormatMarker  = "sbmgr-state-v1"
 )
@@ -845,6 +845,33 @@ func ensureSQLiteSchema(db *sql.DB, created bool) error {
 				return err
 			}
 			version = 13
+		case 13:
+			// Members gain an optional display name; existing rows keep the
+			// empty value and fall back to the member identifier.
+			tx, err := db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+			var count int
+			if err := tx.QueryRow("SELECT count(*) FROM pragma_table_info('mesh_members') WHERE name='name'").Scan(&count); err != nil {
+				return err
+			}
+			if count == 0 {
+				if _, err := tx.Exec(`ALTER TABLE mesh_members ADD COLUMN name TEXT NOT NULL DEFAULT ''`); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec(`UPDATE metadata SET value='14' WHERE key='schema_version'`); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`PRAGMA user_version=14`); err != nil {
+				return err
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			version = 14
 		default:
 			return fmt.Errorf("缺少从 SQLite schema 版本 %d 开始的迁移程序", version)
 		}

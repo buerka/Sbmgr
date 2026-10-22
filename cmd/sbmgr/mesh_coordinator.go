@@ -73,7 +73,7 @@ func (a *app) meshCoordinate(operation string) error {
 				failures = append(failures, fmt.Errorf("%s: %w", member.ID, err))
 				continue
 			}
-			fmt.Fprintf(a.out, "%s · 管理通信正常 · 已应用修订 %d · 事务 %s\n", member.ID, response.Revision, dash(response.Phase))
+			fmt.Fprintf(a.out, "%s · 管理通信正常 · 已应用修订 %d · 事务 %s\n", member.DisplayName(), response.Revision, dash(response.Phase))
 		}
 		return errors.Join(failures...)
 	}

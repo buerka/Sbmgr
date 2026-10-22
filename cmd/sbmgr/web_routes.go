@@ -54,6 +54,13 @@ func (a *app) webWireRoute(input webActionInput) error {
 		if err := setMeshRouteOptions(s.Mesh, input.Fields["id"], []string{input.Fields["entry"]}, "", "", false, input.Fields["entry"], input.Fields["exit"]); err != nil {
 			return err
 		}
+		if name := strings.TrimSpace(input.Fields["name"]); name != "" {
+			index := slices.IndexFunc(s.Mesh.Routes, func(r mesh.Route) bool { return r.ID == input.Fields["id"] })
+			if index < 0 {
+				return errors.New("线路不存在")
+			}
+			s.Mesh.Routes[index].Name = name
+		}
 		s.Mesh.Revision++
 		return saveState(a.statePath, s)
 	})
@@ -133,9 +140,9 @@ func webRouteNameWithAliases(s *State, r mesh.Route, aliases map[string]string) 
 		}
 	}
 	if r.Exit == "" {
-		return strings.ToUpper(s.Mesh.Entry(r))
+		return s.Mesh.MemberLabel(s.Mesh.Entry(r))
 	}
-	return r.Exit + " via " + strings.ToUpper(s.Mesh.Entry(r))
+	return r.Exit + " via " + s.Mesh.MemberLabel(s.Mesh.Entry(r))
 }
 
 // webRouteAliasMap maps legacy local outbounds to the mesh route that now

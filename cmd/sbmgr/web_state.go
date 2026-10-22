@@ -50,7 +50,7 @@ func (a *app) webSnapshot() (map[string]any, error) {
 		role = "master"
 		revision = s.Mesh.Revision
 		for _, m := range s.Mesh.Members {
-			members = append(members, map[string]any{"id": m.ID, "host": m.SSHHost, "master": m.ID == s.Mesh.Master, "client": m.Client})
+			members = append(members, map[string]any{"id": m.ID, "name": m.Name, "host": m.SSHHost, "master": m.ID == s.Mesh.Master, "client": m.Client})
 		}
 		for _, r := range s.Mesh.Routes {
 			protocols := make([]string, 0, len(r.Transports))

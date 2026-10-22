@@ -24,10 +24,11 @@ func (p Plan) Augment(cfg map[string]any) error {
 				}
 			}
 		}
-		if used[RouteTag(h.ID)] || used[RouteTag(h.ID)+"-in"] {
+		tag := hopTag(h)
+		if used[tag] || used[tag+"-in"] {
 			return errors.New("基础配置与受管主从线路 tag 冲突")
 		}
-		used[RouteTag(h.ID)], used[RouteTag(h.ID)+"-in"] = true, true
+		used[tag], used[tag+"-in"] = true, true
 	}
 	inbounds, _ := cfg["inbounds"].([]any)
 	outbounds, _ := cfg["outbounds"].([]any)
@@ -39,7 +40,7 @@ func (p Plan) Augment(cfg map[string]any) error {
 	}
 	var rules []any
 	for _, h := range p.Hops {
-		tag := RouteTag(h.ID)
+		tag := hopTag(h)
 		if h.Outgoing == nil {
 			if h.Exit == "" {
 				outbounds = append(outbounds, map[string]any{"type": "direct", "tag": tag})
@@ -86,6 +87,16 @@ func (p Plan) Augment(cfg map[string]any) error {
 	}
 	return nil
 }
+
+// hopTag prefers the route display name carried by the plan. Older plans
+// without the field keep the stable identifier-based tag.
+func hopTag(h Hop) string {
+	if h.Tag != "" {
+		return h.Tag
+	}
+	return RouteTag(h.ID)
+}
+
 func (c Connection) proxy(tag string, incoming bool) map[string]any {
 	m := map[string]any{"type": c.Type, "tag": tag}
 	if incoming {

@@ -462,7 +462,7 @@ func addRateOutbounds(cfg map[string]any, s *State, active []User) (map[string]s
 	for _, u := range active {
 		for _, n := range u.Nodes {
 			_, _, mark := effectiveNodeRate(u, n)
-			target := n.Outbound
+			target := meshKernelTag(s, n.Outbound)
 			if target == "" {
 				target = defaultTag
 			}

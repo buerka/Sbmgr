@@ -86,6 +86,8 @@ export function routeDestination(r: Snapshot["routes"][number]) {
   return clientExitName(name || r.exit);
 }
 export function memberName(s: Snapshot, id: string) {
+  const member = s.members.find((m) => m.id === id);
+  if (member?.name) return member.name;
   const known = clientEntryNames[id.toLowerCase()];
   if (known) return known;
   const direct = s.routes.find(
