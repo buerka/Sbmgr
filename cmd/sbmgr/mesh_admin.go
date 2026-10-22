@@ -147,7 +147,7 @@ func (a *app) meshCmd(args []string) error {
 				}
 			}
 		} else {
-			if s.Mesh == nil {
+			if s.Mesh == nil && args[0] != "rename-identity" {
 				return errors.New("此操作需要在主机上执行")
 			}
 			fs := a.newFlagSet("mesh " + args[0])
