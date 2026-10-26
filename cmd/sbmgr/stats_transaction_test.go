@@ -70,6 +70,13 @@ func statsTransactionState(api string, quota int64) *State {
 	}
 }
 
+func TestSyncAccessStatsSkipsUnconfiguredService(t *testing.T) {
+	accesses, changed, err := syncAccessStats(&State{})
+	if err != nil || accesses != 0 || changed {
+		t.Fatalf("unconfigured access sync = accesses %d changed %v err %v", accesses, changed, err)
+	}
+}
+
 func TestMergeUserStatsUsesCallerStateAndCounterBaseline(t *testing.T) {
 	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
 	s := statsTransactionState("", 1_000)
