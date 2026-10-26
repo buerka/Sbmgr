@@ -8,10 +8,15 @@ cd "$repo_dir"
 }
 npm --prefix frontend ci
 npm --prefix frontend run format:check
+npm --prefix frontend run typecheck
+npm --prefix frontend test
 npm --prefix frontend run build
 go vet ./...
 go test ./...
+go test -race ./...
+python3 scripts/test_check_public_tree.py
 python3 scripts/check_public_tree.py
 for script in deploy/*.sh scripts/*.sh; do sh -n "$script"; done
+sh ./deploy/test-deploy-scripts.sh
 mkdir -p .dist
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o .dist/sbmgr-check-linux-amd64 ./cmd/sbmgr
