@@ -292,7 +292,10 @@ type journalRecord struct {
 var ansiEscapePattern = regexp.MustCompile("\\x1b\\[[0-9;]*m")
 
 func syncAccessStats(s *State) (int, bool, error) {
-	if runtime.GOOS != "linux" {
+	// A state without a configured service has no journal unit to query.
+	// Avoid turning an unconfigured or freshly migrated state into a
+	// permanent `journalctl -u ""` retry loop.
+	if runtime.GOOS != "linux" || strings.TrimSpace(s.Service) == "" {
 		return 0, false, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), samplingCommandTimeout)
