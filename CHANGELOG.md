@@ -1,6 +1,15 @@
 # Changelog
 
-记录从 v0.22.0 开始；版本以 Git tag 为准。
+记录从 v0.22.0 开始；版本以 Git tag 为准。v0.27.1 之后的历史发布说明以 [GitHub Releases](https://github.com/buerka/Sbmgr/releases) 为准；本文件继续记录下一次发布的变更。
+
+## Unreleased
+
+### 测试与 CI
+
+- 恢复并适配 Go 单元/回归测试，覆盖状态模型、SQLite 迁移与增量写入、配置渲染、配额、主从、订阅和 Web 边界；新增前端 Vitest 纯逻辑测试与部署脚本测试。
+- CI 拆分为公开树/部署策略、前端、Go race + coverage、Linux 特权隔离、macOS 测试、Windows 编译和 Linux 二进制构建；增加并发取消、模块整洁、`govulncheck`、覆盖率摘要与构建冒烟检查。
+- 新增标签发布工作流：校验 `vX.Y.Z` 与 main 祖先关系、重跑验证、生成 SHA256 与构建来源证明并创建 GitHub Release。
+- 新增 Dependabot 的 npm 生态与分组更新；补充测试、发布、贡献文档及 issue 模板。
 
 ## v0.27.1
 

@@ -1,0 +1,68 @@
+name: Bug report
+description: 报告可复现的缺陷（不要在公开 issue 中粘贴真实凭据或配置）
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提交前请先搜索现有 issue，并阅读[测试与 CI](https://github.com/buerka/Sbmgr/blob/main/docs/TESTING.md)。
+        请删除或替换真实服务器地址、用户资料、UUID、token、密钥、订阅地址和代理配置。
+  - type: input
+    id: version
+    attributes:
+      label: sbmgr 版本
+      description: 运行 `sbmgr version` 的结果，或 Git tag/commit。
+      placeholder: "vX.Y.Z / commit"
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 运行环境
+      options:
+        - Linux + systemd
+        - Linux 容器/其他
+        - macOS 本地构建
+        - Windows 本地构建
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 给出最小步骤、输入和触发条件；不要包含真实凭据。
+      placeholder: |
+        1. 执行 ...
+        2. 打开 ...
+        3. 观察到 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为与脱敏日志
+      description: 只保留必要片段；删除地址、账号、UUID、token、证书和完整配置。
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 已运行的检查
+      description: 例如 `go test ./cmd/sbmgr -run TestName -v`、`go vet ./...`、Linux 端到端结果。
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我已移除真实凭据、用户数据和部署资料
+          required: true
+        - label: 这不是安全漏洞；安全问题将通过 SECURITY.md 的私密渠道报告
+          required: true

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/buerka/Sbmgr/security/advisories/new
+    about: 请私密报告漏洞，不要在公开 issue 中提供利用细节、凭据或真实配置。
+  - name: 使用与部署文档
+    url: https://github.com/buerka/Sbmgr/blob/main/docs/USER_GUIDE.md
+    about: 先查阅用户指南、运维指南和测试文档。
+  - name: 贡献指南
+    url: https://github.com/buerka/Sbmgr/blob/main/CONTRIBUTING.md
+    about: 开发、测试、提交和发布约定。
