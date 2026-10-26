@@ -64,7 +64,7 @@ func webActions() []webAction {
 		}
 		specs = append(specs, webAction{ID: id, Title: title, Scope: scope, Effect: effect, Danger: danger, Fields: fields, command: strings.Fields(command), positions: positions})
 	}
-	add("user.add", "新建用户", "users", "user add", "加入默认分组。配额、限速、到期日和线路留空时继承分组规则；分组未设置时沿用不限配额、不限速、长期有效和默认直出。明确填写的项作为个人配置。"+saved, false, []string{"user"}, f("user", "用户名", "text", true), quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("expire", "到期日（留空继承）", "date", false), f("node-name", "初始节点名称", "text", true), source("outbound", "初始线路（留空继承）", "outbounds", false), up, down)
+	add("user.add", "新建用户", "users", "user add", "加入默认分组。配额、限速、到期日和线路留空时继承分组规则；分组未设置时沿用不限配额、不限速、长期有效和默认直出。明确填写的项作为个人配置。"+saved, false, []string{"user"}, f("user", "用户名", "text", true), quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("expire", "到期日（留空继承）", "date", false), f("node-name", "初始节点名称（订阅中的代理名）", "text", true), source("outbound", "初始线路（留空继承）", "outbounds", false), up, down)
 	add("user.clone", "复制用户策略", "users", "user clone", saved, false, []string{"user"}, f("user", "新用户名", "text", true), source("from", "复制自", "users", true))
 	add("user.set", "配额与限速", "user", "user set", saved, false, []string{"user"}, user, quota, selectField("quota-mode", "计费方向", "total", "upload", "download"), f("extra-quota", "本期附加流量（0 清除）", "text", false), f("expire", "到期日", "date", false), f("clear-expire", "清除到期日", "checkbox", false), up, down, selectField("billing-enabled", "自动账期", "true", "false"), f("billing-day", "账期日（1–28）", "number", false))
 	add("user.devices", "自助设备名额", "user", "user set", "保存后名额即时生效。0 关闭自助管理；1–100 为设备总名额，包含已有和停用设备。减少名额不删除设备，超额时停止新增；各设备共用用户流量。", false, []string{"user"}, user, f("device-limit", "设备总名额（0 关闭自助管理）", "number", true))
@@ -76,9 +76,9 @@ func webActions() []webAction {
 	}{{"enable", "启用用户", false}, {"disable", "禁用用户", true}, {"unblock", "解除临时封禁", false}, {"delete", "删除用户", true}} {
 		add("user."+op.id, op.title, "user", "user "+op.id, saved, op.danger, []string{"user"}, user)
 	}
-	add("node.add", "分配节点", "user", "node add", saved, false, []string{"user"}, user, device, f("name", "节点显示名称", "text", true), source("outbound", "线路", "outbounds", false), up, down)
+	add("node.add", "分配节点", "user", "node add", saved, false, []string{"user"}, user, device, f("name", "节点名称（订阅中的代理名）", "text", true), source("outbound", "线路", "outbounds", false), up, down)
 	add("node.assign", "分配线路", "user", "", "线路授权已保存，订阅已更新；应用配置使运行中的入口授权生效。已有节点的名称、身份、限速与用量保持不变。", false, nil, user, device, f("selection", "线路选择", "text", true), f("expected", "原授权版本", "text", true))
-	add("node.set", "名称与节点限速", "node", "node set", saved, false, []string{"user", "node"}, user, node, device, f("name", "新的显示名称（留空保留）", "text", false), up, down)
+	add("node.set", "节点名称与限速", "node", "node set", "名称会作为订阅中的代理名；限速需应用配置生效。", false, []string{"user", "node"}, user, node, device, f("name", "新的节点名称（订阅中的代理名；留空保留）", "text", false), up, down)
 	add("node.delete", "撤销节点", "node", "node delete", saved, true, []string{"user", "node"}, user, node, device)
 	add("device.add", "新增设备", "user", "device add", saved, false, []string{"user"}, user, f("name", "设备名称", "text", true), source("from", "复制节点自设备", "devices", false))
 	for _, op := range []struct {
@@ -109,7 +109,7 @@ func webActions() []webAction {
 	add("mesh.add", "登记从机", "routes", "mesh add", meshSaved, false, nil, f("id", "从机标识", "text", true), f("host", "SSH 地址", "text", true), f("port", "SSH 端口（默认 22）", "number", false), f("user", "SSH 用户（默认 root）", "text", false), f("key", "主机上的专用私钥路径", "text", true), f("home", "从机应用目录", "text", true))
 	add("mesh.route", "编排线路", "routes", "mesh route", meshSaved, false, nil, f("id", "线路标识（相同标识更新）", "text", true), source("entry", "客户端入口", "members", true), f("hops", "经过的成员标识（逗号分隔；本机落地填入口标识）", "text", true), f("exit", "末跳出站 tag（留空直接出站）", "text", false), f("name", "线路名称（内核 tag 同步使用；留空沿用原名称）", "text", false), selectField("protocols", "跨机传输协议", "hysteria2", "socks", "wireguard"))
 	add("mesh.wire", "保存线路连线", "routes", "", meshSaved, false, nil, f("id", "线路标识", "text", true), source("entry", "客户端入口", "members", true), f("exit", "落地", "text", false), f("name", "线路名称（内核 tag 同步使用；留空沿用原名称）", "text", false), f("revision", "原拓扑版本", "number", true), f("replace", "更新已有线路", "checkbox", false))
-	add("mesh.rename-node", "修改节点名称", "member", "mesh rename-node", "名称已保存并用于面板、CLI 和生成中的线路默认名；节点标识、身份、线路与订阅保持不变。留空恢复为节点标识。", false, nil, source("id", "成员", "members", true), f("name", "节点名称（最多 48 字符；留空恢复标识）", "text", false))
+	add("mesh.rename-node", "修改成员名称", "member", "mesh rename-node", "仅修改主从成员在线路和面板中的显示名；不改变用户设备节点名称、订阅代理名、身份或线路。留空恢复为成员标识。", false, nil, source("id", "成员", "members", true), f("name", "成员名称（最多 48 字符；留空恢复标识）", "text", false))
 	add("mesh.rename-route", "修改线路名称", "route", "mesh rename-route", "名称会同步作为 sing-box 出站 tag；保存后需应用拓扑生效，已授权节点的线路引用保持不变。留空恢复默认名称。", false, nil, f("id", "线路标识", "text", true), f("name", "线路名称（最多 48 字符；留空恢复默认）", "text", false))
 	add("mesh.remove-route", "删除线路", "route", "mesh remove-route", meshSaved, true, nil, f("id", "线路标识", "text", true))
 	add("mesh.remove", "移除从机", "member", "mesh remove", meshSaved, true, nil, f("id", "从机标识", "text", true))

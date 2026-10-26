@@ -102,11 +102,14 @@ export function routePath(s: Snapshot, r: Snapshot["routes"][number]) {
   if (!r.exit && entries.length === 1) return entries[0];
   return entries.concat(r.exit ? routeDestination(r) : "直接出站").join(" → ");
 }
-export function nodeDisplayName(s: Snapshot, node: User["nodes"][number]) {
+export function nodeRouteName(s: Snapshot, node: User["nodes"][number]) {
   const route = s.routes.find(
     (r) => routeTag(r.id) === canonicalOutbound(s, node.outbound),
   );
-  return route ? routeName(route) : canonicalRouteName(node.name);
+  return route ? routeName(route) : "";
+}
+export function nodeDisplayName(s: Snapshot, node: User["nodes"][number]) {
+  return nodeRouteName(s, node) || canonicalRouteName(node.name);
 }
 export function assignmentOptions(s: Snapshot, user: User, device: string) {
   const existing = user.nodes.filter((n) => n.device === device);

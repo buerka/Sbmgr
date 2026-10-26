@@ -580,10 +580,19 @@ export function App() {
             <kbd>Ctrl K</kbd>
           </Button>
           <div className="ml-auto flex items-center gap-1 sm:gap-2">
-            {(snapshot?.pending || snapshot?.mesh_pending) && (
+            {snapshot?.pending && (
               <span className="pending-indicator">
-                <Badge kind="warning">待应用</Badge>
+                <Badge kind="warning">待应用配置</Badge>
               </span>
+            )}
+            {snapshot?.mesh_pending && (
+              <Link
+                to="/routes"
+                className="pending-indicator no-underline"
+                title="线路拓扑尚未应用，请到线路管理点击“应用拓扑”"
+              >
+                <Badge kind="warning">待应用拓扑</Badge>
+              </Link>
             )}
             <Button
               variant="ghost"

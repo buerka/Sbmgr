@@ -24,7 +24,7 @@ import { optionLabels } from "../components/formModel";
 import { bytes, dateTime, rate, userNodeSpeed } from "../format";
 import { setUserDraftDirty, useAppDispatch, useAppSelector } from "../store";
 import type { Snapshot, User } from "../types";
-import { memberName, nodeDisplayName } from "../components/routeModel";
+import { memberName, nodeRouteName } from "../components/routeModel";
 import "./user-workspace.css";
 
 const speed = (n?: number) =>
@@ -386,6 +386,7 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                   <DataTable
                     headings={[
                       "节点",
+                      "线路",
                       "入口",
                       "累计用量",
                       "上传 / 下载上限",
@@ -393,7 +394,8 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                     ]}
                   >
                     {nodes.map((n) => {
-                      const displayName = nodeDisplayName(s, n);
+                      const nodeName = n.name;
+                      const routeLabel = nodeRouteName(s, n);
                       return (
                         <TableRow key={n.name}>
                           <TableCell>
@@ -402,8 +404,15 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                                 name="routes"
                                 className="text-muted-foreground"
                               />
-                              {displayName}
+                              {nodeName}
                             </span>
+                          </TableCell>
+                          <TableCell>
+                            {routeLabel ? (
+                              <Badge kind="default">{routeLabel}</Badge>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
                           </TableCell>
                           <TableCell>
                             <Badge kind="default">
@@ -425,7 +434,7 @@ function UserWorkspace({ u, s }: { u: User; s: Snapshot }) {
                                 编辑
                               </ActionButton>
                               <ActionMenu
-                                label={`更多：${displayName}`}
+                                label={`更多：${nodeName}`}
                                 compact
                                 items={[
                                   {
