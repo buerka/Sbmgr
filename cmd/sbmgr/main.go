@@ -445,6 +445,8 @@ func (a *app) adminCmd(args []string) error {
 		return a.renderCmd(args[1:])
 	case "check":
 		return a.checkCmd(args[1:])
+	case "rehash":
+		return a.rehashCmd(args[1:])
 	case "apply":
 		return a.applyCmd(args[1:])
 	case "export":

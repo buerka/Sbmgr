@@ -1864,6 +1864,12 @@ func readSQLiteState(path string) (_ *State, resultErr error) {
 // the daemon may commit counters and history while the Web API or subscription
 // server is reading.
 func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
+	return readSQLiteStateFromOpenDBMode(path, db, true)
+}
+
+// readSQLiteStateFromOpenDBMode keeps the hash check optional for the
+// administrative repair path. Normal readers always verify.
+func readSQLiteStateFromOpenDBMode(path string, db *sql.DB, verifyHash bool) (*State, error) {
 	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelSerializable})
 	if err != nil {
 		return nil, err
@@ -2056,15 +2062,17 @@ func readSQLiteStateFromOpenDB(path string, db *sql.DB) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	if actualHash != expectedHash {
+	if verifyHash && actualHash != expectedHash {
 		return nil, errors.New("状态数据库业务哈希校验失败；数据表可能被不完整地外部修改")
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	state.sqliteSnapshot, err = snapshotSQLiteHistory(path, actualHash, state)
-	if err != nil {
-		return nil, err
+	if verifyHash {
+		state.sqliteSnapshot, err = snapshotSQLiteHistory(path, actualHash, state)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return state, nil
 }
