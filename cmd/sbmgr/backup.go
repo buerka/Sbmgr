@@ -71,15 +71,16 @@ func (a *app) backupCmdLocked(args []string) error {
 	case "restore":
 		fs := a.newFlagSet("backup restore")
 		doApply := fs.Bool("apply", false, "恢复后校验并应用 sing-box 配置")
-		if len(args) < 2 {
-			return errors.New("用法: sbmgr admin backup restore NAME [--apply]")
+		const restoreUsage = "用法: sbmgr admin backup restore NAME [--apply]"
+		name, err := positionalArgument(args, 1, restoreUsage)
+		if err != nil {
+			return err
 		}
-		name := args[1]
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 {
-			return errors.New("用法: sbmgr admin backup restore NAME [--apply]")
+			return errors.New(restoreUsage)
 		}
 		restored, err := readStateBackup(a.statePath, name)
 		if err != nil {

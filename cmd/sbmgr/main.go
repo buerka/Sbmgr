@@ -914,6 +914,16 @@ func (a *app) userCmd(args []string) error {
 	return a.withAuditedStateLock(auditAction("user", args), args, func() error { return a.userCmdLocked(args) })
 }
 
+// positionalArgument rejects a flag token where a documented positional name
+// is required. Without this, commands whose name comes before flags would
+// treat "--help" or "--quota" as the entity name.
+func positionalArgument(args []string, index int, usage string) (string, error) {
+	if len(args) <= index || strings.HasPrefix(args[index], "-") {
+		return "", errors.New(usage)
+	}
+	return args[index], nil
+}
+
 func (a *app) userCmdLocked(args []string) error {
 	if len(args) == 0 {
 		return errors.New("用法: sbmgr user add|clone|set|list|show|enable|disable|unblock|delete")
@@ -932,15 +942,16 @@ func (a *app) userCmdLocked(args []string) error {
 		downMbps := fs.Float64("down-mbps", 0, "实时下载限速 Mbps；0 为不限")
 		outbound := fs.String("outbound", "", "默认节点的出站 tag；留空使用 route.final")
 		nodeName := fs.String("node-name", "default", "自动创建的默认节点名称")
-		if len(args) < 2 {
-			return errors.New("用法: sbmgr user add NAME [--quota 100G] [--quota-mode total|upload|download] [--expire YYYY-MM-DD] [--up-mbps N] [--down-mbps N] [--outbound TAG] [--node-name default]")
+		const addUsage = "用法: sbmgr user add NAME [--quota 100G] [--quota-mode total|upload|download] [--expire YYYY-MM-DD] [--up-mbps N] [--down-mbps N] [--outbound TAG] [--node-name default]"
+		name, err := positionalArgument(args, 1, addUsage)
+		if err != nil {
+			return err
 		}
-		name := args[1]
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 {
-			return errors.New("用法: sbmgr user add NAME [--quota 100G] [--quota-mode total|upload|download] [--expire YYYY-MM-DD] [--up-mbps N] [--down-mbps N] [--outbound TAG] [--node-name default]")
+			return errors.New(addUsage)
 		}
 		if findUser(s, name) != nil {
 			return fmt.Errorf("用户 %q 已存在", name)
@@ -999,15 +1010,16 @@ func (a *app) userCmdLocked(args []string) error {
 	case "clone":
 		fs := a.newFlagSet("user clone")
 		from := fs.String("from", "", "已有模板用户名")
-		if len(args) < 2 {
-			return errors.New("用法: sbmgr admin user clone NAME --from TEMPLATE_USER")
+		const cloneUsage = "用法: sbmgr admin user clone NAME --from TEMPLATE_USER"
+		name, err := positionalArgument(args, 1, cloneUsage)
+		if err != nil {
+			return err
 		}
-		name := args[1]
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 || strings.TrimSpace(*from) == "" {
-			return errors.New("用法: sbmgr admin user clone NAME --from TEMPLATE_USER")
+			return errors.New(cloneUsage)
 		}
 		cloned, err := cloneUserFromTemplate(s, *from, name, time.Now())
 		if err != nil {
@@ -1043,15 +1055,16 @@ func (a *app) userCmdLocked(args []string) error {
 		burstSoftDown := fs.Float64("burst-soft-down-kbps", 0, "软封禁下载 Kbps")
 		billingEnabled := fs.String("billing-enabled", "", "按月自动清零开关: true/false")
 		billingDay := fs.Int("billing-day", 0, "每月账期日 1-28")
-		if len(args) < 2 {
-			return errors.New("用法: sbmgr user set NAME [--quota 100G] [--expire YYYY-MM-DD|--clear-expire] [--up-mbps N] [--down-mbps N]")
+		const setUsage = "用法: sbmgr user set NAME [--quota 100G] [--expire YYYY-MM-DD|--clear-expire] [--up-mbps N] [--down-mbps N]"
+		name, err := positionalArgument(args, 1, setUsage)
+		if err != nil {
+			return err
 		}
-		name := args[1]
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 || (*expire != "" && *clearExpire) {
-			return errors.New("用法: sbmgr user set NAME [--quota 100G] [--expire YYYY-MM-DD|--clear-expire] [--up-mbps N] [--down-mbps N]")
+			return errors.New(setUsage)
 		}
 		u := findUser(s, name)
 		if u == nil {
@@ -1410,15 +1423,16 @@ func (a *app) nodeCmdLocked(args []string) error {
 		uuid := fs.String("uuid", "", "指定 UUID；留空自动生成")
 		upMbps := fs.Float64("up-mbps", 0, "该节点实时上传限速 Mbps；0 为不限")
 		downMbps := fs.Float64("down-mbps", 0, "该节点实时下载限速 Mbps；0 为不限")
-		if len(args) < 2 {
-			return errors.New("用法: sbmgr node add USER --name NAME [--outbound TAG] [--uuid UUID]")
+		const addUsage = "用法: sbmgr node add USER --name NAME [--outbound TAG] [--uuid UUID]"
+		userName, err := positionalArgument(args, 1, addUsage)
+		if err != nil {
+			return err
 		}
-		userName := args[1]
 		if err := fs.Parse(args[2:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 || *name == "" {
-			return errors.New("用法: sbmgr node add USER --name NAME [--outbound TAG] [--uuid UUID]")
+			return errors.New(addUsage)
 		}
 		u := findUser(s, userName)
 		if u == nil {
