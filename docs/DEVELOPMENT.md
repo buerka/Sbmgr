@@ -11,15 +11,21 @@
 ```sh
 gofmt -w cmd/sbmgr internal/mesh
 go vet ./...
-go test ./...                         # 编译所有 Go 包
+go test ./...
+go test -race ./...
 npm --prefix frontend ci
 npm --prefix frontend run format:check
+npm --prefix frontend run typecheck
+npm --prefix frontend test
 npm --prefix frontend run build
+python3 scripts/test_check_public_tree.py
 python3 scripts/check_public_tree.py
+for script in deploy/*.sh scripts/*.sh; do sh -n "$script"; done
+sh deploy/test-deploy-scripts.sh        # 仅 Linux 执行，其他平台明确跳过
 git diff --check
 ```
 
-一键入口：`sh scripts/verify.sh`（含脚本语法和 Linux 构建）；Windows 为 `./scripts/verify.ps1 -LinuxBuild`。Linux 生产构建须 `CGO_ENABLED=0`，否则 Web/订阅进程无法保证全线程降权。
+`go test ./...` 运行 Go 单元与回归测试，不再只是编译检查。一键入口：`sh scripts/verify.sh`（含前端测试、race、脚本语法和 Linux 构建）；Windows 为 `./scripts/verify.ps1 -LinuxBuild`。Linux 生产构建须 `CGO_ENABLED=0`，否则 Web/订阅进程无法保证全线程降权。测试分层、夹具约束和 CI 门禁见[测试与 CI](TESTING.md)。
 
 | 改动 | 重点验证 |
 | --- | --- |
@@ -40,6 +46,14 @@ git diff --check
 | 部署 / 证书 | Shell 语法、Linux 构建、来源和权限检查 |
 
 真实服务器、套餐、出口 IP、订阅地址、用户账号和凭据不属于公开仓库验证范围；部署验收须在目标环境的私有流程中完成。
+
+## CI 与发布
+
+每次推送和 PR 运行 `.github/workflows/ci.yml`：公开树与部署脚本策略、前端格式/类型/单元测试/构建、Linux race + coverage、macOS 全量测试、Windows 编译检查，以及嵌入前端后的 Linux 二进制构建。CodeQL 按推送、PR 和每周计划扫描；Dependabot 每周更新 Go、npm 和 Actions 依赖。
+
+标签发布由 `.github/workflows/release.yml` 执行：校验 `vX.Y.Z` 格式和 main 祖先关系、重跑源码/策略/前端验证、调用 `deploy/build-linux.sh`、生成 SHA256 与构建来源证明，并创建 GitHub Release。发布步骤、验证方式和失败重试见[发布流程](RELEASING.md)。
+
+公开测试只使用合成数据；真实服务器、套餐、出口 IP、订阅地址和凭据的验收仍在私有流程。当前基线覆盖率约 52%，核心逻辑变更应新增或更新测试，不以删除断言换取绿灯。
 
 ## 构建与提交
 
