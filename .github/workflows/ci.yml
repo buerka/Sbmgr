@@ -2,10 +2,13 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+
+# Feature branches are covered by pull_request; restricting push to main avoids
+# duplicate runs for the same commit.
 
 # Superseded pull-request runs are cancelled; branch and tag runs keep their
 # full history so a release check is never silently replaced.
