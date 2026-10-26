@@ -37,7 +37,12 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o "$output" \
     ./cmd/sbmgr
 chmod 0755 "$output"
-sha256sum "$output" >"$checksum_file"
+# Keep the checksum file relocatable: release consumers run
+# `sha256sum -c` next to the downloaded assets, not on the build host.
+(
+    cd "$output_dir"
+    sha256sum "$(basename "$output")" >"$(basename "$checksum_file")"
+)
 
 echo "已从 $git_tag 构建：$output"
 echo "校验文件：$checksum_file"

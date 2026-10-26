@@ -5,69 +5,207 @@ on:
     branches: ["**"]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+
+# Superseded pull-request runs are cancelled; branch and tag runs keep their
+# full history so a release check is never silently replaced.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
+env:
+  GO_VERSION: "1.27.3"
+  NODE_VERSION: "24"
+
 jobs:
-  build:
+  policy:
+    name: Repository policy
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 0
+          persist-credentials: false
       - name: Check public repository tree
-        run: python3 ./scripts/check_public_tree.py
+        run: |
+          python3 ./scripts/test_check_public_tree.py
+          python3 ./scripts/check_public_tree.py
+      - name: Check shell script syntax
+        run: |
+          for script in deploy/*.sh scripts/*.sh; do
+            sh -n "$script"
+          done
+      - name: Test deployment helpers
+        run: sh ./deploy/test-deploy-scripts.sh
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '24'
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Build React frontend
-        run: |
-          npm --prefix frontend ci
-          npm --prefix frontend run format:check
-          npm --prefix frontend run build
+      - name: Install dependencies
+        run: npm --prefix frontend ci
+      - name: Check formatting
+        run: npm --prefix frontend run format:check
+      - name: Typecheck
+        run: npm --prefix frontend run typecheck
+      - name: Unit tests
+        run: npm --prefix frontend test
+      - name: Build
+        run: npm --prefix frontend run build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: frontend-dist
+          path: cmd/sbmgr/web/dist
+          retention-days: 1
+          if-no-files-found: error
+
+  go-test:
+    name: Go test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.27.2'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
+      - name: Check module tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
       - name: Check formatting
-        shell: bash
         run: test -z "$(gofmt -l ./cmd ./internal)"
       - name: Vet
         run: go vet ./...
+      - name: Test with race detector and coverage
+        run: |
+          go test -shuffle=on -count=1 -timeout 10m -race -covermode=atomic -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out | tail -n 1 | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: go-coverage
+          path: coverage.out
+          retention-days: 7
+          if-no-files-found: error
       - name: Check reachable Go vulnerabilities
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
-      - name: Compile Go packages
-        run: go test ./...
-      - name: Check shell script syntax
-        run: for script in deploy/*.sh scripts/*.sh; do sh -n "$script"; done
+      - name: Check whitespace
+        run: git diff --check
+
+  privilege:
+    name: Linux privilege isolation
+    needs: [go-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build test binary
+        run: CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/sbmgr-privilege.test" ./cmd/sbmgr
+      - name: Run privilege tests as root
+        run: sudo env SBMGR_RUN_PRIVILEGE_TEST=1 "$RUNNER_TEMP/sbmgr-privilege.test" -test.run '^Test(Subscription|Web)Privilege' -test.v
+      - name: Run under a restricted systemd sandbox
+        run: |
+          # The production executable and its parents are root-owned. The
+          # sandbox intentionally has no CAP_DAC_OVERRIDE, so a runner-owned
+          # private directory is not a valid self-exec fixture for root.
+          privilege_dir="$(sudo mktemp -d /run/sbmgr-privilege-ci.XXXXXX)"
+          trap 'sudo rm -f -- "$privilege_dir/sbmgr.test"; sudo rmdir -- "$privilege_dir"' EXIT
+          sudo install -m 0700 "$RUNNER_TEMP/sbmgr-privilege.test" "$privilege_dir/sbmgr.test"
+          sudo systemd-run --quiet --wait --pipe --collect \
+            -p User=root -p Group=root -p NoNewPrivileges=true \
+            -p PrivateTmp=true -p PrivateDevices=true -p ProtectSystem=strict \
+            -p ProtectHome=read-only -p ProtectProc=invisible \
+            -p ProtectKernelTunables=true -p ProtectKernelModules=true \
+            -p ProtectControlGroups=true -p RestrictNamespaces=true \
+            -p RestrictSUIDSGID=true -p RestrictRealtime=true -p LockPersonality=true \
+            -p ProtectHostname=true -p MemoryDenyWriteExecute=true \
+            -p 'CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_KILL CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID' \
+            -p AmbientCapabilities=CAP_SETUID \
+            -p 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' \
+            -p 'SystemCallFilter=@system-service' -p SystemCallErrorNumber=EPERM \
+            -p LimitCORE=0 -p Environment=SBMGR_RUN_PRIVILEGE_TEST=1 \
+            "$privilege_dir/sbmgr.test" -test.run '^Test(Subscription|Web)Privilege' -test.v
+
+  go-test-macos:
+    name: Go test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Test
+        run: go test -shuffle=on -count=1 -timeout 10m ./...
+
+  go-compile-windows:
+    name: Go compile (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Vet and compile tests without running them
+        run: |
+          go vet ./...
+          go test -run "^$" -count=1 ./...
+
+  build:
+    name: Build Linux binary
+    needs: [frontend, go-test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: frontend-dist
+          path: cmd/sbmgr/web/dist
       - name: Cross-build Linux AMD64
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: |
           mkdir -p .dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o .dist/sbmgr-ci-linux-amd64 ./cmd/sbmgr
-      - name: Build tagged Linux release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: ./deploy/build-linux.sh
-      - name: Attest tagged Linux release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      - name: Smoke test the binary
+        run: ./.dist/sbmgr-ci-linux-amd64 version
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          subject-path: '.dist/sbmgr-*-linux-amd64'
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: sbmgr-linux-amd64
-          include-hidden-files: true
-          path: |
-            .dist/sbmgr-*-linux-amd64
-            .dist/sbmgr-*-linux-amd64.sha256
+          name: sbmgr-linux-amd64-ci
+          path: .dist/sbmgr-ci-linux-amd64
+          retention-days: 7
           if-no-files-found: error
