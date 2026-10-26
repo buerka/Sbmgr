@@ -67,7 +67,7 @@ jobs:
         run: npm --prefix frontend test
       - name: Build
         run: npm --prefix frontend run build
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: frontend-dist
           path: cmd/sbmgr/web/dist
@@ -98,7 +98,7 @@ jobs:
         run: |
           go test -shuffle=on -count=1 -timeout 10m -race -covermode=atomic -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out | tail -n 1 | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-coverage
           path: coverage.out
@@ -206,7 +206,7 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o .dist/sbmgr-ci-linux-amd64 ./cmd/sbmgr
       - name: Smoke test the binary
         run: ./.dist/sbmgr-ci-linux-amd64 version
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbmgr-linux-amd64-ci
           path: .dist/sbmgr-ci-linux-amd64
